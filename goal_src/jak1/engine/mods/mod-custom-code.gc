@@ -20,6 +20,8 @@
 (define *fisher-line-hp-max* 100.0)
 (define *fisher-line-hp* 100.0)
 (define *fisher-line-broken?* #f)
+(define *fisher-saved-fog* (new 'global 'vector))
+(define *fisher-fog-overridden?* #f)
 
 (defpart 3570
   :init-specs
@@ -122,6 +124,45 @@
     net)
 )
 
+(defun spawn-fisher-lure-snake ((pos vector))
+  (let ((snake
+          (manipy-spawn
+            pos
+            #f
+            *junglesnake-sgc*
+            #f
+            :from *default-dead-pool*
+            :to *default-pool*
+            :name "fisher-lure-snake")))
+
+    (when snake
+      (let ((snake-proc
+              (-> snake 0 self)))
+
+        (send-event
+          snake-proc
+          'anim-mode
+          'loop)
+
+        (set!
+          (-> (the-as manipy snake-proc) root trans quad)
+          (-> pos quad))
+
+        (set-vector!
+          (-> (the-as manipy snake-proc) root scale)
+          0.0333333
+          0.0333333
+          0.0333333
+          1.0)
+
+        (send-event
+          snake-proc
+          'max-vis-dist
+          (meters 999999.0))))
+
+    snake)
+)
+
 (define matt-str (new 'global 'string 2048 (the-as string #f)))
 (define *pc-encoded-matt-str* (new 'global 'string 2048 (the-as string #f)))
 
@@ -169,6 +210,20 @@
 
 
 (defun fisher-restore-normal-background! ()
+  (when
+    (and
+      *sky-tng-data*
+      *fisher-fog-overridden?*)
+
+    (set!
+      (-> *sky-tng-data* fog quad)
+      (-> *fisher-saved-fog* quad))
+
+    (set!
+      *fisher-fog-overridden?*
+      #f)
+  )
+
   (none)
 )
 
@@ -211,6 +266,12 @@
    (bubble-time                 float)
    (stored-music-vol            float)
    (reel-hint-time              float)
+   (lure-snake                  (pointer manipy))
+   (lure-snake-angle            vector :inline)
+   (lure-snake-angular-speed    vector :inline)
+   (lure-snake-last-anchor      vector :inline)
+   (lure-snake-flow-time        float)
+   (underwater-wave-time        float)
   )
   (:state-methods
     idle
@@ -259,6 +320,19 @@
   (-> self camera-radius)
   (vector-length camera-offset))
 )
+
+  (vector-reset!
+    (-> self lure-snake-angle))
+
+  (vector-reset!
+    (-> self lure-snake-angular-speed))
+
+  (vector-reset!
+    (-> self lure-snake-last-anchor))
+
+  (set!
+    (-> self lure-snake-flow-time)
+    0.0)
 
   (set!
     (-> self water-level)
@@ -384,6 +458,10 @@
     (-> self bubble-time)
     -2.0)
 
+  (set!
+    (-> self underwater-wave-time)
+    0.0)
+
   (vector-reset!
     (-> self lure-pos))
 
@@ -408,7 +486,490 @@
   (spawn-fisher-net-at
   (-> self pos))
 
+  (set!
+  (-> self lure-snake)
+  (the-as (pointer manipy) #f))
+
   (go-virtual idle)
+)
+
+(defun fisher-update-underwater-waves! ((self fisher-game))
+  (let ((dt
+          (-> *display* seconds-per-frame)))
+
+    (when
+      (> (-> self underwater-wave-time)
+         0.0)
+
+      (-!
+        (-> self underwater-wave-time)
+        dt)
+
+      (when
+        (< (-> self underwater-wave-time)
+           0.0)
+
+        (set!
+          (-> self underwater-wave-time)
+          0.0))
+    )
+
+    (when
+      (and
+        (-> self camera-underwater?)
+        (<=
+          (-> self underwater-wave-time)
+          0.0))
+
+      (play-sound-file
+        "water-waves.wav"
+        (the int
+          (*
+            (the float
+              (-> *setting-control* current sfx-volume))
+            1.0)))
+
+      (set!
+        (-> self underwater-wave-time)
+        49.0))
+  )
+
+  (none)
+)
+
+(defun fisher-force-underwater-horizon! ((r float) (g float) (b float))
+  (when
+    (and
+      *time-of-day-context*
+      *math-camera*
+      (-> *time-of-day-context* moods 0))
+
+    (let* ((mood
+             (-> *time-of-day-context* moods 0))
+
+           (fog-hour
+             (-> mood fog-interp hour 4))
+
+           (snapshot-1
+             (-> fog-hour snapshot1))
+
+           (snapshot-2
+             (-> fog-hour snapshot2))
+
+           (fog-blend
+             (-> fog-hour morph-start))
+
+           (fog-1
+             (-> mood mood-fog-table data snapshot-1))
+
+           (fog-2
+             (-> mood mood-fog-table data snapshot-2))
+
+           (green-fog-dists
+             (new 'stack-no-clear 'vector)))
+
+      (vector4-lerp!
+        green-fog-dists
+        (-> fog-1 fog-dists)
+        (-> fog-2 fog-dists)
+        fog-blend)
+
+      (set-vector!
+        (-> *time-of-day-context* current-fog fog-color)
+        r
+        g
+        b
+        128.0)
+
+      (set-vector!
+        (-> *time-of-day-context* current-fog erase-color)
+        r
+        g
+        b
+        128.0)
+
+      (set!
+        (-> *time-of-day-context* current-fog fog-dists quad)
+        (-> green-fog-dists quad))
+
+      (set!
+        *fog-color*
+        (new 'static
+          'rgba
+          :r (the int r)
+          :g (the int g)
+          :b (the int b)
+          :a #x80))
+
+      (set!
+        (-> *time-of-day-context* erase-color)
+        (new 'static
+          'rgba
+          :r (the int r)
+          :g (the int g)
+          :b (the int b)
+          :a #x80))
+
+      (set!
+        (-> *math-camera* fog-start)
+        (-> green-fog-dists x))
+
+      (set!
+        (-> *math-camera* fog-end)
+        (-> green-fog-dists y))
+
+      (set!
+        (-> *math-camera* fog-max)
+        (-> green-fog-dists z))
+
+      (set!
+        (-> *math-camera* fog-min)
+        (-> green-fog-dists w))
+
+      (dotimes (i 12)
+        (set!
+          (-> sky-base-polygons i col x)
+          r)
+
+        (set!
+          (-> sky-base-polygons i col y)
+          g)
+
+        (set!
+          (-> sky-base-polygons i col z)
+          b)
+
+        (set!
+          (-> sky-base-polygons i col w)
+          128.0))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-remove-lure-snake! ((self fisher-game))
+  (when
+    (-> self lure-snake)
+
+    (deactivate
+      (-> (-> self lure-snake) 0))
+
+    (set!
+        (-> self lure-snake)
+        (the-as (pointer manipy) #f))
+    )
+    (vector-reset!
+    (-> self lure-snake-angle))
+
+  (vector-reset!
+    (-> self lure-snake-angular-speed))
+
+  (vector-reset!
+    (-> self lure-snake-last-anchor))
+
+  (set!
+    (-> self lure-snake-flow-time)
+    0.0)
+
+  (none)
+)
+
+(defun fisher-update-lure-snake! ((self fisher-game))
+  (when
+    (and
+      (-> self casted?)
+      (-> self lure-snake))
+
+    (let* ((snake-proc
+             (-> (-> self lure-snake) 0 self))
+
+           (snake
+             (the-as manipy snake-proc))
+
+           (dt
+             (-> *display* seconds-per-frame))
+
+           (anchor
+             (new 'stack-no-clear 'vector))
+
+           (movement
+             (new 'stack-no-clear 'vector))
+
+           (target-angle
+             (new 'stack-no-clear 'vector))
+
+           (pivot-offset
+             (new 'stack-no-clear 'vector))
+
+           (rotated-pivot
+             (new 'stack-no-clear 'vector))
+
+           (root-pos
+             (new 'stack-no-clear 'vector))
+
+           (rot
+             (new 'stack-no-clear 'matrix))
+
+           (forward-speed
+             0.0)
+
+           (vertical-speed
+             0.0)
+
+           (spring
+             0.0)
+
+           (damping
+             0.0))
+
+      (vector-copy!
+        anchor
+        (-> self lure-pos))
+
+      (set!
+        (-> anchor w)
+        1.0)
+
+      (vector-!
+        movement
+        anchor
+        (-> self lure-snake-last-anchor))
+
+      (when (> dt 0.0)
+        (set!
+          forward-speed
+          (/
+            (/
+              (vector-dot
+                movement
+                (-> self lure-cast-axis))
+              (meters 1.0))
+            dt))
+
+        (set!
+          vertical-speed
+          (/
+            (/
+              (-> movement y)
+              (meters 1.0))
+            dt))
+      )
+
+      (+!
+        (-> self lure-snake-flow-time)
+        dt)
+
+      (cond
+        ((= (-> self cast-state) 'casting)
+          (set!
+            spring
+            4.0)
+
+          (set!
+            damping
+            1.4)
+
+          (set!
+            (-> target-angle x)
+            (degrees
+              (fmax
+                -75.0
+                (fmin
+                  75.0
+                  (* vertical-speed 15.0)))))
+
+          (set!
+            (-> target-angle y)
+            (degrees
+              (+
+                (* forward-speed 11.0)
+
+                (* 28.0
+                  (sin
+                    (*
+                      (degrees 210.0)
+                      (-> self lure-snake-flow-time)))))))
+
+          (set!
+            (-> target-angle z)
+            (degrees
+              (fmax
+                -65.0
+                (fmin
+                  65.0
+                  (* forward-speed -13.0)))))
+        )
+
+        (else
+          (set!
+            spring
+            19.0)
+
+          (set!
+            damping
+            2.0)
+
+          (set!
+            (-> target-angle x)
+            (degrees
+              (+
+                (fmax
+                  -24.0
+                  (fmin
+                    24.0
+                    (* vertical-speed 3.0)))
+
+                (* 7.0
+                  (sin
+                    (*
+                      (degrees 38.0)
+                      (-> self lure-snake-flow-time)))))))
+
+          (set!
+            (-> target-angle y)
+            (degrees
+              (+
+                (* forward-speed 1.8)
+
+                (* 10.0
+                  (sin
+                    (*
+                      (degrees 25.0)
+                      (-> self lure-snake-flow-time)))))))
+
+          (set!
+            (-> target-angle z)
+            (degrees
+              (+
+                (fmax
+                  -28.0
+                  (fmin
+                    28.0
+                    (* forward-speed -3.2)))
+
+                (* 6.0
+                  (cos
+                    (*
+                      (degrees 31.0)
+                      (-> self lure-snake-flow-time)))))))
+        )
+      )
+
+      (set!
+        (-> target-angle w)
+        0.0)
+
+      (+!
+        (-> self lure-snake-angular-speed x)
+        (*
+          (-
+            (*
+              (-
+                (-> target-angle x)
+                (-> self lure-snake-angle x))
+              spring)
+
+            (*
+              (-> self lure-snake-angular-speed x)
+              damping))
+          dt))
+
+      (+!
+        (-> self lure-snake-angular-speed y)
+        (*
+          (-
+            (*
+              (-
+                (-> target-angle y)
+                (-> self lure-snake-angle y))
+              spring)
+
+            (*
+              (-> self lure-snake-angular-speed y)
+              damping))
+          dt))
+
+      (+!
+        (-> self lure-snake-angular-speed z)
+        (*
+          (-
+            (*
+              (-
+                (-> target-angle z)
+                (-> self lure-snake-angle z))
+              spring)
+
+            (*
+              (-> self lure-snake-angular-speed z)
+              damping))
+          dt))
+
+      (+!
+        (-> self lure-snake-angle x)
+        (*
+          (-> self lure-snake-angular-speed x)
+          dt))
+
+      (+!
+        (-> self lure-snake-angle y)
+        (*
+          (-> self lure-snake-angular-speed y)
+          dt))
+
+      (+!
+        (-> self lure-snake-angle z)
+        (*
+          (-> self lure-snake-angular-speed z)
+          dt))
+
+      (matrix-rotate-xyz!
+        rot
+        (-> self lure-snake-angle))
+
+      (matrix->quaternion
+        (-> snake root quat)
+        rot)
+
+      (set-vector!
+        pivot-offset
+        0.0
+        (meters 1.0666667)
+        0.0
+        0.0)
+
+      (vector-matrix*!
+        rotated-pivot
+        pivot-offset
+        rot)
+
+      (vector-!
+        root-pos
+        anchor
+        rotated-pivot)
+
+      (set!
+        (-> root-pos w)
+        1.0)
+
+      (set!
+        (-> snake root trans quad)
+        (-> root-pos quad))
+
+      (set-vector!
+        (-> snake root scale)
+        0.0333333
+        0.0333333
+        0.0333333
+        1.0)
+
+      (vector-copy!
+        (-> self lure-snake-last-anchor)
+        anchor)
+    )
+  )
+
+  (none)
 )
 
 (defun fisher-reset-line-hp! ()
@@ -984,6 +1545,7 @@
         (set!
           (-> sky-base-polygons i col w)
           128.0))
+      (fisher-force-underwater-horizon! r g b)
     )
   )
 
@@ -1120,6 +1682,8 @@
   (vector-reset! (-> self lure-camera-offset))
   (vector-reset! (-> self lure-camera-pos))
   (vector-reset! (-> self lure-camera-look))
+  (stop-sound-file "water-waves.wav")
+  (fisher-remove-lure-snake! self)
   (set!
     (-> self reel-hint-time)
     0.0)
@@ -1350,6 +1914,54 @@
       (-> self lure-pos)
       (-> self lure-cast-start))
 
+    (fisher-remove-lure-snake! self)
+
+    (let ((snake-anchor
+            (new 'stack-no-clear 'vector))
+
+          (snake-root
+            (new 'stack-no-clear 'vector)))
+
+      (vector-copy!
+        snake-anchor
+        (-> self lure-pos))
+
+      (set!
+        (-> snake-anchor w)
+        1.0)
+
+      (vector-copy!
+        snake-root
+        snake-anchor)
+
+      (-!
+        (-> snake-root y)
+        (meters 1.0666667))
+
+      (set!
+        (-> snake-root w)
+        1.0)
+
+      (vector-copy!
+        (-> self lure-snake-last-anchor)
+        snake-anchor)
+
+      (vector-reset!
+        (-> self lure-snake-angle))
+
+      (vector-reset!
+        (-> self lure-snake-angular-speed))
+
+      (set!
+        (-> self lure-snake-flow-time)
+        0.0)
+
+      (set!
+        (-> self lure-snake)
+        (spawn-fisher-lure-snake
+          snake-root))
+    )
+
     (let ((cam-slave
             (-> *camera* slave 0 0)))
 
@@ -1442,6 +2054,7 @@
 
 (defun fisher-update-underwater-background! ((self fisher-game))
   (fisher-update-camera-water! self)
+  (fisher-update-underwater-waves! self)
 
   (cond
     ((-> self camera-underwater?)
@@ -2080,6 +2693,7 @@
       (fisher-camera-follow-lure! self)
       (fisher-update-underwater-background! self)
       (fisher-update-camera-bubbles! self)
+      (fisher-update-lure-snake! self)
       (fisher-draw-line-hp-bar)
       (fisher-draw-line! self)
     )
@@ -2090,6 +2704,7 @@
       (fisher-update-reel-hint! self)
       (fisher-update-underwater-background! self)
       (fisher-update-camera-bubbles! self)
+      (fisher-update-lure-snake! self)
       (fisher-draw-line-hp-bar)
       (fisher-draw-line! self)
     )
@@ -2100,6 +2715,7 @@
       (fisher-update-reel-hint! self)
       (fisher-update-underwater-background! self)
       (fisher-update-camera-bubbles! self)
+      (fisher-update-lure-snake! self)
       (fisher-draw-line-hp-bar)
       (fisher-draw-line! self)
     )
@@ -2283,6 +2899,7 @@
         *camera-base-mode*
         (seconds 0.5))
 
+      (fisher-remove-lure-snake! self)
       (process-release? *target*)
       (go-virtual idle)
     )
