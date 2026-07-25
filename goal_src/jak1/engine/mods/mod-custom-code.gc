@@ -76,6 +76,27 @@
   :bounds (static-spherem 0 14 0 18)
   :longest-edge (meters 2.5))
 
+(defskelgroup *catch-fisha-sgc*
+  catch-fisha
+  catch-fisha-lod0-jg
+  catch-fisha-idle-ja
+  ((catch-fisha-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *catch-fishb-sgc*
+  catch-fishb
+  catch-fishb-lod0-jg
+  catch-fishb-idle-ja
+  ((catch-fishb-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *catch-fishc-sgc*
+  catch-fishc
+  catch-fishc-lod0-jg
+  catch-fishc-idle-ja
+  ((catch-fishc-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
 (defun spawn-fisher-net-at ((pos vector))
   (let ((net
           (manipy-spawn
