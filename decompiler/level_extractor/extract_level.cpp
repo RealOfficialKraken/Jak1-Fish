@@ -268,6 +268,22 @@ level_tools::BspHeader extract_bsp_from_level(const ObjectFileDB& db,
  * Even though GAME.CGO isn't technically a level, the decompiler/loader treat it like one,
  * but the bsp stuff is just empty. It will contain only textures/art groups.
  */
+void extract_single_ag(const std::string& dgo_name,
+                       const std::string& ag_name,
+                       const ObjectFileDB& db,
+                       const TextureDB& tex_db,
+                       tfrag3::Level& lvl) {
+  auto dgo = db.obj_files_by_dgo.at(dgo_name);
+  for (const auto& file : dgo) {
+    if (file.name == ag_name) {
+      const auto& ag_file = db.lookup_record(file);
+      MercSwapInfo swapped_info;
+      extract_merc(ag_file, tex_db, db.dts, extract_tex_remap(db, dgo_name), lvl, false,
+                   db.version(), swapped_info);
+    }
+  }
+}
+
 void extract_common(const ObjectFileDB& db,
                     const TextureDB& tex_db,
                     const std::string& dgo_name,
@@ -293,6 +309,15 @@ void extract_common(const ObjectFileDB& db,
 
   add_all_textures_from_level(tfrag_level, "ARTSPOOL", tex_db);
   extract_art_groups_from_level(db, tex_db, {}, "ARTSPOOL", tfrag_level, art_group_data);
+
+  extract_single_ag("JUN.DGO", "fisher-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "fish-net-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "junglefish-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "catch-fisha-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "catch-fishb-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "catch-fishc-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "sharkey-ag", db, tex_db, tfrag_level);
+  extract_single_ag("JUN.DGO", "junglesnake-ag", db, tex_db, tfrag_level);
 
   // copy in any art groups that were requested to be common
   if (config.common_art_groups.size() > 0) {

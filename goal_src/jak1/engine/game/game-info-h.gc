@@ -3,7 +3,7 @@
 (bundles "ENGINE.CGO" "GAME.CGO")
 (require "engine/util/types-h.gc")
 
-;; This file contains types for:
+;; This file contains types for: game-info-h.gc
 ;; - the full game state (game-info)
 ;; - the "load state"
 ;; - checkpoints
@@ -76,6 +76,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Game Info
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(declare-type fisher-game process)
+(define *fisher-game* (the (pointer fisher-game) #f))
 
 (defenum continue-flags
   :type uint32

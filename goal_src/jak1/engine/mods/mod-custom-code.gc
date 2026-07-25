@@ -17,6 +17,2277 @@
     an orb
 |#
 
+(define *fisher-line-hp-max* 100.0)
+(define *fisher-line-hp* 100.0)
+(define *fisher-line-broken?* #f)
+
+(defpart 3570
+  :init-specs
+  ((:texture (lakedrop effects))
+   (:num 1.0)
+   (:scale-x (meters 0.08) (meters 0.10))
+   (:scale-y :copy scale-x)
+   (:r 220.0)
+   (:g 240.0)
+   (:b 255.0)
+   (:a 88.0)
+   (:vel-x (meters -0.00002) (meters 0.00004))
+   (:vel-y (meters 0.000025) (meters 0.000025))
+   (:vel-z (meters -0.00002) (meters 0.00004))
+   (:scalevel-x (meters 0.00001))
+   (:scalevel-y :copy scalevel-x)
+   (:fade-a -0.025)
+   (:timer (seconds 30.0))
+   (:flags (bit2 bit3))))
+
+(defpart 3571
+  :init-specs
+  ((:texture (lakedrop effects))
+   (:num 12.0)
+   (:scale-x (meters 0.05) (meters 0.08))
+   (:scale-y :copy scale-x)
+   (:r 220.0)
+   (:g 240.0)
+   (:b 255.0)
+   (:a 112.0)
+   (:vel-x (meters -0.006) (meters 0.012))
+   (:vel-y (meters 0.002) (meters 0.006))
+   (:vel-z (meters -0.006) (meters 0.012))
+   (:scalevel-x (meters 0.00008))
+   (:scalevel-y :copy scalevel-x)
+   (:fade-a -0.30)
+   (:timer (seconds 2.0))
+   (:flags (bit2 bit3))))
+
+(defskelgroup *fish-net-sgc*
+  fish-net
+  fish-net-lod0-jg
+  fish-net-fishing-ja
+  ((fish-net-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *junglesnake-sgc*
+  junglesnake
+  junglesnake-lod0-jg
+  junglesnake-idle-ja
+  ((junglesnake-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 14 0 18)
+  :longest-edge (meters 2.5))
+
+(defun spawn-fisher-net-at ((pos vector))
+  (let ((net
+          (manipy-spawn
+            pos
+            #f
+            *fish-net-sgc*
+            #f
+            :from *default-dead-pool*
+            :to *default-pool*
+            :name "test-fisher-net")))
+
+    (when net
+      (let ((net-proc
+              (-> net 0 self))
+
+            (rot
+              (new 'stack-no-clear 'matrix)))
+
+        (send-event
+          net-proc
+          'anim-mode
+          'still)
+
+        (send-event
+          net-proc
+          'set-frame-num
+          10.0)
+
+        (set!
+          (-> (the-as manipy net-proc) root trans quad)
+          (-> pos quad))
+
+        (matrix-rotate-x!
+          rot
+          (degrees 180))
+
+        (matrix->quaternion
+          (-> (the-as manipy net-proc) root quat)
+          rot)
+
+        (send-event
+          net-proc
+          'max-vis-dist
+          (meters 999999.0))))
+
+    net)
+)
+
+(define matt-str (new 'global 'string 2048 (the-as string #f)))
+(define *pc-encoded-matt-str* (new 'global 'string 2048 (the-as string #f)))
+
+(defun draw-mod-menu-text-custom ((text string)
+                                  (text-x-pos int)
+                                  (text-y-pos int)
+                                  (left? symbol)
+                                  (middle? symbol)
+                                  (right? symbol))
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) debug-buf))
+     (bucket-id debug-no-zbuf))
+
+    (let ((font-ctx
+            (new 'stack
+                 'font-context
+                 *font-default-matrix*
+                 text-x-pos
+                 text-y-pos
+                 0.0
+                 (font-color white)
+                 (cond
+                   (middle?
+                     (font-flags large middle shadow kerning))
+                   (right?
+                     (font-flags large right shadow kerning))
+                   (else
+                     (font-flags large shadow kerning))))))
+
+      (draw-string
+        *pc-encoded-matt-str*
+        buf
+        font-ctx)
+    )
+  )
+
+  (none)
+)
+
+
+(defun fisher-restore-normal-background! ()
+  (none)
+)
+
+;;name: fisher-game.gc
+
+(deftype fisher-game (process)
+  ((location                    string)
+   (pos                         vector :inline)
+   (casted?                     symbol)
+   (fisher-cam                  vector :inline)
+   (fisher-look                 vector :inline)
+   (camera-state                symbol)
+   (saved-camera-read-analog    symbol)
+   (saved-external-cam-mode     symbol)
+   (water-level                 float)
+   (camera-underwater?          symbol)
+   (cast-state                  symbol)
+   (cast-charge                 float)
+   (cast-charge-direction       float)
+   (lure-pos                    vector :inline)
+   (lure-cast-start             vector :inline)
+   (lure-cast-end               vector :inline)
+   (lure-cast-axis              vector :inline)
+   (lure-camera-offset          vector :inline)
+   (lure-camera-pos             vector :inline)
+   (lure-camera-look            vector :inline)
+   (cast-time                   float)
+   (cast-duration               float)
+   (camera-blend                float)
+   (lure-fall-speed             float)
+   (lure-reel-x-speed           float)
+   (lure-reel-y-speed           float)
+   (lure-x-velocity             float)
+   (lure-y-velocity             float)
+   (playfield-angle             float)
+   (playfield-axis              vector :inline)
+   (camera-angle                float)
+   (camera-axis                 vector :inline)
+   (camera-radius               float)
+   (bubble-time                 float)
+   (stored-music-vol            float)
+   (reel-hint-time              float)
+  )
+  (:state-methods
+    idle
+    fishing
+    exit
+    dead
+  )
+)
+
+(defbehavior fisher-game-init-by-other fisher-game
+  ((loc string)
+   (vec vector)
+   (camera-vec vector)
+   (water-height float)
+   (angles vector))
+
+  (set!
+    (-> self location)
+    loc)
+  (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
+  (vector-copy!
+    (-> self pos)
+    vec)
+
+  (vector-copy!
+    (-> self fisher-cam)
+    camera-vec)
+
+  (let ((camera-offset
+        (new 'stack-no-clear 'vector)))
+
+  (vector-!
+    camera-offset
+    camera-vec
+    vec)
+
+  (set!
+    (-> camera-offset y)
+    0.0)
+
+  (set!
+    (-> camera-offset w)
+    0.0)
+
+  (set!
+  (-> self camera-radius)
+  (vector-length camera-offset))
+)
+
+  (set!
+    (-> self water-level)
+    water-height)
+
+  (set!
+    (-> self camera-angle)
+    (-> angles x))
+
+  (set!
+    (-> self playfield-angle)
+    (-> angles y))
+
+  (set!
+    (-> self camera-axis x)
+    (sin (-> self camera-angle)))
+
+  (set!
+    (-> self camera-axis y)
+    0.0)
+
+  (set!
+    (-> self camera-axis z)
+    (cos (-> self camera-angle)))
+
+  (set!
+    (-> self camera-axis w)
+    0.0)
+
+  (vector-normalize!
+    (-> self camera-axis)
+    1.0)
+
+  (set!
+    (-> self playfield-axis x)
+    (sin (-> self playfield-angle)))
+
+  (set!
+    (-> self playfield-axis y)
+    0.0)
+
+  (set!
+    (-> self playfield-axis z)
+    (cos (-> self playfield-angle)))
+
+  (set!
+    (-> self playfield-axis w)
+    0.0)
+
+  (vector-normalize!
+    (-> self playfield-axis)
+    1.0)
+
+  (set!
+    (-> self saved-camera-read-analog)
+    #t)
+
+  (set!
+    (-> self saved-external-cam-mode)
+    #f)
+
+  (set!
+    (-> self casted?)
+    #f)
+
+  (set!
+    (-> self camera-state)
+    'before-cast)
+
+  (set!
+    (-> self camera-underwater?)
+    #f)
+
+  (set!
+    (-> self cast-state)
+    'ready)
+
+  (set!
+    (-> self cast-charge)
+    0.0)
+
+  (set!
+    (-> self cast-charge-direction)
+    0.0)
+
+  (set!
+    (-> self cast-time)
+    0.0)
+
+  (set!
+    (-> self cast-duration)
+    1.0)
+
+  (set!
+    (-> self camera-blend)
+    0.0)
+
+  (set!
+    (-> self lure-fall-speed)
+    1.25)
+
+  (set!
+    (-> self lure-reel-x-speed)
+    4.0)
+
+  (set!
+    (-> self lure-reel-y-speed)
+    3.0)
+
+  (set!
+    (-> self lure-x-velocity)
+    0.0)
+  
+  (set!
+    (-> self reel-hint-time)
+    0.0)
+
+  (set!
+    (-> self lure-y-velocity)
+    0.0)
+
+  (set!
+    (-> self bubble-time)
+    -2.0)
+
+  (vector-reset!
+    (-> self lure-pos))
+
+  (vector-reset!
+    (-> self lure-cast-start))
+
+  (vector-reset!
+    (-> self lure-cast-end))
+
+  (vector-reset!
+    (-> self lure-cast-axis))
+
+  (vector-reset!
+    (-> self lure-camera-offset))
+
+  (vector-reset!
+    (-> self lure-camera-pos))
+
+  (vector-reset!
+    (-> self lure-camera-look))
+
+  (spawn-fisher-net-at
+  (-> self pos))
+
+  (go-virtual idle)
+)
+
+(defun fisher-reset-line-hp! ()
+  (set!
+    *fisher-line-hp*
+    *fisher-line-hp-max*)
+
+  (set!
+    *fisher-line-broken?*
+    #f)
+
+  (none)
+)
+
+(defun fisher-damage-line! ((damage float))
+  (-!
+    *fisher-line-hp*
+    damage)
+
+  (when
+    (<= *fisher-line-hp* 0.0)
+
+    (set!
+      *fisher-line-hp*
+      0.0)
+
+    (set!
+      *fisher-line-broken?*
+      #t))
+
+  (none)
+)
+
+(defun fisher-heal-line! ((amount float))
+  (+!
+    *fisher-line-hp*
+    amount)
+
+  (when
+    (> *fisher-line-hp*
+       *fisher-line-hp-max*)
+
+    (set!
+      *fisher-line-hp*
+      *fisher-line-hp-max*))
+
+  (when
+    (> *fisher-line-hp* 0.0)
+
+    (set!
+      *fisher-line-broken?*
+      #f))
+
+  (none)
+)
+
+(defun fisher-set-line-color! ((color rgba))
+  (let ((health-ratio
+          (fmax
+            0.0
+            (fmin
+              1.0
+              (/ *fisher-line-hp*
+                 *fisher-line-hp-max*))))
+
+        (blend
+          0.0))
+
+    (cond
+      ((>= health-ratio 0.5)
+        (set!
+          blend
+          (* (- 1.0 health-ratio)
+             2.0))
+
+        (set!
+          (-> color r)
+          (the uint8
+            (+ 32.0
+               (* (- 240.0 32.0)
+                  blend))))
+
+        (set!
+          (-> color g)
+          (the uint8
+            (+ 224.0
+               (* (- 208.0 224.0)
+                  blend))))
+
+        (set!
+          (-> color b)
+          (the uint8
+            (+ 64.0
+               (* (- 32.0 64.0)
+                  blend))))
+      )
+
+      (else
+        (set!
+          blend
+          (* (- 0.5 health-ratio)
+             2.0))
+
+        (set!
+          (-> color r)
+          240)
+
+        (set!
+          (-> color g)
+          (the uint8
+            (+ 208.0
+               (* (- 32.0 208.0)
+                  blend))))
+
+        (set!
+          (-> color b)
+          32)
+      )
+    )
+
+    (set!
+      (-> color a)
+      #xc0)
+  )
+
+  (none)
+)
+
+(defun fisher-draw-line-hp-number ()
+  (let ((display-hp
+          (the int
+            (fmax
+              0.0
+              (fmin
+                *fisher-line-hp-max*
+                *fisher-line-hp*)))))
+
+    (clear matt-str)
+    (clear *pc-encoded-matt-str*)
+
+    (format
+      matt-str
+      "~D"
+      display-hp)
+
+    (pc-encode-utf8-string
+      matt-str
+      *pc-encoded-matt-str*)
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) debug-buf))
+       (bucket-id debug-no-zbuf))
+
+      (let ((font-ctx
+              (new 'stack
+                   'font-context
+                   *font-default-matrix*
+                   472
+                   39
+                   0.0
+                   (font-color white)
+                   (font-flags large middle shadow kerning))))
+
+        (draw-string
+          *pc-encoded-matt-str*
+          buf
+          font-ctx)
+      )
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-draw-line-hp-bar ()
+  (let* ((health-ratio
+           (fmax
+             0.0
+             (fmin
+               1.0
+               (/ *fisher-line-hp*
+                  *fisher-line-hp-max*))))
+
+         (fill-height
+           (the int
+             (* 120.0 health-ratio)))
+
+         (fill-y
+           (the int
+             (- 188.0
+                fill-height)))
+
+         (hp-color
+           (new 'static 'rgba
+            :r #x20
+            :g #xe0
+            :b #x40
+            :a #xc0)))
+
+    (fisher-set-line-color!
+      hp-color)
+
+    (fisher-draw-line-hp-number)
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) debug-buf))
+       (bucket-id debug-no-zbuf))
+
+      (draw-sprite2d-xy
+        buf
+        455
+        61
+        34
+        134
+        (new 'static 'rgba
+          :r #x08
+          :g #x0c
+          :b #x10
+          :a #xb0))
+
+      (draw-sprite2d-xy
+        buf
+        458
+        64
+        28
+        128
+        (new 'static 'rgba
+          :r #x58
+          :g #x60
+          :b #x68
+          :a #xd0))
+
+      (draw-sprite2d-xy
+        buf
+        462
+        68
+        20
+        120
+        (new 'static 'rgba
+          :r #x08
+          :g #x0a
+          :b #x0c
+          :a #xd0))
+
+      (when (> fill-height 0)
+        (draw-sprite2d-xy
+          buf
+          464
+          fill-y
+          16
+          fill-height
+          hp-color)
+
+        (draw-sprite2d-xy
+          buf
+          462
+          (- fill-y 2)
+          20
+          4
+          hp-color)
+      )
+
+      (draw-sprite2d-xy
+        buf
+        458
+        58
+        28
+        6
+        (new 'static 'rgba
+          :r #x78
+          :g #x80
+          :b #x88
+          :a #xd0))
+
+      (draw-sprite2d-xy
+        buf
+        458
+        192
+        28
+        6
+        (new 'static 'rgba
+          :r #x78
+          :g #x80
+          :b #x88
+          :a #xd0))
+
+      (dotimes (i 11)
+        (let ((stud-y
+                (+ 67
+                   (* i 12))))
+
+          (draw-sprite2d-xy
+            buf
+            452
+            stud-y
+            6
+            3
+            (new 'static 'rgba
+              :r #x98
+              :g #xa0
+              :b #xa8
+              :a #xe0))
+
+          (draw-sprite2d-xy
+            buf
+            486
+            stud-y
+            6
+            3
+            (new 'static 'rgba
+              :r #x98
+              :g #xa0
+              :b #xa8
+              :a #xe0))
+        )
+      )
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-reel-hint! ((self fisher-game))
+  (when
+    (> (-> self reel-hint-time)
+       0.0)
+
+    (draw-mod-menu-text-custom ;;change this for progression skills
+      "<PAD_X> TO REEL"
+      10
+      200
+      #t
+      #f
+      #f)
+
+    (-!
+      (-> self reel-hint-time)
+      (-> *display* seconds-per-frame))
+
+    (when
+      (< (-> self reel-hint-time)
+         0.0)
+
+      (set!
+        (-> self reel-hint-time)
+        0.0))
+  )
+
+  (none)
+)
+
+(defun fisher-launch-water-entry-bubbles! ((self fisher-game))
+  (let ((spray-pos
+          (new 'stack-no-clear 'vector)))
+
+    (vector-copy!
+      spray-pos
+      (-> self lure-pos))
+
+    (set!
+      (-> spray-pos y)
+      (- (-> self water-level)
+         (meters 0.05)))
+
+    (set!
+      (-> spray-pos w)
+      1.0)
+
+    (launch-particles
+      :system *sp-particle-system-2d*
+      (-> *part-id-table* 3571)
+      spray-pos)
+  )
+
+  (none)
+)
+
+(defun fisher-force-underwater-background! ()
+  (when *time-of-day-context*
+    (let ((hour
+            (-> *time-of-day-context* time))
+
+          (blend
+            0.0)
+
+          (r
+            0.0)
+
+          (g
+            0.0)
+
+          (b
+            0.0))
+
+      (cond
+        ((and
+           (>= hour 4.0)
+           (< hour 7.0))
+
+          (set!
+            blend
+            (/ (- hour 4.0)
+               3.0))
+
+          (set!
+            r
+            (+ 9.0
+               (* (- 34.0 9.0)
+                  blend)))
+
+          (set!
+            g
+            (+ 88.0
+               (* (- 110.0 88.0)
+                  blend)))
+
+          (set!
+            b
+            (+ 97.0
+               (* (- 97.0 97.0)
+                  blend)))
+        )
+
+        ((and
+           (>= hour 7.0)
+           (< hour 9.0))
+
+          (set!
+            blend
+            (/ (- hour 7.0)
+               2.0))
+
+          (set!
+            r
+            (+ 34.0
+               (* (- 62.0 34.0)
+                  blend)))
+
+          (set!
+            g
+            (+ 110.0
+               (* (- 164.0 110.0)
+                  blend)))
+
+          (set!
+            b
+            (+ 97.0
+               (* (- 175.0 97.0)
+                  blend)))
+        )
+
+        ((and
+          (>= hour 9.0)
+          (< hour 12.0))
+
+          (set! r 62.0)
+          (set! g 164.0)
+          (set! b 175.0)
+        )
+
+        ((and
+          (>= hour 12.0)
+          (< hour 18.0))
+
+          (set!
+            blend
+            (/ (- hour 12.0)
+              6.0))
+
+          (set!
+            r
+            (+ 62.0
+              (* (- 30.0 62.0)
+                  blend)))
+
+          (set!
+            g
+            (+ 164.0
+              (* (- 72.0 164.0)
+                  blend)))
+
+          (set!
+            b
+            (+ 175.0
+              (* (- 57.0 175.0)
+                  blend)))
+        )
+
+        ((and
+           (>= hour 18.0)
+           (< hour 19.0))
+
+          (set!
+            blend
+            (- hour 18.0))
+
+          (set!
+            r
+            (+ 30.0
+               (* (- 11.0 30.0)
+                  blend)))
+
+          (set!
+            g
+            (+ 72.0
+               (* (- 44.0 72.0)
+                  blend)))
+
+          (set!
+            b
+            (+ 57.0
+               (* (- 96.0 57.0)
+                  blend)))
+        )
+
+        (else
+          (cond
+            ((and
+              (>= hour 19.0)
+              (< hour 24.0))
+
+              (set! r 11.0)
+              (set! g 44.0)
+              (set! b 96.0)
+            )
+
+            ((< hour 3.0)
+              (set! r 11.0)
+              (set! g 44.0)
+              (set! b 96.0)
+            )
+
+            (else
+              (set!
+                blend
+                (- hour 3.0))
+
+              (set!
+                r
+                (+ 11.0
+                  (* (- 9.0 11.0)
+                      blend)))
+
+              (set!
+                g
+                (+ 44.0
+                  (* (- 88.0 44.0)
+                      blend)))
+
+              (set!
+                b
+                (+ 96.0
+                  (* (- 97.0 96.0)
+                      blend)))
+            )
+          )
+        )
+      )
+
+      (dotimes (i 12)
+        (set!
+          (-> sky-base-polygons i col x)
+          r)
+
+        (set!
+          (-> sky-base-polygons i col y)
+          g)
+
+        (set!
+          (-> sky-base-polygons i col z)
+          b)
+
+        (set!
+          (-> sky-base-polygons i col w)
+          128.0))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-camera-water! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0)))
+      (set!
+        (-> self camera-underwater?)
+        (< (-> cam-slave trans y)
+           (-> self water-level)))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-draw-cast-bar ((charge float))
+  (let ((fill-height (the int (* 116.0 charge)))
+        (fill-y (the int (- 184.0 (* 116.0 charge)))))
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) debug-buf))
+       (bucket-id debug-no-zbuf))
+
+      (draw-sprite2d-xy
+        buf
+        455
+        61
+        34
+        134
+        (new 'static 'rgba
+          :r #x00
+          :g #x00
+          :b #x00
+          :a #x60))
+
+      (draw-sprite2d-xy
+        buf
+        458
+        64
+        28
+        128
+        (new 'static 'rgba
+          :r #x70
+          :g #x78
+          :b #x70
+          :a #x80))
+
+      (draw-sprite2d-xy
+        buf
+        462
+        68
+        20
+        120
+        (new 'static 'rgba
+          :r #x08
+          :g #x10
+          :b #x18
+          :a #x70))
+
+      (when (> fill-height 0)
+        (draw-sprite2d-xy
+          buf
+          464
+          fill-y
+          16
+          fill-height
+          (new 'static 'rgba
+            :r #x20
+            :g #x70
+            :b #x80
+            :a #x80))
+
+        (draw-sprite2d-xy
+          buf
+          462
+          (- fill-y 2)
+          20
+          4
+          (new 'static 'rgba
+            :r #x70
+            :g #x80
+            :b #x80
+            :a #x80))
+      )
+
+      (draw-sprite2d-xy
+        buf
+        458
+        58
+        28
+        6
+        (new 'static 'rgba
+          :r #x70
+          :g #x78
+          :b #x70
+          :a #x80))
+
+      (draw-sprite2d-xy
+        buf
+        458
+        192
+        28
+        6
+        (new 'static 'rgba
+          :r #x70
+          :g #x78
+          :b #x70
+          :a #x80))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-reset-cast! ((self fisher-game))
+  (set! (-> self cast-state) 'ready)
+  (set! (-> self camera-state) 'before-cast)
+  (set! (-> self cast-charge-direction) 1.0)
+  (set! (-> self cast-charge) 0.0)
+  (set! (-> self cast-time) 0.0)
+  (set! (-> self camera-blend) 0.0)
+  (set! (-> self casted?) #f)
+
+  (set! (-> self lure-x-velocity) 0.0)
+  (set! (-> self lure-y-velocity) 0.0)
+  (vector-reset! (-> self lure-pos))
+  (vector-reset! (-> self lure-cast-start))
+  (vector-reset! (-> self lure-cast-end))
+  (vector-reset! (-> self lure-cast-axis))
+  (vector-reset! (-> self lure-camera-offset))
+  (vector-reset! (-> self lure-camera-pos))
+  (vector-reset! (-> self lure-camera-look))
+  (set!
+    (-> self reel-hint-time)
+    0.0)
+  (set!
+    (-> self bubble-time)
+  -2.0)
+
+  (none)
+)
+
+(defun fisher-launch-camera-bubble! ((self fisher-game))
+  (when
+    (and
+      *camera*
+      (> (-> *camera* num-slaves) 0))
+
+    (let ((cam-slave
+            (-> *camera* slave 0 0))
+
+          (bubble-pos
+            (new 'stack-no-clear 'vector))
+
+          (forward
+            (new 'stack-no-clear 'vector))
+
+          (right
+            (new 'stack-no-clear 'vector))
+
+          (depth
+            (rand-vu-float-range
+              (meters 2.0)
+              (meters 9.0)))
+
+          (horizontal-offset
+            0.0)
+
+          (vertical-offset
+            0.0))
+
+      (vector-!
+        forward
+        (-> self lure-camera-look)
+        (-> cam-slave trans))
+
+      (set!
+        (-> forward w)
+        0.0)
+
+      (vector-normalize!
+        forward
+        1.0)
+
+      (vector-cross!
+        right
+        forward
+        (-> *camera* local-down))
+
+      (set!
+        (-> right w)
+        0.0)
+
+      (vector-normalize!
+        right
+        1.0)
+
+      (set!
+        horizontal-offset
+        (rand-vu-float-range
+          (- (* depth 0.65))
+          (* depth 0.65)))
+
+      (set!
+        vertical-offset
+        (rand-vu-float-range
+          (- (* depth 0.38))
+          (* depth 0.38)))
+
+      (vector+float*!
+        bubble-pos
+        (-> cam-slave trans)
+        forward
+        depth)
+
+      (vector+float*!
+        bubble-pos
+        bubble-pos
+        right
+        horizontal-offset)
+
+      (vector+float*!
+        bubble-pos
+        bubble-pos
+        (-> *camera* local-down)
+        vertical-offset)
+
+      (when
+        (>=
+          (-> bubble-pos y)
+          (-> self water-level))
+
+        (set!
+          (-> bubble-pos y)
+          (- (-> self water-level)
+             (meters 0.25)))
+      )
+
+      (set!
+        (-> bubble-pos w)
+        1.0)
+
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 3570)
+        bubble-pos)
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-camera-bubbles! ((self fisher-game))
+  (let ((dt
+          (-> *display* seconds-per-frame)))
+
+    (cond
+      ((and
+         (-> self casted?)
+         (-> self camera-underwater?)
+         (<
+           (-> self lure-pos y)
+           (-> self water-level)))
+
+        (cond
+          ((< (-> self bubble-time) 0.0)
+            (+!
+              (-> self bubble-time)
+              dt)
+
+            (when
+              (>= (-> self bubble-time) 0.0)
+
+              (fisher-launch-camera-bubble! self)
+
+              (set!
+                (-> self bubble-time)
+                (rand-vu-float-range
+                  6.0
+                  15.0)))
+          )
+
+          (else
+            (-!
+              (-> self bubble-time)
+              dt)
+
+            (when
+              (<= (-> self bubble-time) 0.0)
+
+              (fisher-launch-camera-bubble! self)
+
+              (set!
+                (-> self bubble-time)
+                (rand-vu-float-range
+                  6.0
+                  15.0)))
+          )
+        )
+      )
+
+      (else
+        (set!
+          (-> self bubble-time)
+          -2.0))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-start-cast! ((self fisher-game))
+  (set!
+    *fisher-line-hp-max*
+    (+
+      15.0
+      (* 85.0
+         (-> self cast-charge))))
+
+  (fisher-reset-line-hp!)
+
+  (let ((cast-distance
+          (+
+            (meters 2.0)
+            (* (meters 28.0)
+               (-> self cast-charge)))))
+
+    (vector-copy!
+      (-> self lure-cast-start)
+      (target-pos 0))
+
+    (play-sound-file
+      "cast.wav"
+      (the int
+        (-> *setting-control* current sfx-volume)))
+
+    (+!
+      (-> self lure-cast-start y)
+      (meters 1.4))
+
+    (vector-copy!
+      (-> self lure-cast-axis)
+      (-> self playfield-axis))
+
+    (vector+float*!
+      (-> self lure-cast-end)
+      (-> self lure-cast-start)
+      (-> self lure-cast-axis)
+      cast-distance)
+
+    (set!
+      (-> self lure-cast-end y)
+      (-> self water-level))
+
+    (set!
+      (-> self lure-cast-end w)
+      1.0)
+
+    (vector-copy!
+      (-> self lure-pos)
+      (-> self lure-cast-start))
+
+    (let ((cam-slave
+            (-> *camera* slave 0 0)))
+
+      (vector-float*!
+        (-> self lure-camera-offset)
+        (-> self camera-axis)
+        (- (-> self camera-radius)))
+
+      (set!
+        (-> self lure-camera-offset y)
+        0.0)
+
+      (set!
+        (-> self lure-camera-offset w)
+        0.0)
+
+      (vector-copy!
+        (-> self fisher-cam)
+        (-> cam-slave trans))
+    )
+
+    (set! (-> self cast-time) 0.0)
+    (set! (-> self camera-blend) 0.0)
+    (set! (-> self cast-duration) 1.0)
+    (set! (-> self casted?) #t)
+    (set!
+      (-> self reel-hint-time)
+      3.0)
+
+    (set! (-> self lure-x-velocity) 0.0)
+    (set! (-> self lure-y-velocity) 0.0)
+
+    (set! (-> self cast-state) 'casting)
+    (set! (-> self camera-state) 'follow-lure)
+  )
+
+  (none)
+)
+
+(defun fisher-update-cast-arc! ((self fisher-game))
+  (let* ((dt (-> *display* seconds-per-frame))
+         (t
+           (fmin
+             1.0
+             (/ (-> self cast-time)
+                (-> self cast-duration))))
+         (arc-height
+           (* (meters 5.0)
+              (* 4.0
+                 t
+                 (- 1.0 t)))))
+
+    (vector-lerp!
+      (-> self lure-pos)
+      (-> self lure-cast-start)
+      (-> self lure-cast-end)
+      t)
+
+    (+!
+      (-> self lure-pos y)
+      arc-height)
+
+    (+!
+      (-> self cast-time)
+      dt)
+
+    (when (>= t 1.0)
+  (vector-copy!
+    (-> self lure-pos)
+    (-> self lure-cast-end))
+
+  (set!
+    (-> self lure-x-velocity)
+    0.87)
+
+  (set!
+    (-> self lure-y-velocity)
+    -2.0)
+
+  (fisher-launch-water-entry-bubbles! self)
+  (play-sound-file "splash.wav" (the int (-> *setting-control* current sfx-volume)))
+
+  (set!
+    (-> self cast-state)
+    'water-entry))
+  )
+
+  (none)
+)
+
+(defun fisher-update-underwater-background! ((self fisher-game))
+  (fisher-update-camera-water! self)
+
+  (cond
+    ((-> self camera-underwater?)
+      (fisher-force-underwater-background!)
+    )
+
+    (else
+      (fisher-restore-normal-background!)
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-water-entry! ((self fisher-game))
+  (let* ((dt
+           (-> *display* seconds-per-frame))
+
+         (entry-depth
+           (meters 3.0))
+
+         (entry-bottom
+           (- (-> self water-level)
+              entry-depth))
+
+         (current-depth
+           (fmax
+             0.0
+             (-
+               (-> self water-level)
+               (-> self lure-pos y))))
+
+         (depth-progress
+           (fmin
+             1.0
+             (/ current-depth
+                entry-depth)))
+
+         (smooth-progress
+           (*
+             depth-progress
+             depth-progress
+             (-
+               3.0
+               (* 2.0 depth-progress))))
+
+         (starting-y-speed
+           -2.0)
+
+         (ending-y-speed
+           (- (-> self lure-fall-speed))))
+
+    (set!
+      (-> self lure-y-velocity)
+      (+
+        (* starting-y-speed
+           (- 1.0 smooth-progress))
+
+        (* ending-y-speed
+           smooth-progress)))
+
+    (set!
+      (-> self lure-x-velocity)
+      (*
+        0.87
+        (- 1.0 smooth-progress)))
+
+    (vector+float*!
+      (-> self lure-pos)
+      (-> self lure-pos)
+      (-> self lure-cast-axis)
+      (* (meters 1.0)
+         (-> self lure-x-velocity)
+         dt))
+
+    (+!
+      (-> self lure-pos y)
+      (* (meters 1.0)
+         (-> self lure-y-velocity)
+         dt))
+
+    (when
+      (<=
+        (-> self lure-pos y)
+        entry-bottom)
+
+      (set!
+        (-> self lure-pos y)
+        entry-bottom)
+
+      (set!
+        (-> self lure-x-velocity)
+        0.0)
+
+      (set!
+        (-> self lure-y-velocity)
+        (- (-> self lure-fall-speed)))
+
+      (set!
+        (-> self cast-state)
+        'line-active))
+  )
+
+  (none)
+)
+
+(defun fisher-camera-follow-lure! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0))
+          (desired-camera (new 'stack-no-clear 'vector))
+          (desired-look (new 'stack-no-clear 'vector))
+          (forward (new 'stack-no-clear 'vector))
+          (blend-value 0.0)
+          (blend-speed 2.5))
+
+      (vector+!
+        desired-camera
+        (-> self lure-pos)
+        (-> self lure-camera-offset))
+
+      (vector-copy!
+        desired-look
+        (-> self lure-pos))
+
+      (+!
+        (-> desired-look y)
+        (meters 0.5))
+
+      (when
+        (< (-> self camera-blend)
+           1.0)
+
+        (+!
+          (-> self camera-blend)
+          (* blend-speed
+             (-> *display* seconds-per-frame)))
+
+        (when
+          (> (-> self camera-blend)
+             1.0)
+
+          (set!
+            (-> self camera-blend)
+            1.0))
+      )
+
+      (set!
+        blend-value
+        (parameter-ease-sin-clamp
+          (-> self camera-blend)))
+
+      (vector-lerp!
+        (-> self lure-camera-pos)
+        (-> self fisher-cam)
+        desired-camera
+        blend-value)
+
+      (vector-lerp!
+        (-> self lure-camera-look)
+        (-> self fisher-look)
+        desired-look
+        blend-value)
+
+      (set!
+        (-> cam-slave saved-pt quad)
+        (-> self lure-camera-pos quad))
+
+      (set!
+        (-> cam-slave trans quad)
+        (-> self lure-camera-pos quad))
+
+      (vector-!
+  forward
+  (-> self lure-camera-look)
+  (-> self lure-camera-pos))
+
+(let ((horizontal-length
+        (sqrtf
+          (+
+            (* (-> forward x)
+               (-> forward x))
+
+            (* (-> forward z)
+               (-> forward z))))))
+
+  (when (> horizontal-length 0.0)
+    (set!
+      (-> forward x)
+      (*
+        (/ (-> forward x)
+           horizontal-length)
+
+        (cos (degrees -5))))
+
+    (set!
+      (-> forward z)
+      (*
+        (/ (-> forward z)
+           horizontal-length)
+
+        (cos (degrees -5))))
+
+    (set!
+      (-> forward y)
+      (sin (degrees -5)))
+
+    (set!
+      (-> forward w)
+      0.0))
+)
+
+(vector-normalize!
+  forward
+  1.0)
+
+      (forward-down->inv-matrix
+        (-> cam-slave tracking inv-mat)
+        forward
+        (-> *camera* local-down))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-camera-before-cast! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0))
+          (forward (new 'stack-no-clear 'vector))
+          (look-pos (new 'stack-no-clear 'vector))
+          (camera-pos (new 'stack-no-clear 'vector)))
+
+      (vector+float*!
+        camera-pos
+        (-> self pos)
+        (-> self camera-axis)
+        (- (-> self camera-radius)))
+
+      (set!
+        (-> camera-pos y)
+        (-> self fisher-cam y))
+
+      (set!
+        (-> camera-pos w)
+        1.0)
+
+      (vector-copy!
+        look-pos
+        (-> self pos))
+
+      (+!
+        (-> look-pos y)
+        (meters 1.0))
+
+      (vector-copy!
+        (-> self fisher-look)
+        look-pos)
+
+      (set!
+        (-> cam-slave saved-pt quad)
+        (-> camera-pos quad))
+
+      (set!
+        (-> cam-slave trans quad)
+        (-> camera-pos quad))
+
+      (vector-!
+        forward
+        look-pos
+        camera-pos)
+
+      (vector-normalize!
+        forward
+        1.0)
+
+      (forward-down->inv-matrix
+        (-> cam-slave tracking inv-mat)
+        forward
+        (-> *camera* local-down))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-lure! ((self fisher-game))
+  (let ((dt (-> *display* seconds-per-frame))
+        (from-jak (new 'stack-no-clear 'vector))
+        (horizontal-distance 0.0)
+        (saved-y 0.0)
+        (top-y
+          (- (-> self water-level)
+             (meters 3.0)))
+        (bottom-y
+          (- (-> self water-level)
+             (meters 20.0)))
+        (current-speed -0.18)
+        (bottom-current-speed -0.28))
+
+    (vector-!
+      from-jak
+      (-> self lure-pos)
+      (-> self pos))
+
+    (set!
+      horizontal-distance
+      (vector-dot
+        from-jak
+        (-> self lure-cast-axis)))
+
+    (cond
+      ((cpad-hold? 0 x)
+        (vector+float*!
+          (-> self lure-pos)
+          (-> self lure-pos)
+          (-> self lure-cast-axis)
+          (-
+            (* (meters 1.0)
+               (-> self lure-reel-x-speed)
+               dt)))
+
+        (+!
+          (-> self lure-pos y)
+          (* (meters 1.0)
+             (-> self lure-reel-y-speed)
+             dt))
+
+        (set!
+          (-> self lure-x-velocity)
+          (- (-> self lure-reel-x-speed)))
+
+        (set!
+          (-> self lure-y-velocity)
+          0.0)
+      )
+
+      (else
+        (cond
+          ((> horizontal-distance
+              (meters 2.0))
+
+            (cond
+              ((<=
+                 (-> self lure-pos y)
+                 (+ bottom-y
+                    (meters 0.75)))
+
+                (set!
+                  (-> self lure-x-velocity)
+                  bottom-current-speed)
+              )
+
+              (else
+                (set!
+                  (-> self lure-x-velocity)
+                  current-speed)
+              )
+            )
+
+            (vector+float*!
+              (-> self lure-pos)
+              (-> self lure-pos)
+              (-> self lure-cast-axis)
+              (* (meters 1.0)
+                 (-> self lure-x-velocity)
+                 dt))
+          )
+
+          (else
+            (set!
+              (-> self lure-x-velocity)
+              0.0)
+          )
+        )
+
+        (-!
+          (-> self lure-y-velocity)
+          (* 1.2 dt))
+
+        (when
+          (< (-> self lure-y-velocity)
+             (- (-> self lure-fall-speed)))
+
+          (set!
+            (-> self lure-y-velocity)
+            (- (-> self lure-fall-speed)))
+        )
+
+        (+!
+          (-> self lure-pos y)
+          (* (meters 1.0)
+             (-> self lure-y-velocity)
+             dt))
+      )
+    )
+
+    (vector-!
+      from-jak
+      (-> self lure-pos)
+      (-> self pos))
+
+    (set!
+      horizontal-distance
+      (vector-dot
+        from-jak
+        (-> self lure-cast-axis)))
+
+    (set!
+      saved-y
+      (-> self lure-pos y))
+
+    (cond
+      ((< horizontal-distance
+          (meters 2.0))
+
+        (vector+float*!
+          (-> self lure-pos)
+          (-> self pos)
+          (-> self lure-cast-axis)
+          (meters 2.0))
+
+        (set!
+          (-> self lure-pos y)
+          saved-y)
+
+        (set!
+          (-> self lure-x-velocity)
+          0.0)
+      )
+
+      ((> horizontal-distance
+          (meters 30.0))
+
+        (vector+float*!
+          (-> self lure-pos)
+          (-> self pos)
+          (-> self lure-cast-axis)
+          (meters 30.0))
+
+        (set!
+          (-> self lure-pos y)
+          saved-y)
+
+        (set!
+          (-> self lure-x-velocity)
+          0.0)
+      )
+    )
+
+    (when
+      (> (-> self lure-pos y)
+         top-y)
+
+      (set!
+        (-> self lure-pos y)
+        top-y)
+
+      (when
+        (> (-> self lure-y-velocity)
+           0.0)
+
+        (set!
+          (-> self lure-y-velocity)
+          0.0))
+    )
+
+    (when
+      (< (-> self lure-pos y)
+         bottom-y)
+
+      (set!
+        (-> self lure-pos y)
+        bottom-y)
+
+      (set!
+        (-> self lure-y-velocity)
+        0.48)
+    )
+
+    (vector-!
+      from-jak
+      (-> self lure-pos)
+      (-> self pos))
+
+    (set!
+      horizontal-distance
+      (vector-dot
+        from-jak
+        (-> self lure-cast-axis)))
+
+    (when
+      (and
+        (>=
+          (-> self lure-pos y)
+          (- (-> self water-level)
+             (meters 3.05)))
+
+        (<=
+          horizontal-distance
+          (meters 4.0)))
+
+      (fisher-reset-cast! self))
+  )
+
+  (none)
+)
+
+(defun fisher-draw-line! ((self fisher-game))
+  (when (and *target* (-> self casted?))
+    (let ((line-start (new 'stack-no-clear 'vector))
+          (line-end (new 'stack-no-clear 'vector))
+          (line-step (new 'stack-no-clear 'vector))
+          (segment-start (new 'stack-no-clear 'vector))
+          (segment-end (new 'stack-no-clear 'vector))
+          (line-offset (new-stack-vector0))
+          (line-color (new 'static 'rgba
+                      :r #x20
+                      :g #xe0
+                      :b #x40
+                      :a #xc0))
+         )
+      (fisher-set-line-color! line-color)
+      (vector-copy!
+        line-start
+        (target-pos 0))
+
+      (+!
+        (-> line-start y)
+        (meters 3.25))
+
+      (vector-copy!
+        line-end
+        (-> self lure-pos))
+
+      (vector-!
+        line-step
+        line-end
+        line-start)
+
+      (vector-float*!
+        line-step
+        line-step
+        (/ 1.0 32.0))
+
+      (vector-copy!
+        segment-start
+        line-start)
+
+      (dotimes (i 32)
+        (vector+!
+          segment-end
+          segment-start
+          line-step)
+
+        (add-debug-line
+          #t
+          (bucket-id debug-no-zbuf)
+          segment-start
+          segment-end
+          line-color
+          #f
+          line-color)
+
+        (vector-copy!
+          segment-start
+          segment-end)
+      )
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-casting! ((self fisher-game))
+  (cond
+    ((= (-> self cast-state) 'ready)
+      (fisher-restore-normal-background!)
+
+      (draw-mod-menu-text-custom
+        "PRESS <PAD_X> TO CAST"
+        256
+        160
+        #f
+        #t
+        #f)
+
+      (when (cpad-pressed? 0 x)
+        (cpad-clear! 0 x)
+        (set! (-> self cast-state) 'charging)
+        (set! (-> self cast-charge) 0.0)
+        (set! (-> self cast-charge-direction) 1.0))
+    )
+
+    ((= (-> self cast-state) 'charging)
+        (fisher-restore-normal-background!)
+
+        (fisher-draw-cast-bar
+          (-> self cast-charge))
+
+        (when (cpad-pressed? 0 x)
+          (cpad-clear! 0 x)
+          (fisher-start-cast! self))
+
+        (when (= (-> self cast-state) 'charging)
+          (+!
+            (-> self cast-charge)
+            (*
+              (-> self cast-charge-direction)
+              (-> *display* seconds-per-frame)))
+
+          (cond
+            ((>= (-> self cast-charge) 1.0)
+              (set!
+                (-> self cast-charge)
+                1.0)
+
+              (set!
+                (-> self cast-charge-direction)
+                -1.0)
+            )
+
+            ((<= (-> self cast-charge) 0.0)
+              (set!
+                (-> self cast-charge)
+                0.0)
+
+              (fisher-reset-cast! self)
+            )
+          )
+        )
+      )
+
+    ((= (-> self cast-state) 'casting)
+      (fisher-update-cast-arc! self)
+      (fisher-update-reel-hint! self)
+      (fisher-camera-follow-lure! self)
+      (fisher-update-underwater-background! self)
+      (fisher-update-camera-bubbles! self)
+      (fisher-draw-line-hp-bar)
+      (fisher-draw-line! self)
+    )
+
+    ((= (-> self cast-state) 'water-entry)
+      (fisher-update-water-entry! self)
+      (fisher-camera-follow-lure! self)
+      (fisher-update-reel-hint! self)
+      (fisher-update-underwater-background! self)
+      (fisher-update-camera-bubbles! self)
+      (fisher-draw-line-hp-bar)
+      (fisher-draw-line! self)
+    )
+
+    ((= (-> self cast-state) 'line-active)
+      (fisher-update-lure! self)
+      (fisher-camera-follow-lure! self)
+      (fisher-update-reel-hint! self)
+      (fisher-update-underwater-background! self)
+      (fisher-update-camera-bubbles! self)
+      (fisher-draw-line-hp-bar)
+      (fisher-draw-line! self)
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-face-jak-right-side! ((self fisher-game))
+  (when *target*
+    (let ((jak-forward (new 'stack-no-clear 'vector))
+          (jak-rot (new 'stack-no-clear 'matrix)))
+
+      (vector-copy!
+        jak-forward
+        (-> self playfield-axis))
+
+      (set! (-> jak-forward y) 0.0)
+      (set! (-> jak-forward w) 0.0)
+
+      (vector-normalize!
+        jak-forward
+        1.0)
+
+      (forward-down->inv-matrix
+        jak-rot
+        jak-forward
+        (-> *camera* local-down))
+
+      (matrix->quaternion
+        (-> *target* control quat-for-control)
+        jak-rot)
+
+      (quaternion-copy!
+        (-> *target* control quat)
+        (-> *target* control quat-for-control))
+
+      (rot->dir-targ!
+        (-> *target* control))
+    )
+  )
+
+  (none)
+)
+
+(defun spawn-fisher-game
+  ((loc string)
+   (player-pos vector)
+   (camera-pos vector)
+   (water-height float)
+   (camera-angle float)
+   (playfield-angle float))
+
+  (let ((angles
+          (new 'stack-no-clear 'vector)))
+
+    (set!
+      (-> angles x)
+      camera-angle)
+
+    (set!
+      (-> angles y)
+      playfield-angle)
+
+    (set!
+      (-> angles z)
+      0.0)
+
+    (set!
+      (-> angles w)
+      0.0)
+
+    (set!
+      *fisher-game*
+      (process-spawn
+        fisher-game
+        loc
+        player-pos
+        camera-pos
+        water-height
+        angles
+        :name "fisher-game"
+        *active-pool*))
+  )
+
+  (none)
+)
+
+(defstate idle (fisher-game)
+    :virtual #t
+    :code (behavior ()
+        (loop
+            (when (<= (vector-vector-distance (target-pos 0) (-> self pos)) (meters 5))
+                (draw-mod-menu-text-custom
+                "PRESS <PAD_CIRCLE> TO START FISHING"
+                256
+                160
+                #f
+                #t
+                #f)
+                (when (cpad-pressed? 0 circle)
+                  (cpad-clear! 0 circle)
+                  (set! (-> self camera-state) 'before-cast)
+                  (send-event *camera* 'change-state cam-fixed 0)
+                  (go-virtual fishing)
+                )
+            )
+            (suspend)
+        )
+    )
+)
+
+(defstate fishing (fisher-game)
+  :virtual #t
+
+  :enter
+    (behavior ()
+      (process-grab? *target*)
+      (play-main-music "fishing-theme-a.wav" (the int (-> *setting-control* current sfx-volume)))
+      (set! (-> self stored-music-vol) (-> *setting-control* current music-volume))
+      (set-setting! 'music-volume 'abs 0.0 0)
+      (set!
+        (-> self saved-camera-read-analog)
+        *camera-read-analog*)
+
+      (set!
+        (-> self saved-external-cam-mode)
+        *external-cam-mode*)
+
+      (set! *camera-read-analog* #f)
+      (set! *external-cam-mode* #f)
+
+      (fisher-reset-cast! self)
+    )
+
+  :code
+    (behavior ()
+      (loop
+        (when (= (-> self camera-state) 'before-cast)
+          (fisher-face-jak-right-side! self)
+          (fisher-camera-before-cast! self)
+        )
+
+        (fisher-update-casting! self)
+
+        (when
+          (and
+            (= (-> self cast-state) 'ready)
+            (cpad-pressed? 0 triangle))
+
+          (cpad-clear! 0 triangle)
+          (go-virtual exit)
+        )
+
+        (cpad-clear! 0 x)
+        (cpad-clear! 0 circle)
+        (cpad-clear! 0 square)
+        (cpad-clear! 0 triangle)
+
+        (suspend)
+      )
+    )
+)
+
+(defstate exit (fisher-game)
+  :virtual #t
+  :code
+    (behavior ()
+      (set!
+        *camera-read-analog*
+        (-> self saved-camera-read-analog))
+
+      (set!
+        *external-cam-mode*
+        (-> self saved-external-cam-mode))
+      (remove-setting! 'music-volume)
+      (stop-main-music)
+      (send-event
+        *camera*
+        'change-state
+        *camera-base-mode*
+        (seconds 0.5))
+
+      (process-release? *target*)
+      (go-virtual idle)
+    )
+)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Begin function defintions.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -82,6 +2353,26 @@
   ;; Code here runs every time jak spawns (loading a file new game or death)
   ;;uncomment this to use custom music for custom levels - the function is in mod-common-functions.gc
   ;;(process-spawn-function process music-manager-proc)
+  (spawn-fisher-game
+  "sandover-dock"
+
+  (new 'static 'vector
+    :x (meters -31.6360)
+    :y (meters 2.3620)
+    :z (meters 91.6117)
+    :w 1.0)
+
+  (new 'static 'vector
+    :x (meters -22.4873)
+    :y (meters 9.6994)
+    :z (meters 75.4411)
+    :w 1.0)
+
+  (meters 0)
+
+  (degrees 0)
+
+  (degrees 90))
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))

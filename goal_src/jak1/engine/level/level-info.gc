@@ -167,6 +167,25 @@
              :disp1 #f)
         (new 'static
              'continue-point
+             :name "village1-dock"
+             :level 'village1
+             :trans
+             (new 'static 'vector :x (meters -32.8256) :y (meters 2.3620) :z (meters 106.2401) :w 1.0)
+             :quat
+             (new 'static 'quaternion :y -0.9889 :w -0.148)
+             :camera-trans
+             (new 'static 'vector :x (meters -32.8256) :y (meters 2.3620) :z (meters 106.2401) :w 1.0)
+             :camera-rot
+             (new 'static 'array float 9 -0.8947 0.0 -0.4464 0.1082 0.9701 -0.2169 0.4331 -0.2424 -0.868)
+             :load-commands
+             '()
+             :vis-nick 'vi1
+             :lev0 'village1
+             :disp0 'display
+             :lev1 'beach
+             :disp1 #f)
+        (new 'static
+             'continue-point
              :name "village1-intro"
              :level 'village1
              :flags (continue-flags warp sage-intro)
