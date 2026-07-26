@@ -781,11 +781,12 @@
   this)
 
 (defmethod init-from-entity! ((this money) (arg0 entity-actor))
-  (initialize this)
-  (process-drawable-from-entity! this (-> this entity))
-  (initialize-params this 0 (the-as float 1024.0))
-  (update-transforms! (-> this root))
-  (go (method-of-object this wait))
+  ;; Prevent level-authored money from becoming an active process.
+  (process-entity-status!
+    this
+    (entity-perm-status dead)
+    #t)
+  (deactivate this)
   (none))
 
 (defbehavior money-init-by-other money ((arg0 vector) (arg1 vector) (arg2 fact-info) (arg3 entity-actor))
@@ -1141,12 +1142,12 @@
   this)
 
 (defmethod init-from-entity! ((this fuel-cell) (arg0 entity-actor))
-  (initialize this)
-  (process-drawable-from-entity! this (-> this entity))
-  (initialize-params this 0 (the-as float 1024.0))
-  (logclear! (-> this fact options) (fact-options can-collect))
-  (update-transforms! (-> this root))
-  (go (method-of-object this wait))
+  ;; Prevent level-authored fuel cells from becoming active processes.
+  (process-entity-status!
+    this
+    (entity-perm-status dead)
+    #t)
+  (deactivate this)
   (none))
 
 (defbehavior fuel-cell-init-by-other fuel-cell ((arg0 vector) (arg1 vector) (arg2 fact-info) (arg3 entity-actor))
@@ -1392,8 +1393,6 @@
             ((= v1-2 (pickup-type eco-red)) eco-red)
             ((= v1-2 (pickup-type eco-yellow)) eco-yellow)
             ((= v1-2 (pickup-type eco-green)) health)
-            ((= v1-2 (pickup-type money)) money)
-            ((= v1-2 (pickup-type fuel-cell)) fuel-cell)
             ((= v1-2 (pickup-type buzzer)) buzzer)
             (else eco-pill))))
   (init-from-entity! this arg0)
@@ -1491,28 +1490,15 @@
                          (set! sv-192 (-> sv-128 ppointer))
                          v1-52)))
                sv-192)
+              ;; Money may only be awarded directly through get-pickup.
               ((= v1-25 (pickup-type money))
-               (let ((sv-144 (get-process *pickup-dead-pool* money #x4000)))
-                 (set! v1-58
-                       (when sv-144
-                         (set! sv-192 (the-as (pointer process) v1-58))
-                         ((method-of-type money activate) (the-as money sv-144) arg4 'money (the-as pointer #x70004000))
-                         (run-now-in-process sv-144 money-init-by-other arg0 s1-0 s0-0 (-> self entity))
-                         (set! sv-192 (-> sv-144 ppointer))
-                         v1-58)))
-               sv-192)
+                (set! sv-48 0)
+                #f)
+
+              ;; Fuel cells may only be awarded directly through get-pickup.
               ((= v1-25 (pickup-type fuel-cell))
-               (set! (-> s0-0 pickup-spawn-amount) arg2)
-               (let ((sv-160 (get-process *pickup-dead-pool* fuel-cell #x4000)))
-                 (set! v1-64
-                       (when sv-160
-                         (set! sv-192 (the-as (pointer process) v1-64))
-                         ((method-of-type fuel-cell activate) (the-as fuel-cell sv-160) arg4 'fuel-cell (the-as pointer #x70004000))
-                         (run-now-in-process sv-160 fuel-cell-init-by-other arg0 s1-0 s0-0 (-> self entity))
-                         (set! sv-192 (-> sv-160 ppointer))
-                         v1-64)))
-               (set! sv-48 0)
-               sv-48)
+                (set! sv-48 0)
+                #f)
               ((= v1-25 (pickup-type buzzer))
                (set! (-> s0-0 pickup-spawn-amount) arg2)
                (let ((sv-176 (get-process *pickup-dead-pool* buzzer #x4000)))
