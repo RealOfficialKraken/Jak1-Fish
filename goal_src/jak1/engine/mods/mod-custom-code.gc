@@ -21,11 +21,12 @@
 (define *fisher-line-hp-max* 100.0)
 (define *fisher-line-hp* 100.0)
 (define *fisher-line-broken?* #f)
-(define *fisher-saved-fog* (new 'global 'vector))
-(define *fisher-fog-overridden?* #f)
 (define *singlefish-session-id* 0)
 (define *singlefish-session-active?* #f)
 (define *fisher-in-debug?* #f)
+(define *fisher-underwater-haze-override?* #f)
+(define *fisher-underwater-haze-color*
+  (new 'global 'vector))
 (define *fisher-spawn-player-pos*
   (new 'global 'vector))
 (define *singlefish-dead-pool*
@@ -75,15 +76,21 @@
 
 (defpart 3572
   :init-specs
-  ((:texture (bigpuff effects))
+  ((:texture (lakedrop effects))
    (:num 1.0)
-   (:scale-x (meters 80.0))
-   (:scale-y (meters 28.0))
-   (:r 12.0)
-   (:g 28.0)
-   (:b 34.0)
-   (:a 56.0)
-   (:timer (seconds 0.08))
+   (:scale-x (meters 0.035) (meters 0.075))
+   (:scale-y :copy scale-x)
+   (:r 190.0 40.0)
+   (:g 225.0 30.0)
+   (:b 255.0 20.0)
+   (:a 48.0 40.0)
+   (:vel-x (meters -0.0015) (meters 0.003))
+   (:vel-y (meters 0.0008) (meters 0.0035))
+   (:vel-z (meters -0.0015) (meters 0.003))
+   (:scalevel-x (meters 0.000006))
+   (:scalevel-y :copy scalevel-x)
+   (:fade-a -0.045)
+   (:timer (seconds 8.0) (seconds 6.0))
    (:flags (bit2 bit3))))
 
 (defskelgroup *fish-net-sgc*
@@ -299,19 +306,9 @@
 
 
 (defun fisher-restore-normal-background! ()
-  (when
-    (and
-      *sky-tng-data*
-      *fisher-fog-overridden?*)
-
-    (set!
-      (-> *sky-tng-data* fog quad)
-      (-> *fisher-saved-fog* quad))
-
-    (set!
-      *fisher-fog-overridden?*
-      #f)
-  )
+  (set!
+    *fisher-underwater-haze-override?*
+    #f)
 
   (none)
 )
@@ -710,6 +707,12 @@
 
 (deftype eco-drum (singlefish-base)
   ())
+
+(define-extern fisher-debug-line!
+  (function vector vector rgba none))
+
+(define-extern fisher-hook-target!
+  (function fisher-game vector vector))
 
 (defbehavior fisher-game-init-by-other fisher-game
   ((location-id int)
@@ -1269,116 +1272,25 @@
   (none)
 )
 
-(defun fisher-force-underwater-horizon! ((r float) (g float) (b float))
-  (when
-    (and
-      *time-of-day-context*
-      *math-camera*
-      (-> *time-of-day-context* moods 0))
+(defun fisher-force-underwater-horizon!
+  ((r float)
+   (g float)
+   (b float))
 
-    (let* ((mood
-             (-> *time-of-day-context* moods 0))
+  (set-vector!
+    *fisher-underwater-haze-color*
+    r
+    g
+    b
+    128.0)
 
-           (fog-hour
-             (-> mood fog-interp hour 4))
-
-           (snapshot-1
-             (-> fog-hour snapshot1))
-
-           (snapshot-2
-             (-> fog-hour snapshot2))
-
-           (fog-blend
-             (-> fog-hour morph-start))
-
-           (fog-1
-             (-> mood mood-fog-table data snapshot-1))
-
-           (fog-2
-             (-> mood mood-fog-table data snapshot-2))
-
-           (green-fog-dists
-             (new 'stack-no-clear 'vector)))
-
-      (vector4-lerp!
-        green-fog-dists
-        (-> fog-1 fog-dists)
-        (-> fog-2 fog-dists)
-        fog-blend)
-
-      (set-vector!
-        (-> *time-of-day-context* current-fog fog-color)
-        r
-        g
-        b
-        128.0)
-
-      (set-vector!
-        (-> *time-of-day-context* current-fog erase-color)
-        r
-        g
-        b
-        128.0)
-
-      (set!
-        (-> *time-of-day-context* current-fog fog-dists quad)
-        (-> green-fog-dists quad))
-
-      (set!
-        *fog-color*
-        (new 'static
-          'rgba
-          :r (the int r)
-          :g (the int g)
-          :b (the int b)
-          :a #x80))
-
-      (set!
-        (-> *time-of-day-context* erase-color)
-        (new 'static
-          'rgba
-          :r (the int r)
-          :g (the int g)
-          :b (the int b)
-          :a #x80))
-
-      (set!
-        (-> *math-camera* fog-start)
-        (-> green-fog-dists x))
-
-      (set!
-        (-> *math-camera* fog-end)
-        (-> green-fog-dists y))
-
-      (set!
-        (-> *math-camera* fog-max)
-        (-> green-fog-dists z))
-
-      (set!
-        (-> *math-camera* fog-min)
-        (-> green-fog-dists w))
-
-      (dotimes (i 12)
-        (set!
-          (-> sky-base-polygons i col x)
-          r)
-
-        (set!
-          (-> sky-base-polygons i col y)
-          g)
-
-        (set!
-          (-> sky-base-polygons i col z)
-          b)
-
-        (set!
-          (-> sky-base-polygons i col w)
-          128.0))
-    )
-  )
+  (set!
+    *fisher-underwater-haze-override?*
+    #t)
 
   (none)
 )
+
 
 (defun fisher-remove-lure-snake! ((self fisher-game))
   (when
@@ -1497,6 +1409,62 @@
     (set! (-> dst w) 0.0))
 
   dst)
+
+(defun fisher-draw-hook-point-debug!
+  ((self fisher-game))
+
+  (when *fisher-in-debug?*
+    (let ((hook-point
+            (new 'stack-no-clear 'vector))
+
+          (left
+            (new 'stack-no-clear 'vector))
+
+          (right
+            (new 'stack-no-clear 'vector))
+
+          (top
+            (new 'stack-no-clear 'vector))
+
+          (bottom
+            (new 'stack-no-clear 'vector))
+
+          (front
+            (new 'stack-no-clear 'vector))
+
+          (back
+            (new 'stack-no-clear 'vector))
+
+          (color
+            (new 'static 'rgba
+              :r #xff
+              :g #x30
+              :b #xff
+              :a #xff)))
+
+      (fisher-hook-target!
+        self
+        hook-point)
+
+      (singlefish-vector-copy-safe! left hook-point)
+      (singlefish-vector-copy-safe! right hook-point)
+      (singlefish-vector-copy-safe! top hook-point)
+      (singlefish-vector-copy-safe! bottom hook-point)
+      (singlefish-vector-copy-safe! front hook-point)
+      (singlefish-vector-copy-safe! back hook-point)
+
+      (-! (-> left x) (meters 0.35))
+      (+! (-> right x) (meters 0.35))
+      (+! (-> top y) (meters 0.35))
+      (-! (-> bottom y) (meters 0.35))
+      (+! (-> front z) (meters 0.35))
+      (-! (-> back z) (meters 0.35))
+
+      (fisher-debug-line! left right color)
+      (fisher-debug-line! top bottom color)
+      (fisher-debug-line! front back color)))
+
+  (none))
 
 (defun fisher-update-lure-snake! ((self fisher-game))
   (when
@@ -1761,7 +1729,6 @@
               hook-facing
               (-> self hooked-fish-facing))
 
-            (set! (-> hook-facing y) 0.0)
             (set! (-> hook-facing w) 0.0)
 
             (when
@@ -1770,9 +1737,12 @@
                   hook-facing)
                 0.001)
 
-              (singlefish-vector-copy-safe!
+              (singlefish-vector-scale-safe!
                 hook-facing
-                (-> self lure-cast-axis)))
+                (-> self playfield-axis)
+                -1.0)
+
+              (set! (-> hook-facing y) 0.72))
 
             (singlefish-vector-normalize-safe!
               hook-facing
@@ -1823,6 +1793,9 @@
       (set!
         (-> snake root trans quad)
         (-> root-pos quad))
+
+      (fisher-draw-hook-point-debug!
+        self)
 
       (set-vector!
         (-> snake root scale)
@@ -2378,199 +2351,133 @@
 
   dst)
 
+(defun fisher-restore-sky-base-position! ()
+  (set! (-> sky-base-polygons 0 pos y) 0.0)
+  (set! (-> sky-base-polygons 1 pos y) 0.0)
+  (set! (-> sky-base-polygons 3 pos y) 0.0)
+  (set! (-> sky-base-polygons 4 pos y) 0.0)
+  (set! (-> sky-base-polygons 6 pos y) 0.0)
+  (set! (-> sky-base-polygons 7 pos y) 0.0)
+  (set! (-> sky-base-polygons 9 pos y) 0.0)
+  (set! (-> sky-base-polygons 10 pos y) 0.0)
+
+  (none))
+
+
 (defun fisher-launch-background-mist!
   ((self fisher-game))
 
-  (let ((mist-center
-          (new 'stack-no-clear 'vector))
+  (when
+    (and
+      (-> self casted?)
+      (-> self camera-underwater?))
 
-        (mist-pos
-          (new 'stack-no-clear 'vector))
+    (let ((particle-pos
+            (new 'stack-no-clear 'vector))
 
-        (side-axis
-          (new 'stack-no-clear 'vector))
+          (side-axis
+            (new 'stack-no-clear 'vector))
 
-        (mist-color
-          (new 'stack-no-clear 'vector))
+          (forward-distance
+            (rand-vu-float-range
+              (meters 5.0)
+              (meters 55.0)))
 
-        (wave-x
-          0.0)
+          (side-distance
+            (rand-vu-float-range
+              (meters -28.0)
+              (meters 28.0)))
 
-        (wave-y
-          0.0)
+          (depth
+            (rand-vu-float-range
+              (meters 2.5)
+              (meters 18.0))))
 
-        (fade
-          0.0))
+      (set!
+        (-> side-axis x)
+        (-> self playfield-axis z))
 
-    (set!
-      (-> side-axis x)
-      (-> self playfield-axis z))
+      (set!
+        (-> side-axis y)
+        0.0)
 
-    (set!
-      (-> side-axis y)
-      0.0)
+      (set!
+        (-> side-axis z)
+        (- (-> self playfield-axis x)))
 
-    (set!
-      (-> side-axis z)
-      (- (-> self playfield-axis x)))
+      (set!
+        (-> side-axis w)
+        0.0)
 
-    (set!
-      (-> side-axis w)
-      0.0)
+      (vector-normalize!
+        side-axis
+        1.0)
 
-    (vector-normalize!
-      side-axis
-      1.0)
+      (vector+float*!
+        particle-pos
+        (-> self fishing-player-pos)
+        (-> self playfield-axis)
+        forward-distance)
 
-    (set!
-      wave-x
-      (*
-        (meters 2.0)
-        (sin
-          (*
-            (degrees 42.0)
-            (-> self background-mist-time)))))
+      (vector+float*!
+        particle-pos
+        particle-pos
+        side-axis
+        side-distance)
 
-    (set!
-      wave-y
-      (*
-        (meters 1.0)
-        (sin
-          (+
-            (degrees 90.0)
-            (*
-              (degrees 30.0)
-              (-> self background-mist-time))))))
-
-    (set!
-      fade
-      (+
-        0.72
-        (*
-          0.18
-          (sin
-            (*
-              (degrees 54.0)
-              (-> self background-mist-time))))))
-
-    (vector+float*!
-      mist-center
-      (-> self fishing-player-pos)
-      (-> self playfield-axis)
-      (meters 62.5))
-
-    (set!
-      (-> mist-center y)
-      (+
+      (set!
+        (-> particle-pos y)
         (- (-> self water-level)
-           (meters 32.0))
-        wave-y))
+           depth))
 
-    (set!
-      (-> mist-center w)
-      1.0)
+      (set!
+        (-> particle-pos w)
+        1.0)
 
-    (fisher-background-color!
-      mist-color)
-
-    (set!
-      (-> *part-id-table* 3572 init-specs 4 initial-valuef)
-      (* (-> mist-color x) 0.35))
-
-    (set!
-      (-> *part-id-table* 3572 init-specs 5 initial-valuef)
-      (* (-> mist-color y) 0.35))
-
-    (set!
-      (-> *part-id-table* 3572 init-specs 6 initial-valuef)
-      (* (-> mist-color z) 0.35))
-
-    (set!
-      (-> *part-id-table* 3572 init-specs 7 initial-valuef)
-      (* 56.0 fade))
-
-    (vector+float*!
-      mist-pos
-      mist-center
-      side-axis
-      (+ (meters -24.0) wave-x))
-
-    (launch-particles
-      :system *sp-particle-system-2d*
-      (-> *part-id-table* 3572)
-      mist-pos)
-
-    (vector+float*!
-      mist-pos
-      mist-center
-      side-axis
-      (+ (meters -12.0) wave-x))
-
-    (launch-particles
-      :system *sp-particle-system-2d*
-      (-> *part-id-table* 3572)
-      mist-pos)
-
-    (vector+float*!
-      mist-pos
-      mist-center
-      side-axis
-      wave-x)
-
-    (launch-particles
-      :system *sp-particle-system-2d*
-      (-> *part-id-table* 3572)
-      mist-pos)
-
-    (vector+float*!
-      mist-pos
-      mist-center
-      side-axis
-      (+ (meters 12.0) wave-x))
-
-    (launch-particles
-      :system *sp-particle-system-2d*
-      (-> *part-id-table* 3572)
-      mist-pos)
-
-    (vector+float*!
-      mist-pos
-      mist-center
-      side-axis
-      (+ (meters 24.0) wave-x))
-
-    (launch-particles
-      :system *sp-particle-system-2d*
-      (-> *part-id-table* 3572)
-      mist-pos))
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 3572)
+        particle-pos)))
 
   (none))
+
 
 (defun fisher-update-background-mist!
   ((self fisher-game))
 
-  (cond
-    ((and
-       (or
-         (= (-> self cast-state) 'water-entry)
-         (= (-> self cast-state) 'line-active))
-       (<
-         (-> self lure-pos y)
-         (-> self water-level)))
+  (let ((dt
+          (-> *display* seconds-per-frame)))
 
-      (+!
-        (-> self background-mist-time)
-        (-> *display* seconds-per-frame))
+    (cond
+      ((and
+         (-> self casted?)
+         (-> self camera-underwater?))
 
-      (fisher-launch-background-mist!
-        self))
+        (-!
+          (-> self background-mist-time)
+          dt)
 
-    (else
-      (set!
-        (-> self background-mist-time)
-        0.0)))
+        (when
+          (<=
+            (-> self background-mist-time)
+            0.0)
+
+          (fisher-launch-background-mist!
+            self)
+
+          (set!
+            (-> self background-mist-time)
+            (rand-vu-float-range
+              0.045
+              0.11))))
+
+      (else
+        (set!
+          (-> self background-mist-time)
+          0.0))))
 
   (none))
+
 
 (defun fisher-force-underwater-background! ()
   (when *time-of-day-context*
@@ -3755,14 +3662,24 @@
       (set! (-> self scared-time) 5.0)
       (go-virtual singlefish-scared))
 
-    (singlefish-vector-copy-safe!
-      forward
-      (-> owner playfield-axis))
-
-    (singlefish-face-vector! self forward)
-
     (cond
       ((-> self fighting?)
+        (singlefish-vector-copy-safe!
+          forward
+          (-> owner playfield-axis))
+
+        (set! (-> forward y) 0.0)
+        (set! (-> forward w) 0.0)
+
+        (singlefish-vector-normalize-safe!
+          forward
+          1.0)
+
+        (singlefish-face-vector!
+          self
+          forward)
+
+
         (-! (-> self fight-time) dt)
         (+! (-> self fight-phase) (* (degrees 285.0) dt))
 
@@ -3800,6 +3717,22 @@
           (set! (-> self next-fight-time) (rand-vu-float-range 1.5 4.5))))
 
       (else
+        (singlefish-vector-scale-safe!
+          forward
+          (-> owner playfield-axis)
+          -1.0)
+
+        (set! (-> forward y) 0.72)
+        (set! (-> forward w) 0.0)
+
+        (singlefish-vector-normalize-safe!
+          forward
+          1.0)
+
+        (singlefish-face-vector!
+          self
+          forward)
+
         (-! (-> self next-fight-time) dt)
 
         (cond
@@ -4006,7 +3939,14 @@
 
   (set! (-> self base-scale) base-scale)
   (set! (-> self visual-scale) base-scale)
-  (set! (-> self swim-speed) swim-speed)
+  (set!
+    (-> self swim-speed)
+    (*
+      swim-speed
+      (rand-vu-float-range
+        0.70
+        1.35)))
+
   (set! (-> self nose-offset) nose-offset)
   (set! (-> self model-forward-sign) model-forward-sign)
 
@@ -6427,13 +6367,20 @@
   ((self fisher-game)
    (dst vector))
 
-  (singlefish-vector-copy-safe!
-    dst
-    (-> self lure-pos))
+  (cond
+    ((-> self lure-snake)
+      (singlefish-vector-copy-safe!
+        dst
+        (->
+          (the-as manipy
+            (-> (-> self lure-snake) 0 self))
+          root
+          trans)))
 
-  (-!
-    (-> dst y)
-    (meters 1.5))
+    (else
+      (singlefish-vector-copy-safe!
+        dst
+        (-> self lure-pos))))
 
   (set! (-> dst w) 1.0)
   dst)
@@ -6480,110 +6427,261 @@
 
   (none))
 
+(defun fisher-hooked-fish-mouth-offset
+  ((self fisher-game))
+
+  (cond
+    ((< (-> self hooked-fish-slot) 0)
+      (meters 0.42))
+
+    ((= (fisher-fish-species self (-> self hooked-fish-slot)) 1)
+      (meters 0.55))
+
+    ((= (fisher-fish-species self (-> self hooked-fish-slot)) 2)
+      (meters 0.48))
+
+    (else
+      (meters 0.42))))
+
+(defun fisher-begin-hook-transition!
+  ((self fisher-game)
+   (fish-proc manipy)
+   (hook-pos vector))
+
+  (let ((facing
+          (new 'stack-no-clear 'vector))
+
+        (mouth-pos
+          (new 'stack-no-clear 'vector))
+
+        (mouth-offset
+          (fisher-hooked-fish-mouth-offset self)))
+
+    (singlefish-vector-sub-safe!
+      facing
+      hook-pos
+      (-> fish-proc root trans))
+
+    (set! (-> facing w) 0.0)
+
+    (when
+      (<=
+        (singlefish-vector-length-safe facing)
+        0.001)
+
+      (singlefish-vector-scale-safe!
+        facing
+        (-> self playfield-axis)
+        -1.0))
+
+    (singlefish-vector-normalize-safe!
+      facing
+      1.0)
+
+    (singlefish-vector-copy-safe!
+      (-> self hooked-fish-facing)
+      facing)
+
+    (singlefish-vector-add-scaled-safe!
+      mouth-pos
+      (-> fish-proc root trans)
+      facing
+      mouth-offset)
+
+    (singlefish-vector-copy-safe!
+      (-> self hooked-fish-last-hook-pos)
+      mouth-pos))
+
+  (none))
+
 (defun fisher-animate-hooked-fish!
   ((self fisher-game)
    (fish-proc manipy)
    (hook-pos vector)
    (fighting? symbol))
 
-  (let* ((dt
-           (-> *display* seconds-per-frame))
+  (let ((target-facing
+          (new 'stack-no-clear 'vector))
 
-         (desired-facing
-           (new 'stack-no-clear 'vector))
+        (smoothed-facing
+          (new 'stack-no-clear 'vector))
 
-         (smoothed-facing
-           (new 'stack-no-clear 'vector))
+        (side-axis
+          (new 'stack-no-clear 'vector))
 
-         (desired-root
-           (new 'stack-no-clear 'vector))
+        (active-hook
+          (new 'stack-no-clear 'vector))
 
-         (smoothed-root
-           (new 'stack-no-clear 'vector))
+        (root-pos
+          (new 'stack-no-clear 'vector))
 
-         (down
-           (new 'stack-no-clear 'vector))
+        (down
+          (new 'stack-no-clear 'vector))
 
-         (rot
-           (new 'stack-no-clear 'matrix))
+        (rot
+          (new 'stack-no-clear 'matrix))
 
-         (turn-blend
-           (fmin
-             1.0
-             (* 5.5 dt)))
+        (dt
+          (-> *display* seconds-per-frame))
 
-         (position-blend
-           (fmin
-             1.0
-             (* 9.0 dt))))
+        (face-blend
+          0.0)
 
-    (singlefish-vector-sub-safe!
-      desired-facing
-      hook-pos
-      (-> self hooked-fish-last-hook-pos))
-
-    (when
-      (<=
-        (singlefish-vector-length-safe
-          desired-facing)
-        (meters 0.001))
-
-      (singlefish-vector-copy-safe!
-        desired-facing
-        (-> self lure-cast-axis))
-
-      (singlefish-vector-normalize-safe!
-        desired-facing
-        (if fighting? 1.0 -1.0)))
-
-    (when fighting?
-      (let ((fight-side
-              (new 'stack-no-clear 'vector))
-
-            (fight-angle
-              (* 0.5
-                 (+
-                   1.0
-                   (sin
-                     (-> self fish-fight-phase))))))
-
-        (set! (-> fight-side x) (-> self playfield-axis z))
-        (set! (-> fight-side y) 0.0)
-        (set! (-> fight-side z) (- (-> self playfield-axis x)))
-        (set! (-> fight-side w) 0.0)
-
-        (singlefish-vector-normalize-safe!
-          fight-side
+        (hook-blend
           1.0)
 
-        (vector-lerp!
-          desired-facing
+        (turn-angle
+          0.0)
+
+        (fight-pitch
+          0.0)
+
+        (mouth-offset
+          (fisher-hooked-fish-mouth-offset self)))
+
+    (set!
+      (-> side-axis x)
+      (-> (-> self playfield-axis) z))
+
+    (set!
+      (-> side-axis y)
+      0.0)
+
+    (set!
+      (-> side-axis z)
+      (- (-> (-> self playfield-axis) x)))
+
+    (set!
+      (-> side-axis w)
+      0.0)
+
+    (singlefish-vector-normalize-safe!
+      side-axis
+      1.0)
+
+    (cond
+      (fighting?
+        (set!
+          turn-angle
+          (fmin
+            (degrees 180.0)
+            (-> self fish-fight-phase)))
+
+        (singlefish-vector-scale-safe!
+          target-facing
           (-> self playfield-axis)
-          fight-side
-          fight-angle)
+          (- (cos turn-angle)))
 
-        (set! (-> desired-facing y) 0.0)
-        (set! (-> desired-facing w) 0.0)
+        (singlefish-vector-add-scaled-safe!
+          target-facing
+          target-facing
+          side-axis
+          (sin turn-angle))
 
-        (singlefish-vector-normalize-safe!
-          desired-facing
-          1.0)))
+        (when
+          (>=
+            (-> self fish-fight-phase)
+            (degrees 180.0))
 
-    (when
-      (<=
-        (singlefish-vector-length-safe
-          (-> self hooked-fish-facing))
-        0.001)
+          (set!
+            fight-pitch
+            (*
+              0.28
+              (sin
+                (-
+                  (-> self fish-fight-phase)
+                  (degrees 180.0))))))
 
-      (singlefish-vector-copy-safe!
-        (-> self hooked-fish-facing)
-        desired-facing))
+        (set!
+          (-> target-facing y)
+          fight-pitch))
 
-    (vector-lerp!
-      smoothed-facing
-      (-> self hooked-fish-facing)
-      desired-facing
-      turn-blend)
+      (else
+        (cond
+          ((> (-> self fish-fight-phase) 0.0)
+            (-!
+              (-> self fish-fight-phase)
+              (* (degrees 360.0) dt))
+
+            (when
+              (< (-> self fish-fight-phase) 0.0)
+
+              (set!
+                (-> self fish-fight-phase)
+                0.0))
+
+            (set!
+              turn-angle
+              (-> self fish-fight-phase))
+
+            (singlefish-vector-scale-safe!
+              target-facing
+              (-> self playfield-axis)
+              (- (cos turn-angle)))
+
+            (singlefish-vector-add-scaled-safe!
+              target-facing
+              target-facing
+              side-axis
+              (sin turn-angle))
+
+            (set!
+              (-> target-facing y)
+              0.0))
+
+          (else
+            (singlefish-vector-scale-safe!
+              target-facing
+              (-> self playfield-axis)
+              -1.0)
+
+            (set!
+              (-> target-facing y)
+              0.72)))))
+
+    (set! (-> target-facing w) 0.0)
+
+    (singlefish-vector-normalize-safe!
+      target-facing
+      1.0)
+
+    (set!
+      face-blend
+      (fmin
+        1.0
+        (* dt 6.5)))
+
+    (set!
+      (-> smoothed-facing x)
+      (+
+        (-> (-> self hooked-fish-facing) x)
+        (*
+          (-
+            (-> target-facing x)
+            (-> (-> self hooked-fish-facing) x))
+          face-blend)))
+
+    (set!
+      (-> smoothed-facing y)
+      (+
+        (-> (-> self hooked-fish-facing) y)
+        (*
+          (-
+            (-> target-facing y)
+            (-> (-> self hooked-fish-facing) y))
+          face-blend)))
+
+    (set!
+      (-> smoothed-facing z)
+      (+
+        (-> (-> self hooked-fish-facing) z)
+        (*
+          (-
+            (-> target-facing z)
+            (-> (-> self hooked-fish-facing) z))
+          face-blend)))
+
+    (set! (-> smoothed-facing w) 0.0)
 
     (singlefish-vector-normalize-safe!
       smoothed-facing
@@ -6593,26 +6691,60 @@
       (-> self hooked-fish-facing)
       smoothed-facing)
 
-    (singlefish-vector-copy-safe!
-      desired-root
-      hook-pos)
+    (when
+      (= (-> self fish-state) 'hook-window)
 
-    (vector-lerp!
-      smoothed-root
-      (-> fish-proc root trans)
-      desired-root
-      position-blend)
+      (set!
+        hook-blend
+        (fmin
+          1.0
+          (* dt 7.5))))
+
+    (set!
+      (-> active-hook x)
+      (+
+        (-> (-> self hooked-fish-last-hook-pos) x)
+        (*
+          (-
+            (-> hook-pos x)
+            (-> (-> self hooked-fish-last-hook-pos) x))
+          hook-blend)))
+
+    (set!
+      (-> active-hook y)
+      (+
+        (-> (-> self hooked-fish-last-hook-pos) y)
+        (*
+          (-
+            (-> hook-pos y)
+            (-> (-> self hooked-fish-last-hook-pos) y))
+          hook-blend)))
+
+    (set!
+      (-> active-hook z)
+      (+
+        (-> (-> self hooked-fish-last-hook-pos) z)
+        (*
+          (-
+            (-> hook-pos z)
+            (-> (-> self hooked-fish-last-hook-pos) z))
+          hook-blend)))
+
+    (set! (-> active-hook w) 1.0)
+
+    (singlefish-vector-copy-safe!
+      (-> self hooked-fish-last-hook-pos)
+      active-hook)
+
+    (singlefish-vector-add-scaled-safe!
+      root-pos
+      active-hook
+      smoothed-facing
+      (- mouth-offset))
 
     (set!
       (-> fish-proc root trans quad)
-      (-> smoothed-root quad))
-
-    (set! (-> smoothed-facing y) 0.0)
-    (set! (-> smoothed-facing w) 0.0)
-
-    (singlefish-vector-normalize-safe!
-      smoothed-facing
-      1.0)
+      (-> root-pos quad))
 
     (set-vector!
       down
@@ -6628,11 +6760,7 @@
 
     (matrix->quaternion
       (-> fish-proc root quat)
-      rot)
-
-    (singlefish-vector-copy-safe!
-      (-> self hooked-fish-last-hook-pos)
-      hook-pos))
+      rot))
 
   (none))
 
@@ -6996,9 +7124,10 @@
                     (when
                       (<= remaining (meters 0.20))
 
-                      (set!
-                        (-> fish-proc root trans quad)
-                        (-> hook-target quad))
+                      (fisher-begin-hook-transition!
+                        self
+                        fish-proc
+                        hook-target)
 
                       (cond
                         ((-> self fish-scare-on-arrival?)
@@ -7026,9 +7155,11 @@
                     self
                     hook-target)
 
-                  (set!
-                    (-> fish-proc root trans quad)
-                    (-> hook-target quad))
+                  (fisher-animate-hooked-fish!
+                    self
+                    fish-proc
+                    hook-target
+                    #f)
 
                   (-!
                     (-> self fish-hook-time)
@@ -7074,7 +7205,11 @@
 
                       (set!
                         (-> self fish-fighting?)
-                        #f)))
+                        #f)
+
+                      (set!
+                        (-> self fish-fight-phase)
+                        (degrees 180.0))))
 
                   (when
                     (and
@@ -7846,19 +7981,27 @@
 (defun fisher-update-underwater-background! ((self fisher-game))
   (fisher-update-camera-water! self)
   (fisher-update-underwater-waves! self)
+  (fisher-restore-sky-base-position!)
+
+  (when
+    (-> self casted?)
+
+    (set!
+      *particles-flag*
+      #t))
 
   (cond
     ((-> self camera-underwater?)
-      (fisher-force-underwater-background!)
-    )
+      (fisher-force-underwater-background!))
 
     (else
-      (fisher-restore-normal-background!)
-    )
-  )
+      (set!
+        *fisher-underwater-haze-override?*
+        #f)))
 
   (none)
 )
+
 
 (defun fisher-update-water-entry! ((self fisher-game))
   (let* ((dt
@@ -8227,17 +8370,6 @@
       (set! (-> self fish-fight-base-y) (-> self lure-pos y))
       (set! (-> self reel-camera-blend) 0.0)
 
-      (fisher-hook-target!
-        self
-        (-> self hooked-fish-last-hook-pos))
-
-      (singlefish-vector-copy-safe!
-        (-> self hooked-fish-facing)
-        (-> self lure-cast-axis))
-
-      (singlefish-vector-normalize-safe!
-        (-> self hooked-fish-facing)
-        -1.0)
       (set! (-> self fish-hook-time) 2.0)
       (set! (-> self fish-fight-time) 0.0)
       (set! (-> self fish-fighting?) #f))
@@ -8712,6 +8844,7 @@
 
       (singlefish-end-session! self)
       (fisher-remove-lure-snake! self)
+      (fisher-restore-normal-background!)
       (process-release? *target*)
       (go-virtual idle)
     )
