@@ -113,7 +113,6 @@
 
 (defun art-group-load-check ((arg0 string) (arg1 kheap) (arg2 int))
   "Load and check an art-group file. this only runs if we're using debug memory."
-  (when *debug-segment*
     #|
 (with-sp (protect sp
       (if (< sp *stack-top*)
@@ -132,7 +131,7 @@
          (the-as art-group #f))
         (else (login s3-1))))
     ;;))
-    ))
+)
 
 (defmethod set-pending-file ((this external-art-buffer) (arg0 string) (arg1 int) (arg2 handle) (arg3 float))
   "Request a new file to be loaded into this buffer."

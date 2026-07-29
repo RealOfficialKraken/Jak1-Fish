@@ -306,7 +306,7 @@
       (if *target* (stop 'debug) (start 'play (get-or-create-continue! *game-info*))))
     ;; reinitialize to title-start with left, up, select
     (if (and (cpad-hold? 0 left) (cpad-hold? 0 up) (cpad-pressed? 0 select))
-      (initialize! *game-info* 'game (the-as game-save #f) "title-start"))
+      (launch-main-mmenu))
     ;; push R3 to print global heap status. not very useful.
     (if (cpad-pressed? 1 r3) (inspect global))
     ;; push R3 to display IOP memory stats

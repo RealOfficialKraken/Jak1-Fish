@@ -229,6 +229,12 @@
        (/ (* 10.0 (the float current-orbs)) (the float total-orbs))
        (/ (* 10.0 (the float current-buzzers)) (the float total-buzzers)))))
 
+(define-extern main-menu-request-new-game-transition!
+  (function none))
+
+(define-extern main-menu-exit-for-load!
+  (function none))
+
 (define *progress-save-info* (new 'global 'mc-slot-info))
 
 ;; og:preserve-this
@@ -282,6 +288,7 @@
       (((progress-screen memcard-creating)) (auto-save-command 'create-file 0 0 this))
       (((progress-screen memcard-loading))
        (set! (-> *progress-state* last-slot-saved) (-> *progress-state* which))
+       (main-menu-exit-for-load!)
        (sound-volume-off)
        (auto-save-command 'restore 0 (-> *progress-state* which) this))
       (((progress-screen memcard-saving))
@@ -295,6 +302,7 @@
        (while (handle->process (-> *game-info* auto-save-proc))
         (suspend))
        ;; load
+       (main-menu-exit-for-load!)
        (sound-volume-off)
        (auto-save-command 'restore 0 (-> *progress-state* which) this)       
        )
@@ -754,10 +762,9 @@
                 (set! (-> this next-display-state) (progress-screen memcard-data-exists))))
              ((and (= (-> this display-state) (progress-screen save-game-title)) (= (-> this option-index) 4))
               (sound-play "starts-options")
-              (sound-volume-off)
               (set! (-> *game-info* mode) 'play)
-              (initialize! *game-info* 'game (the-as game-save #f) "intro-start")
-              (set-master-mode 'game))
+              (set-blackout-frames 0)
+              (main-menu-request-new-game-transition!))
              (else (sound-play "cursor-options") (set! (-> this next-display-state) (progress-screen invalid)))))
           (((progress-screen memcard-insert))
            (sound-play "cursor-options")
@@ -780,19 +787,17 @@
              ;; og:preserve-this PAL & NTSC-J patch here
              ((= (-> this display-state-stack 0) (progress-screen title))
               (sound-play "cursor-options")
-              (sound-volume-off)
               (set! (-> *game-info* mode) 'play)
-              (initialize! *game-info* 'game (the-as game-save #f) "intro-start")
-              (set-master-mode 'game))
+              (set-blackout-frames 0)
+              (main-menu-request-new-game-transition!))
              (else (sound-play "cursor-options") (set! (-> this next-display-state) (progress-screen invalid)))))
           (((progress-screen memcard-no-space) (progress-screen memcard-not-inserted) (progress-screen memcard-not-formatted))
            (cond
              ((= (-> this display-state-stack 0) (progress-screen title))
               (sound-play "start-options")
-              (sound-volume-off)
               (set! (-> *game-info* mode) 'play)
-              (initialize! *game-info* 'game (the-as game-save #f) "intro-start")
-              (set-master-mode 'game))
+              (set-blackout-frames 0)
+              (main-menu-request-new-game-transition!))
              ((nonzero? (-> this display-state-stack 0)) (sound-play "start-options") (set-master-mode 'game))
              (else (sound-play "cursor-options") (set! (-> this next-display-state) (progress-screen invalid)))))
           (((progress-screen memcard-error-loading)
@@ -831,10 +836,18 @@
            (cond
              ((-> *progress-state* yes-no-choice)
               (sound-play "start-options")
-              (sound-volume-off)
+
+              ;; Fully close Progress before rebuilding the custom title.
+              ;; Do not use sound-volume-off here.
+              (hide-progress-screen)
+              (set-master-mode 'game)
+              (set-blackout-frames 0)
               (set! (-> *game-info* mode) 'play)
-              (initialize! *game-info* 'game (the-as game-save #f) "title-start"))
-             (else (sound-play "cursor-options") (set! (-> this next-display-state) (progress-screen invalid)))))
+              (launch-main-mmenu))
+
+             (else
+              (sound-play "cursor-options")
+              (set! (-> this next-display-state) (progress-screen invalid)))))
           (((progress-screen memcard-format))
            (cond
              ((-> *progress-state* yes-no-choice)
@@ -843,10 +856,9 @@
              ;; og:preserve-this NTSC-J patch here
              ((= (-> this display-state-stack 0) (progress-screen title))
               (sound-play "start-options")
-              (sound-volume-off)
               (set! (-> *game-info* mode) 'play)
-              (initialize! *game-info* 'game (the-as game-save #f) "intro-start")
-              (set-master-mode 'game))
+              (set-blackout-frames 0)
+              (main-menu-request-new-game-transition!))
              (else (sound-play "cursor-options") (set! (-> this next-display-state) (progress-screen invalid)))))))))
   0
   (none))
@@ -1182,9 +1194,9 @@
                       ((= (-> *pc-settings* speedrunner-mode?) #t) (speedrun-start-full-game-run))
                       ;; start the game normally
                       (else
-                       (initialize! *game-info* 'game (the-as game-save #f) "intro-start")
-                       (set! (-> *setting-control* default auto-save) gp-1))))
-                  (set-master-mode 'game))
+                       (set! (-> *setting-control* default auto-save) gp-1)
+                       (main-menu-request-new-game-transition!))))
+                  (none))
                  (else (set! v0-0 -1) (set! (-> self next-display-state) (the-as progress-screen v0-0)) v0-0)))
               (((progress-screen memcard-formatting))
                (set! (-> self force-transition) #t)

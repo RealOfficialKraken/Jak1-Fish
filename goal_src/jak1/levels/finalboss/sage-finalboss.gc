@@ -441,7 +441,7 @@
       (when (= (current-status (-> self tasks)) (task-status invalid))
         (cond
           ((not (-> self credits-played)) (set! (-> self kick-the-credits) #t))
-          (else (set-blackout-frames 0) (initialize! *game-info* 'game (the-as game-save #f) "title-start"))))
+          (else (set-blackout-frames 0) (launch-main-mmenu))))
       (let ((a0-4 (handle->process (-> self redsage)))) (if a0-4 (deactivate a0-4)))
       (let ((a0-8 (handle->process (-> self bluesage)))) (if a0-8 (deactivate a0-8)))
       (let ((a0-12 (handle->process (-> self yellowsage)))) (if a0-12 (deactivate a0-12)))
@@ -580,7 +580,7 @@
     (behavior ()
       (when (= (current-status (-> self tasks)) (task-status invalid))
         (set-blackout-frames 0)
-        (initialize! *game-info* 'game (the-as game-save #f) "title-start")))
+        (launch-main-mmenu)))
   :code
     (behavior ()
       (local-vars (s5-0 symbol))

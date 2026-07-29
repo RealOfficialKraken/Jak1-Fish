@@ -10,6 +10,11 @@
 
 ;; DECOMP BEGINS
 
+(defun-extern turn-to-scene-camera vector vector none)
+(define in-main-menu? #f)
+(defun-extern launch-main-mmenu none)
+(define jak-warp-out #f)
+
 ;; Game parameters.
 (deftype game-bank (basic)
   ((life-max-default   float) ;; yes this life system works, but does nothing

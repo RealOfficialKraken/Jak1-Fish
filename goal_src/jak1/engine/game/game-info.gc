@@ -21,6 +21,7 @@
 ;; DECOMP BEGINS
 
 (define-extern runs-on-jak-death (function symbol none))
+(define-extern in-main-menu? symbol)
 
 ;; DECOMP BEGINS
 
@@ -147,7 +148,9 @@
     The cause can be 'dead if you die, or 'game to reset everything.
     If save-to-load is not #f will load data from that.
     If continue-point-override is not #f, will use that."
-  (local-vars (v0-0 int))
+  (local-vars
+    (v0-0 int))
+
   (case cause
     (('dead)
      ;; reload game-info because we died.  Increase death counts
@@ -178,12 +181,21 @@
      ;; we are doing a full restart.
      ;; reset everything!
      (reset-all-hint-controls)
-     (set-continue! this
-                    (cond
-                      (continue-point-override (empty) continue-point-override)
-                      ((!= *kernel-boot-message* 'play) "demo-start")
-                      (*debug-segment* "jungle-start")
-                      (else "title-start")))
+     (cond
+       (continue-point-override
+        (empty)
+        (set-continue! this continue-point-override))
+       ((!= *kernel-boot-message* 'play)
+        (set-continue! this "demo-start"))
+       (*debug-segment*
+        (set-continue! this "jungle-start"))
+       (else
+        (when
+          (not save-to-load)
+
+          (set! in-main-menu? #t))
+
+        (set-continue! this "game-start")))
      (set! (-> this auto-save-count) 0)
      (set! (-> *setting-control* default auto-save) #f)
      (set! (-> this money) 0.0)
