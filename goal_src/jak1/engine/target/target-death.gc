@@ -8,6 +8,7 @@
 
 ;; DECOMP BEGINS
 (define-extern runs-on-jak-spawn (function none))
+(define-extern launch-main-mmenu (function none))
 (define-extern jak-warp-out symbol)
 
 (defskelgroup *deathcam-sg*
@@ -221,7 +222,16 @@
               (set! (-> s5-6 quad) (-> (entity-by-name "training-part-1") extra trans quad))
               (set-continue! *game-info* "training-start")
 
-              (set-blackout-frames 0)
+              ;; Wait until the continue point's blackout has completely ended.
+              (until
+                (>=
+                  (current-time)
+                  (-> *game-info* blackout-time))
+
+                (suspend))
+
+              ;; Start the custom main menu only after game-start is fully loaded.
+              (launch-main-mmenu)
 
               (remove-setting! 'bg-a)
 

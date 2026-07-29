@@ -318,6 +318,8 @@ void extract_common(const ObjectFileDB& db,
   extract_single_ag("JUN.DGO", "catch-fishc-ag", db, tex_db, tfrag_level);
   extract_single_ag("JUN.DGO", "sharkey-ag", db, tex_db, tfrag_level);
   extract_single_ag("JUN.DGO", "junglesnake-ag", db, tex_db, tfrag_level);
+  extract_single_ag("VI2.DGO", "pontoonfive-ag", db, tex_db, tfrag_level);
+  extract_single_ag("VI2.DGO", "pontoonten-ag", db, tex_db, tfrag_level);
 
   // copy in any art groups that were requested to be common
   if (config.common_art_groups.size() > 0) {

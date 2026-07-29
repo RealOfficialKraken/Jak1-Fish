@@ -63,6 +63,9 @@
   (auto-save-command 'save 0 0 *default-pool*)
   (start-speedrun category))
 
+(define-extern main-menu-request-new-game-transition!
+  (function none))
+
 ;; used in title logo
 (define *quit-to-title* #f)
 
@@ -2857,14 +2860,14 @@
              ;; continue without saving
              ((and (= (-> obj display-state) (progress-screen save-game-title)) (= (-> obj option-index) 4))
               (sound-play "starts-options")
-              (sound-volume-off)
               (set! (-> *game-info* mode) 'play)
+
               (if (= (-> *pc-settings* speedrunner-mode?) #t)
-                ;; Start a new game differently if speedrunning mode is active
+                ;; Preserve the dedicated speedrun path.
                 (speedrun-start-full-game-run)
-                ;; start the game normally
-                (initialize! *game-info* 'game (the-as game-save #f) "intro-start"))
-              (set-master-mode 'game))
+
+                ;; Use the exact same seamless custom-menu handoff as New Game.
+                (main-menu-request-new-game-transition!)))
              (else (sound-play "cursor-options") (set! (-> obj next-display-state) (progress-screen invalid)))))
           (((progress-screen memcard-insert))
            (sound-play "cursor-options")
@@ -2952,11 +2955,11 @@
           (((progress-screen quit))
            (cond
              ((-> *progress-state* yes-no-choice)
-              (set! *quit-to-title* #t)
-              (sound-play "start-options")
-              (sound-volume-off)
-              (set! (-> *game-info* mode) 'play)
-              (launch-main-mmenu))
+              (initialize!
+                *game-info*
+                'game
+                (the-as game-save #f)
+                "game-start"))
              (else (sound-play "cursor-options") (set! (-> obj next-display-state) (progress-screen invalid)))))
           (((progress-screen memcard-format))
            (cond

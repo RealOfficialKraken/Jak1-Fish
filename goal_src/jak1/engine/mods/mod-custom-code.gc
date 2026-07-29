@@ -190,20 +190,23 @@ an orb
 (define *main-menu-made-by-y* 112.0)
 (define *main-menu-saved-music-volume* 0.0)
 
+;; Prevent the Training pontoon from being spawned every frame.
+(define *training-pontoon-spawned?* #f)
+
 (define *main-menu-saved-jak-pos*
   (new 'global 'vector))
 
 (define *main-menu-camera-pos*
   (new 'static 'vector
-    :x (meters -1313.3660)
+    :x (meters -1298.6059)
     :y (meters 152.8300)
-    :z (meters 1064.0238)
+    :z (meters 1044.6289)
     :w 1.0))
 
 (define *main-menu-target-pos*
   (new 'static 'vector
     :x (meters -1312.8790)
-    :y (meters 169.8300)
+    :y (meters 189.8300)
     :z (meters 1062.1098)
     :w 1.0))
 
@@ -255,17 +258,9 @@ an orb
       *target*
       *camera*)
 
-    (set-vector!
-      (-> *target* control trans)
-      (-> *main-menu-target-pos* x)
-      (-> *main-menu-target-pos* y)
-      (-> *main-menu-target-pos* z)
-      1.0)
+    (set-vector! (-> *target* control trans) (-> *main-menu-target-pos* x) (-> *main-menu-target-pos* y) (-> *main-menu-target-pos* z) 1.0)
 
-    (send-event
-      *camera*
-      'teleport-to-vector-start-string
-      *main-menu-camera-pos*))
+    (send-event *camera* 'teleport-to-vector-start-string *main-menu-camera-pos*))
 
   (none))
 
@@ -378,6 +373,658 @@ an orb
 
 (define-extern fisher-draw-retail-line!
   (function vector vector rgba none))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Standalone pontoon clone
+;;
+;; These types are owned by mod-custom-code. They do not instantiate the
+;; pontoon/pontoonfive/pontoonten process types from village2-obs.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(deftype swimmer-pontoon (rigid-body-platform)
+  ((anchor-point vector :inline)
+   (visual       (pointer manipy)))
+  (:states
+    swimmer-pontoon-die)
+  (:state-methods
+    swimmer-pontoon-float))
+
+(deftype swimmer-pontoonfive (swimmer-pontoon) ())
+(deftype swimmer-pontoonten (swimmer-pontoon) ())
+
+(defskelgroup *swimmer-pontoonfive-sg*
+  pontoonfive
+  pontoonfive-lod0-jg
+  pontoonfive-idle-ja
+  ((pontoonfive-lod0-mg (meters 20))
+   (pontoonfive-lod1-mg (meters 40))
+   (pontoonfive-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 5)
+  :longest-edge (meters 3.5))
+
+(defskelgroup *swimmer-pontoonten-sg*
+  pontoonten
+  pontoonten-lod0-jg
+  pontoonten-idle-ja
+  ((pontoonten-lod0-mg (meters 20))
+   (pontoonten-lod1-mg (meters 40))
+   (pontoonten-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 7)
+  :longest-edge (meters 4))
+
+(define *swimmer-pontoonfive-constants*
+  (new 'static
+    'rigid-body-platform-constants
+    :drag-factor 4.0
+    :buoyancy-factor 3.0
+    :max-buoyancy-depth (meters 3)
+    :gravity-factor 1.0
+    :gravity (meters 80)
+    :player-weight (meters 35)
+    :player-bonk-factor 1.0
+    :player-dive-factor 1.0
+    :player-force-distance (meters 1000)
+    :player-force-clamp (meters 1000000)
+    :player-force-timeout (seconds 0.1)
+    :explosion-force (meters 1000)
+    :linear-damping 0.98
+    :angular-damping 0.98
+    :control-point-count 4
+    :mass 2.0
+    :inertial-tensor-x (meters 2.5)
+    :inertial-tensor-y (meters 2)
+    :inertial-tensor-z (meters 3.2)
+    :idle-distance (meters 90)
+    :platform #t
+    :sound-name "pontoonten"))
+
+(define *swimmer-pontoonten-constants*
+  (new 'static
+    'rigid-body-platform-constants
+    :drag-factor 4.0
+    :buoyancy-factor 3.0
+    :max-buoyancy-depth (meters 3)
+    :gravity-factor 1.0
+    :gravity (meters 80)
+    :player-weight (meters 35)
+    :player-bonk-factor 1.0
+    :player-dive-factor 1.0
+    :player-force-distance (meters 1000)
+    :player-force-clamp (meters 1000000)
+    :player-force-timeout (seconds 0.1)
+    :explosion-force (meters 1000)
+    :linear-damping 0.98
+    :angular-damping 0.95
+    :control-point-count 4
+    :mass 4.0
+    :inertial-tensor-x (meters 5)
+    :inertial-tensor-y (meters 2)
+    :inertial-tensor-z (meters 3.2)
+    :idle-distance (meters 90)
+    :platform #t
+    :sound-name "pontoonten"))
+
+(defstate swimmer-pontoon-die (swimmer-pontoon)
+  :code
+  (behavior ()
+    (when (-> self visual)
+      (deactivate
+        (-> (-> self visual) 0))
+
+      (set!
+        (-> self visual)
+        (the-as (pointer manipy) #f)))
+
+    (cleanup-for-death self)
+    (deactivate self)))
+
+(defstate swimmer-pontoon-float (swimmer-pontoon)
+  :virtual #t
+
+  :event
+  (behavior
+    ((proc process)
+     (argc int)
+     (message symbol)
+     (block event-message-block))
+
+    (case message
+      (('die)
+        (go swimmer-pontoon-die))
+
+      (else
+        (rigid-body-platform-event-handler
+          proc
+          argc
+          message
+          block))))
+
+  :code
+  (behavior ()
+    (loop
+      ;; The rigid body owns collision and buoyancy. Keep the independent
+      ;; pontoon visual locked to that rigid-body transform.
+      (when (-> self visual)
+        (let ((visual-proc
+              (the-as manipy
+                (-> (-> self visual) 0 self))))
+
+          (set!
+            (-> visual-proc root trans quad)
+            (-> self root-overlay trans quad))
+
+          (set!
+            (-> visual-proc root quat quad)
+            (-> self root-overlay quat quad))))
+
+      (suspend)))
+
+  :post rigid-body-platform-post)
+
+(defmethod rigid-body-platform-method-23
+  ((this swimmer-pontoon) (time-step float))
+
+  (call-parent-method this time-step)
+
+  (rigid-body-platform-method-27
+    this
+    (-> this anchor-point))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-30
+  ((this swimmer-pontoonfive))
+
+  (let ((moving-shape
+        (new 'process
+          'collide-shape-moving
+          this
+          (collide-list-enum hit-by-player))))
+
+    (set!
+      (-> moving-shape dynam)
+      (copy *standard-dynamics* 'process))
+
+    (set!
+      (-> moving-shape reaction)
+      default-collision-reaction)
+
+    (set!
+      (-> moving-shape no-reaction)
+      (the-as
+        (function
+          collide-shape-moving
+          collide-shape-intersect
+          vector
+          vector
+          none)
+        nothing))
+
+    (alloc-riders moving-shape 1)
+
+    (let ((mesh
+          (new 'process
+            'collide-shape-prim-mesh
+            moving-shape
+            (the-as uint 0)
+            (the-as uint 0))))
+
+      (set!
+        (-> mesh prim-core collide-as)
+        (collide-kind enemy))
+
+      (set!
+        (-> mesh collide-with)
+        (collide-kind target))
+
+      (set!
+        (-> mesh prim-core action)
+        (collide-action solid rider-plat-sticky))
+
+      (set!
+        (-> mesh prim-core offense)
+        (collide-offense indestructible))
+
+      (set! (-> mesh transform-index) 0)
+
+      (set-vector!
+        (-> mesh local-sphere)
+        0.0
+        0.0
+        0.0
+        18432.0)
+
+      (set-root-prim! moving-shape mesh))
+
+    (set!
+      (-> moving-shape nav-radius)
+      (* 0.75
+        (-> moving-shape root-prim local-sphere w)))
+
+    (backup-collide-with-as moving-shape)
+
+    (set!
+      (-> this root-overlay)
+      moving-shape))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-31
+  ((this swimmer-pontoonfive))
+
+  (initialize-skeleton
+    this
+    *swimmer-pontoonfive-sg*
+    '())
+
+  (rigid-body-platform-method-29
+    this
+    *swimmer-pontoonfive-constants*)
+
+  (set! (-> this float-height-offset) 6144.0)
+  (set! (-> this root-overlay nav-radius) 12288.0)
+
+  (let ((point
+        (-> this control-point-array data 0)))
+    (set-vector!
+      (-> point local-pos)
+      9216.0
+      0.0
+      12083.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 1)))
+    (set-vector!
+      (-> point local-pos)
+      9216.0
+      0.0
+      -12083.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 2)))
+    (set-vector!
+      (-> point local-pos)
+      -9216.0
+      0.0
+      -12083.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 3)))
+    (set-vector!
+      (-> point local-pos)
+      -9216.0
+      0.0
+      12083.2
+      1.0))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-30
+  ((this swimmer-pontoonten))
+
+  (let ((moving-shape
+        (new 'process
+          'collide-shape-moving
+          this
+          (collide-list-enum hit-by-player))))
+
+    (set!
+      (-> moving-shape dynam)
+      (copy *standard-dynamics* 'process))
+
+    (set!
+      (-> moving-shape reaction)
+      default-collision-reaction)
+
+    (set!
+      (-> moving-shape no-reaction)
+      (the-as
+        (function
+          collide-shape-moving
+          collide-shape-intersect
+          vector
+          vector
+          none)
+        nothing))
+
+    (alloc-riders moving-shape 1)
+
+    (let ((mesh
+          (new 'process
+            'collide-shape-prim-mesh
+            moving-shape
+            (the-as uint 0)
+            (the-as uint 0))))
+
+      (set!
+        (-> mesh prim-core collide-as)
+        (collide-kind enemy))
+
+      (set!
+        (-> mesh collide-with)
+        (collide-kind target))
+
+      (set!
+        (-> mesh prim-core action)
+        (collide-action solid rider-plat-sticky))
+
+      (set!
+        (-> mesh prim-core offense)
+        (collide-offense indestructible))
+
+      (set! (-> mesh transform-index) 0)
+
+      (set-vector!
+        (-> mesh local-sphere)
+        0.0
+        0.0
+        0.0
+        25395.2)
+
+      (set-root-prim! moving-shape mesh))
+
+    (set!
+      (-> moving-shape nav-radius)
+      (* 0.75
+        (-> moving-shape root-prim local-sphere w)))
+
+    (backup-collide-with-as moving-shape)
+
+    (set!
+      (-> this root-overlay)
+      moving-shape))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-31
+  ((this swimmer-pontoonten))
+
+  (initialize-skeleton
+    this
+    *swimmer-pontoonten-sg*
+    '())
+
+  (rigid-body-platform-method-29
+    this
+    *swimmer-pontoonten-constants*)
+
+  (set! (-> this float-height-offset) 6144.0)
+  (set! (-> this root-overlay nav-radius) 20480.0)
+
+  (let ((point
+        (-> this control-point-array data 0)))
+    (set-vector!
+      (-> point local-pos)
+      17408.0
+      0.0
+      10035.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 1)))
+    (set-vector!
+      (-> point local-pos)
+      17408.0
+      0.0
+      -10035.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 2)))
+    (set-vector!
+      (-> point local-pos)
+      -17408.0
+      0.0
+      -10035.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 3)))
+    (set-vector!
+      (-> point local-pos)
+      -17408.0
+      0.0
+      10035.2
+      1.0))
+
+  0
+  (none))
+
+(defbehavior swimmer-pontoonfive-init-by-other
+  swimmer-pontoonfive
+  ((spawn-pos vector)
+   (rotation-degrees float))
+
+  (set!
+    (-> self visual)
+    (the-as (pointer manipy) #f))
+
+
+  (logior!
+    (-> self mask)
+    (process-mask platform))
+
+  (rigid-body-platform-method-30 self)
+  (rigid-body-platform-method-31 self)
+
+  (set!
+    (-> self root-overlay trans quad)
+    (-> spawn-pos quad))
+
+  (quaternion-axis-angle!
+    (-> self root-overlay quat)
+    0.0
+    1.0
+    0.0
+    (degrees rotation-degrees))
+
+  (set!
+    (-> self anchor-point quad)
+    (-> self root-overlay trans quad))
+
+  (set! (-> self water-anim) #f)
+
+  (set!
+    (-> self root-overlay pause-adjust-distance)
+    -122880.0)
+
+  ;; Use a separate local manipy for guaranteed visual submission.
+  (set!
+    (-> self visual)
+    (manipy-spawn
+      spawn-pos
+      #f
+      *swimmer-pontoonfive-sg*
+      #f
+      :from *default-dead-pool*
+      :to *default-pool*
+      :name "swimmer-pontoonfive-visual"))
+
+  (when (-> self visual)
+    (let ((visual-proc
+          (the-as manipy
+            (-> (-> self visual) 0 self))))
+
+      (send-event visual-proc 'anim-mode 'loop)
+
+      (send-event
+        visual-proc
+        'max-vis-dist
+        (meters 999999.0))
+
+      (set!
+        (-> visual-proc root trans quad)
+        (-> self root-overlay trans quad))
+
+      (set!
+        (-> visual-proc root quat quad)
+        (-> self root-overlay quat quad))))
+
+  ;; Finalize the rigid body after assigning the runtime transform.
+  (logclear!
+    (-> self draw status)
+    (draw-status hidden))
+
+  (logior!
+    (-> self skel status)
+    (janim-status inited))
+
+  (transform-post)
+  (ja-post)
+
+  (go-virtual swimmer-pontoon-float))
+
+(defbehavior swimmer-pontoonten-init-by-other
+  swimmer-pontoonten
+  ((spawn-pos vector)
+   (rotation-degrees float))
+
+  (set!
+    (-> self visual)
+    (the-as (pointer manipy) #f))
+
+
+  (logior!
+    (-> self mask)
+    (process-mask platform))
+
+  (rigid-body-platform-method-30 self)
+  (rigid-body-platform-method-31 self)
+
+  (set!
+    (-> self root-overlay trans quad)
+    (-> spawn-pos quad))
+
+  (quaternion-axis-angle!
+    (-> self root-overlay quat)
+    0.0
+    1.0
+    0.0
+    (degrees rotation-degrees))
+
+  (set!
+    (-> self anchor-point quad)
+    (-> self root-overlay trans quad))
+
+  (set! (-> self water-anim) #f)
+
+  (set!
+    (-> self root-overlay pause-adjust-distance)
+    -122880.0)
+
+  ;; Use a separate local manipy for guaranteed visual submission.
+  (set!
+    (-> self visual)
+    (manipy-spawn
+      spawn-pos
+      #f
+      *swimmer-pontoonten-sg*
+      #f
+      :from *default-dead-pool*
+      :to *default-pool*
+      :name "swimmer-pontoonten-visual"))
+
+  (when (-> self visual)
+    (let ((visual-proc
+          (the-as manipy
+            (-> (-> self visual) 0 self))))
+
+      (send-event visual-proc 'anim-mode 'loop)
+
+      (send-event
+        visual-proc
+        'max-vis-dist
+        (meters 999999.0))
+
+      (set!
+        (-> visual-proc root trans quad)
+        (-> self root-overlay trans quad))
+
+      (set!
+        (-> visual-proc root quat quad)
+        (-> self root-overlay quat quad))))
+
+  ;; Finalize the rigid body after assigning the runtime transform.
+  (logclear!
+    (-> self draw status)
+    (draw-status hidden))
+
+  (logior!
+    (-> self skel status)
+    (janim-status inited))
+
+  (transform-post)
+  (ja-post)
+
+  (go-virtual swimmer-pontoon-float))
+
+(defun-extern spawn-pontoon-swimmer vector int float none)
+
+(defun spawn-pontoon-swimmer
+  ((spawn-pos vector)
+   (pontoon-type int)
+   (rotation-degrees float))
+
+  (cond
+    ((= pontoon-type 0)
+      (process-spawn
+        swimmer-pontoonfive
+        spawn-pos
+        rotation-degrees
+        :name "swimmer-pontoonfive"
+        *active-pool*))
+
+    ((= pontoon-type 1)
+      (process-spawn
+        swimmer-pontoonten
+        spawn-pos
+        rotation-degrees
+        :name "swimmer-pontoonten"
+        *active-pool*))
+
+    (else
+      (format
+        0
+        "spawn-pontoon-swimmer: invalid type ~D; use 0 or 1.~%"
+        pontoon-type)))
+
+  (none))
+
+(defun maintain-training-pontoon! ()
+  (let ((inside
+        (when *level*
+          (level-get-target-inside *level*))))
+
+    (cond
+      ((and
+          inside
+          (= (-> inside name) 'training))
+
+        (when
+          (not *training-pontoon-spawned?*)
+
+          (spawn-pontoon-swimmer
+            (new 'static 'vector
+              :x (meters -1330.3963)
+              :y (meters 0.3323)
+              :z (meters 925.1775)
+              :w 1.0)
+            0
+            0.0)
+
+          (set! *training-pontoon-spawned?* #t)))
+
+      (else
+        (set! *training-pontoon-spawned?* #f))))
+
+  (none))
 
 (defun launch-main-mmenu ()
   (set!
@@ -618,7 +1265,9 @@ an orb
       (singlefish-vector-scale-safe!
         offset
         *main-menu-camera-forward*
-        (-> self depth))
+        (-
+          (-> self depth)
+          (meters 8.0)))
 
       (singlefish-vector-add-safe!
         position
@@ -891,31 +1540,58 @@ an orb
       (<= *main-menu-bubble-time* 0.0)
 
       (let ((bubble-pos
-            (new 'stack-no-clear 'vector)))
+          (new 'stack-no-clear 'vector))
 
-        (set-vector!
-          bubble-pos
-          (+
-            (-> *main-menu-camera-pos* x)
-            (rand-vu-float-range
-              (meters -8.0)
-              (meters 8.0)))
-          (+
-            (-> *main-menu-camera-pos* y)
-            (rand-vu-float-range
-              (meters 2.0)
-              (meters 7.0)))
-          (+
-            (-> *main-menu-camera-pos* z)
-            (rand-vu-float-range
-              (meters -4.0)
-              (meters 4.0)))
-          1.0)
+        (bubble-offset
+          (new 'stack-no-clear 'vector)))
 
-        (launch-particles
-          :system *sp-particle-system-2d*
-          (-> *part-id-table* 3574)
-          bubble-pos))
+      (main-menu-build-camera-basis!)
+
+      (vector-copy!
+        bubble-pos
+        *main-menu-camera-pos*)
+
+      ;; Put bubbles in the same closer screen field as the fish.
+      (singlefish-vector-scale-safe!
+        bubble-offset
+        *main-menu-camera-forward*
+        (rand-vu-float-range
+          (meters 1.0)
+          (meters 6.0)))
+
+      (singlefish-vector-add-safe!
+        bubble-pos
+        bubble-pos
+        bubble-offset)
+
+      (singlefish-vector-scale-safe!
+        bubble-offset
+        *main-menu-camera-right*
+        (rand-vu-float-range
+          (meters -8.0)
+          (meters 8.0)))
+
+      (singlefish-vector-add-safe!
+        bubble-pos
+        bubble-pos
+        bubble-offset)
+
+      (singlefish-vector-scale-safe!
+        bubble-offset
+        *main-menu-camera-up*
+        (rand-vu-float-range
+          (meters -8.0)
+          (meters -3.0)))
+
+      (singlefish-vector-add-safe!
+        bubble-pos
+        bubble-pos
+        bubble-offset)
+
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 3574)
+        bubble-pos))
 
       (set!
         *main-menu-bubble-time*
@@ -941,22 +1617,21 @@ an orb
 
       ((and
           (not (paused?))
-          *main-menu-music-paused-by-game?*)
-
-        ;; The new-game/title Progress screen has just closed.
-        ;; Stop the custom title music immediately on this first unpaused frame.
-        (when *main-menu-start-accepted?*
-          (stop-main-music))
+          *main-menu-progress-was-paused?*)
 
         (resume-main-music)
+
         (set! *main-menu-music-paused-by-game?* #f)
-
-        (when *main-menu-start-accepted?*
-          (cpad-clear! 0 start)
-          (cpad-clear! 0 x))
-
         (set! *main-menu-progress-was-paused?* #f)
-        (set! *main-menu-music-resumed?* #t))))
+        (set! *main-menu-music-resumed?* #t)
+
+        ;; Progress/title menu was closed. Return to the visible
+        ;; Fishing Legacy / PRESS START state.
+        (set! *main-menu-start-accepted?* #f)
+
+        ;; Consume the closing input so it cannot instantly reopen.
+        (cpad-clear! 0 start)
+        (cpad-clear! 0 x))))
 
   (none))
 
@@ -1074,11 +1749,12 @@ an orb
           #t
           #f))
 
+      ;; On the custom main menu, Start/X open the title progress menu.
+      ;; Clear Start immediately so normal gameplay pause cannot open too.
       (when
         (and
-          (and
-        (not *main-menu-start-accepted?*)
-        (not *main-menu-new-game-transition?*))
+          (not *main-menu-start-accepted?*)
+          (not *main-menu-new-game-transition?*)
           (or
             (cpad-pressed? 0 start)
             (cpad-pressed? 0 x)))
@@ -1168,13 +1844,13 @@ an orb
     (set! *main-menu-new-game-transition-requested?* #t)
     (set! *main-menu-start-accepted?* #t)
     (set! *main-menu-progress-was-paused?* #f)
-    (set! *main-menu-music-paused-by-game?* #f)
 
-    ;; Progress activation switches the game into 'progress master mode.
-    ;; hide-progress-screen only sends go-away, so explicitly return control
-    ;; to gameplay before beginning the custom camera sequence.
     (hide-progress-screen)
     (set-master-mode 'game)
+    (set-blackout-frames 0)
+
+    (set! *main-menu-music-paused-by-game?* #f)
+    (set! *main-menu-music-resumed?* #f)
 
     (sound-group-continue
       (sound-group
@@ -1199,8 +1875,10 @@ an orb
       *camera*
       (> (-> *camera* num-slaves) 0))
 
-    ;; Do not stop the menu music here. Keeping it alive removes the silent
-    ;; gap at the bottom of the pan before target-warp-in begins.
+    ;; This function is entered on the first unpaused frame that begins
+    ;; the custom camera transition, so stop the custom title music here.
+    (stop-main-music)
+
     (set-master-mode 'game)
     (set-blackout-frames 0)
 
@@ -2303,14 +2981,20 @@ an orb
 (define-extern fisher-hook-target! (function fisher-game vector vector))
 
 (defbehavior fisher-game-init-by-other fisher-game
-  ((location-id int) (vec vector) (camera-vec vector) (water-height float) (angles vector))
+  ((location-id int)
+   (vec vector)
+   (camera-vec vector)
+   (water-height float)
+   (angles vector))
 
   (set! (-> self location-id) location-id)
 
   (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
   (vector-copy! (-> self pos) vec)
 
-  (vector-copy! (-> self fishing-player-pos) *fisher-spawn-player-pos*)
+  (vector-copy!
+    (-> self fishing-player-pos)
+    *fisher-spawn-player-pos*)
 
   (vector-copy! (-> self fisher-cam) camera-vec)
 
@@ -5238,7 +5922,21 @@ an orb
     ((= suffix 5) "LEGENDARY")
     (else "GOLDEN")))
 
-(defun fisher-species-name ((species int)) (cond ((= species 1) "LARGEMOUTH ECOFISH") ((= species 2) "BABAK ECOFISH") (else "ECO DRUM")))
+(defun fisher-species-name
+  ((self fisher-game) (species int))
+
+  (cond
+    ((= species 1)
+      (if
+        (= (-> self location-id) 2)
+        "GOLDEN HOUR"
+        "LARGEMOUTH ECOFISH"))
+
+    ((= species 2)
+      "BABAK ECOFISH")
+
+    (else
+      "ECO DRUM")))
 
 (defun fisher-suffix-value-multiplier ((suffix int))
   (cond
@@ -5307,6 +6005,26 @@ an orb
 
   (none))
 
+(defun fisher-configure-training-lagoon-table! ((self fisher-game))
+  (let ((eco-count
+        (rand-vu-int-range 2 3))
+
+      (golden-hour-count
+        (rand-vu-int-range 4 5)))
+
+    (set! (-> self sandover-eco-count) eco-count)
+
+    ;; Reuse the secondary species slot for Golden Hour in this location.
+    (set! (-> self sandover-largemouth-count) golden-hour-count)
+
+    (fisher-assign-table-slots!
+      self
+      eco-count
+      golden-hour-count
+      0))
+
+  (none))
+
 (defun fisher-configure-jungle-pillar-table! ((self fisher-game))
   (let ((total-count 0)
       (eco-count 0)
@@ -5339,7 +6057,15 @@ an orb
   (none))
 
 (defun fisher-configure-location-table! ((self fisher-game))
-  (if (= (-> self location-id) 1) (fisher-configure-jungle-pillar-table! self) (fisher-configure-sandover-table! self))
+  (cond
+    ((= (-> self location-id) 1)
+      (fisher-configure-jungle-pillar-table! self))
+
+    ((= (-> self location-id) 2)
+      (fisher-configure-training-lagoon-table! self))
+
+    (else
+      (fisher-configure-sandover-table! self)))
 
   (none))
 
@@ -7797,6 +8523,7 @@ an orb
   (format
     *fish-ui-str*
     (fisher-species-name
+      self
       (-> self caught-fish-species)))
 
   *fish-ui-str*)
@@ -7974,26 +8701,40 @@ an orb
 )
 
 (defun spawn-fisher-game
-  ((location-id int) (fishnet-pos vector) (player-pos vector) (camera-pos vector) (water-height float) (camera-angle float) (playfield-angle float))
+  ((location-id int)
+   (fishnet-pos vector)
+   (player-pos vector)
+   (camera-pos vector)
+   (water-height float)
+   (camera-angle float)
+   (playfield-angle float))
 
   (let ((angles
         (new 'stack-no-clear 'vector)))
 
     (set! (-> angles x) camera-angle)
-
     (set! (-> angles y) playfield-angle)
-
     (set! (-> angles z) 0.0)
-
     (set! (-> angles w) 0.0)
 
-    (vector-copy! *fisher-spawn-player-pos* player-pos)
+    ;; Match the existing working fishing-area spawn path.
+    (vector-copy!
+      *fisher-spawn-player-pos*
+      player-pos)
 
-    (set! *fisher-game* (process-spawn fisher-game location-id fishnet-pos camera-pos water-height angles :name "fisher-game" *active-pool*))
-  )
+    (set!
+      *fisher-game*
+      (process-spawn
+        fisher-game
+        location-id
+        fishnet-pos
+        camera-pos
+        water-height
+        angles
+        :name "fisher-game"
+        *active-pool*)))
 
-  (none)
-)
+  (none))
 
 (defstate idle (fisher-game)
   :virtual #t
@@ -8093,6 +8834,16 @@ an orb
     (main-menu-update!)
   )
 
+  ;; Spawn the custom pontoon once while the player is inside Training.
+  (when
+    (and
+      *target*
+      (= (pause-allowed?) #t)
+      (= (paused?) #f)
+    )
+    (maintain-training-pontoon!)
+  )
+
   ;; ensure orb-placer is spawned/killed as requested, debug menu is updated
   (when *debug-segment* (orb-placer-maintenance))
   (none))
@@ -8172,6 +8923,40 @@ an orb
     (meters 0)
     (degrees -35)
     (degrees 55))
+
+  ;; Training lagoon fishing area.
+  (spawn-fisher-game
+    2
+
+    ;; Net / interaction point.
+    (new 'static 'vector
+      :x (meters -1332.0715)
+      :y (meters 1.1072)
+      :z (meters 922.7199)
+      :w 1.0)
+
+    ;; Target/Jak position while fishing.
+    (new 'static 'vector
+      :x (meters -1331.3082)
+      :y (meters 1.1357)
+      :z (meters 925.2125)
+      :w 1.0)
+
+    ;; Camera position.
+    (new 'static 'vector
+      :x (meters -1341.0826)
+      :y (meters 4.2468)
+      :z (meters 935.4356)
+      :w 1.0)
+
+    ;; Nearby water surface.
+    (meters 0.3323)
+
+    ;; Derived from the net-to-camera direction.
+    (degrees -35.3237)
+
+    ;; Fishing field is perpendicular to the camera axis.
+    (degrees 234))
 
   (none))
 

@@ -762,6 +762,7 @@
                 (set! (-> this next-display-state) (progress-screen memcard-data-exists))))
              ((and (= (-> this display-state) (progress-screen save-game-title)) (= (-> this option-index) 4))
               (sound-play "starts-options")
+              (set-continue! *game-info* "game-start")
               (set! (-> *game-info* mode) 'play)
               (set-blackout-frames 0)
               (main-menu-request-new-game-transition!))
@@ -787,6 +788,7 @@
              ;; og:preserve-this PAL & NTSC-J patch here
              ((= (-> this display-state-stack 0) (progress-screen title))
               (sound-play "cursor-options")
+              (set-continue! *game-info* "game-start")
               (set! (-> *game-info* mode) 'play)
               (set-blackout-frames 0)
               (main-menu-request-new-game-transition!))
@@ -795,6 +797,7 @@
            (cond
              ((= (-> this display-state-stack 0) (progress-screen title))
               (sound-play "start-options")
+              (set-continue! *game-info* "game-start")
               (set! (-> *game-info* mode) 'play)
               (set-blackout-frames 0)
               (main-menu-request-new-game-transition!))
@@ -836,14 +839,14 @@
            (cond
              ((-> *progress-state* yes-no-choice)
               (sound-play "start-options")
-
-              ;; Fully close Progress before rebuilding the custom title.
-              ;; Do not use sound-volume-off here.
-              (hide-progress-screen)
-              (set-master-mode 'game)
-              (set-blackout-frames 0)
+              (sound-volume-off)
               (set! (-> *game-info* mode) 'play)
-              (launch-main-mmenu))
+              (initialize!
+                *game-info*
+                'game
+                (the-as game-save #f)
+                "game-start")
+              (set-master-mode 'game))
 
              (else
               (sound-play "cursor-options")
@@ -856,6 +859,7 @@
              ;; og:preserve-this NTSC-J patch here
              ((= (-> this display-state-stack 0) (progress-screen title))
               (sound-play "start-options")
+              (set-continue! *game-info* "game-start")
               (set! (-> *game-info* mode) 'play)
               (set-blackout-frames 0)
               (main-menu-request-new-game-transition!))
