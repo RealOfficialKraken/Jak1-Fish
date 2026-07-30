@@ -1,0 +1,2095 @@
+;;-*-Lisp-*-
+(in-package goal)
+(bundles "JUN.DGO")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Fish tables, fish-slot management, gameplay fish spawning, fishing-area spawning, and pontoons
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defskelgroup *swimmer-pontoonfive-sg*
+  pontoonfive
+  pontoonfive-lod0-jg
+  pontoonfive-idle-ja
+  ((pontoonfive-lod0-mg (meters 20))
+   (pontoonfive-lod1-mg (meters 40))
+   (pontoonfive-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 5)
+  :longest-edge (meters 3.5))
+
+(defskelgroup *swimmer-pontoonten-sg*
+  pontoonten
+  pontoonten-lod0-jg
+  pontoonten-idle-ja
+  ((pontoonten-lod0-mg (meters 20))
+   (pontoonten-lod1-mg (meters 40))
+   (pontoonten-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 7)
+  :longest-edge (meters 4))
+
+(defstate swimmer-pontoon-die (swimmer-pontoon)
+  :code
+  (behavior ()
+    (when (-> self visual)
+      (deactivate
+        (-> (-> self visual) 0))
+
+      (set!
+        (-> self visual)
+        (the-as (pointer manipy) #f)))
+
+    (cleanup-for-death self)
+    (deactivate self)))
+
+(defstate swimmer-pontoon-float (swimmer-pontoon)
+  :virtual #t
+
+  :event
+  (behavior
+    ((proc process)
+     (argc int)
+     (message symbol)
+     (block event-message-block))
+
+    (case message
+      (('die)
+        (go swimmer-pontoon-die))
+
+      (else
+        (rigid-body-platform-event-handler
+          proc
+          argc
+          message
+          block))))
+
+  :code
+  (behavior ()
+    (loop
+      ;; The rigid body owns collision and buoyancy. Keep the independent
+      ;; pontoon visual locked to that rigid-body transform.
+      (when (-> self visual)
+        (let ((visual-proc
+              (the-as manipy
+                (-> (-> self visual) 0 self))))
+
+          (set!
+            (-> visual-proc root trans quad)
+            (-> self root-overlay trans quad))
+
+          (set!
+            (-> visual-proc root quat quad)
+            (-> self root-overlay quat quad))))
+
+      (suspend)))
+
+  :post rigid-body-platform-post)
+
+(defmethod rigid-body-platform-method-23
+  ((this swimmer-pontoon) (time-step float))
+
+  (call-parent-method this time-step)
+
+  (rigid-body-platform-method-27
+    this
+    (-> this anchor-point))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-30
+  ((this swimmer-pontoonfive))
+
+  (let ((moving-shape
+        (new 'process
+          'collide-shape-moving
+          this
+          (collide-list-enum hit-by-player))))
+
+    (set!
+      (-> moving-shape dynam)
+      (copy *standard-dynamics* 'process))
+
+    (set!
+      (-> moving-shape reaction)
+      default-collision-reaction)
+
+    (set!
+      (-> moving-shape no-reaction)
+      (the-as
+        (function
+          collide-shape-moving
+          collide-shape-intersect
+          vector
+          vector
+          none)
+        nothing))
+
+    (alloc-riders moving-shape 1)
+
+    (let ((mesh
+          (new 'process
+            'collide-shape-prim-mesh
+            moving-shape
+            (the-as uint 0)
+            (the-as uint 0))))
+
+      (set!
+        (-> mesh prim-core collide-as)
+        (collide-kind enemy))
+
+      (set!
+        (-> mesh collide-with)
+        (collide-kind target))
+
+      (set!
+        (-> mesh prim-core action)
+        (collide-action solid rider-plat-sticky))
+
+      (set!
+        (-> mesh prim-core offense)
+        (collide-offense indestructible))
+
+      (set! (-> mesh transform-index) 0)
+
+      (set-vector!
+        (-> mesh local-sphere)
+        0.0
+        0.0
+        0.0
+        18432.0)
+
+      (set-root-prim! moving-shape mesh))
+
+    (set!
+      (-> moving-shape nav-radius)
+      (* 0.75
+        (-> moving-shape root-prim local-sphere w)))
+
+    (backup-collide-with-as moving-shape)
+
+    (set!
+      (-> this root-overlay)
+      moving-shape))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-31
+  ((this swimmer-pontoonfive))
+
+  (initialize-skeleton
+    this
+    *swimmer-pontoonfive-sg*
+    '())
+
+  (rigid-body-platform-method-29
+    this
+    *swimmer-pontoonfive-constants*)
+
+  (set! (-> this float-height-offset) 6144.0)
+  (set! (-> this root-overlay nav-radius) 12288.0)
+
+  (let ((point
+        (-> this control-point-array data 0)))
+    (set-vector!
+      (-> point local-pos)
+      9216.0
+      0.0
+      12083.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 1)))
+    (set-vector!
+      (-> point local-pos)
+      9216.0
+      0.0
+      -12083.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 2)))
+    (set-vector!
+      (-> point local-pos)
+      -9216.0
+      0.0
+      -12083.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 3)))
+    (set-vector!
+      (-> point local-pos)
+      -9216.0
+      0.0
+      12083.2
+      1.0))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-30
+  ((this swimmer-pontoonten))
+
+  (let ((moving-shape
+        (new 'process
+          'collide-shape-moving
+          this
+          (collide-list-enum hit-by-player))))
+
+    (set!
+      (-> moving-shape dynam)
+      (copy *standard-dynamics* 'process))
+
+    (set!
+      (-> moving-shape reaction)
+      default-collision-reaction)
+
+    (set!
+      (-> moving-shape no-reaction)
+      (the-as
+        (function
+          collide-shape-moving
+          collide-shape-intersect
+          vector
+          vector
+          none)
+        nothing))
+
+    (alloc-riders moving-shape 1)
+
+    (let ((mesh
+          (new 'process
+            'collide-shape-prim-mesh
+            moving-shape
+            (the-as uint 0)
+            (the-as uint 0))))
+
+      (set!
+        (-> mesh prim-core collide-as)
+        (collide-kind enemy))
+
+      (set!
+        (-> mesh collide-with)
+        (collide-kind target))
+
+      (set!
+        (-> mesh prim-core action)
+        (collide-action solid rider-plat-sticky))
+
+      (set!
+        (-> mesh prim-core offense)
+        (collide-offense indestructible))
+
+      (set! (-> mesh transform-index) 0)
+
+      (set-vector!
+        (-> mesh local-sphere)
+        0.0
+        0.0
+        0.0
+        25395.2)
+
+      (set-root-prim! moving-shape mesh))
+
+    (set!
+      (-> moving-shape nav-radius)
+      (* 0.75
+        (-> moving-shape root-prim local-sphere w)))
+
+    (backup-collide-with-as moving-shape)
+
+    (set!
+      (-> this root-overlay)
+      moving-shape))
+
+  0
+  (none))
+
+(defmethod rigid-body-platform-method-31
+  ((this swimmer-pontoonten))
+
+  (initialize-skeleton
+    this
+    *swimmer-pontoonten-sg*
+    '())
+
+  (rigid-body-platform-method-29
+    this
+    *swimmer-pontoonten-constants*)
+
+  (set! (-> this float-height-offset) 6144.0)
+  (set! (-> this root-overlay nav-radius) 20480.0)
+
+  (let ((point
+        (-> this control-point-array data 0)))
+    (set-vector!
+      (-> point local-pos)
+      17408.0
+      0.0
+      10035.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 1)))
+    (set-vector!
+      (-> point local-pos)
+      17408.0
+      0.0
+      -10035.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 2)))
+    (set-vector!
+      (-> point local-pos)
+      -17408.0
+      0.0
+      -10035.2
+      1.0))
+
+  (let ((point
+        (-> this control-point-array data 3)))
+    (set-vector!
+      (-> point local-pos)
+      -17408.0
+      0.0
+      10035.2
+      1.0))
+
+  0
+  (none))
+
+(defbehavior swimmer-pontoonfive-init-by-other
+  swimmer-pontoonfive
+  ((spawn-pos vector)
+   (rotation-degrees float))
+
+  (set!
+    (-> self visual)
+    (the-as (pointer manipy) #f))
+
+
+  (logior!
+    (-> self mask)
+    (process-mask platform))
+
+  (rigid-body-platform-method-30 self)
+  (rigid-body-platform-method-31 self)
+
+  (set!
+    (-> self root-overlay trans quad)
+    (-> spawn-pos quad))
+
+  (quaternion-axis-angle!
+    (-> self root-overlay quat)
+    0.0
+    1.0
+    0.0
+    (degrees rotation-degrees))
+
+  (set!
+    (-> self anchor-point quad)
+    (-> self root-overlay trans quad))
+
+  (set! (-> self water-anim) #f)
+
+  (set!
+    (-> self root-overlay pause-adjust-distance)
+    -122880.0)
+
+  ;; Use a separate local manipy for guaranteed visual submission.
+  (set!
+    (-> self visual)
+    (manipy-spawn
+      spawn-pos
+      #f
+      *swimmer-pontoonfive-sg*
+      #f
+      :from *default-dead-pool*
+      :to *default-pool*
+      :name "swimmer-pontoonfive-visual"))
+
+  (when (-> self visual)
+    (let ((visual-proc
+          (the-as manipy
+            (-> (-> self visual) 0 self))))
+
+      (send-event visual-proc 'anim-mode 'loop)
+
+      (send-event
+        visual-proc
+        'max-vis-dist
+        (meters 999999.0))
+
+      (set!
+        (-> visual-proc root trans quad)
+        (-> self root-overlay trans quad))
+
+      (set!
+        (-> visual-proc root quat quad)
+        (-> self root-overlay quat quad))))
+
+  ;; Finalize the rigid body after assigning the runtime transform.
+  (logclear!
+    (-> self draw status)
+    (draw-status hidden))
+
+  (logior!
+    (-> self skel status)
+    (janim-status inited))
+
+  (transform-post)
+  (ja-post)
+
+  (go-virtual swimmer-pontoon-float))
+
+(defbehavior swimmer-pontoonten-init-by-other
+  swimmer-pontoonten
+  ((spawn-pos vector)
+   (rotation-degrees float))
+
+  (set!
+    (-> self visual)
+    (the-as (pointer manipy) #f))
+
+
+  (logior!
+    (-> self mask)
+    (process-mask platform))
+
+  (rigid-body-platform-method-30 self)
+  (rigid-body-platform-method-31 self)
+
+  (set!
+    (-> self root-overlay trans quad)
+    (-> spawn-pos quad))
+
+  (quaternion-axis-angle!
+    (-> self root-overlay quat)
+    0.0
+    1.0
+    0.0
+    (degrees rotation-degrees))
+
+  (set!
+    (-> self anchor-point quad)
+    (-> self root-overlay trans quad))
+
+  (set! (-> self water-anim) #f)
+
+  (set!
+    (-> self root-overlay pause-adjust-distance)
+    -122880.0)
+
+  ;; Use a separate local manipy for guaranteed visual submission.
+  (set!
+    (-> self visual)
+    (manipy-spawn
+      spawn-pos
+      #f
+      *swimmer-pontoonten-sg*
+      #f
+      :from *default-dead-pool*
+      :to *default-pool*
+      :name "swimmer-pontoonten-visual"))
+
+  (when (-> self visual)
+    (let ((visual-proc
+          (the-as manipy
+            (-> (-> self visual) 0 self))))
+
+      (send-event visual-proc 'anim-mode 'loop)
+
+      (send-event
+        visual-proc
+        'max-vis-dist
+        (meters 999999.0))
+
+      (set!
+        (-> visual-proc root trans quad)
+        (-> self root-overlay trans quad))
+
+      (set!
+        (-> visual-proc root quat quad)
+        (-> self root-overlay quat quad))))
+
+  ;; Finalize the rigid body after assigning the runtime transform.
+  (logclear!
+    (-> self draw status)
+    (draw-status hidden))
+
+  (logior!
+    (-> self skel status)
+    (janim-status inited))
+
+  (transform-post)
+  (ja-post)
+
+  (go-virtual swimmer-pontoon-float))
+
+(defun spawn-pontoon-swimmer
+  ((spawn-pos vector)
+   (pontoon-type int)
+   (rotation-degrees float))
+
+  (cond
+    ((= pontoon-type 0)
+      (process-spawn
+        swimmer-pontoonfive
+        spawn-pos
+        rotation-degrees
+        :name "swimmer-pontoonfive"
+        *active-pool*))
+
+    ((= pontoon-type 1)
+      (process-spawn
+        swimmer-pontoonten
+        spawn-pos
+        rotation-degrees
+        :name "swimmer-pontoonten"
+        *active-pool*))
+
+    (else
+      (format
+        0
+        "spawn-pontoon-swimmer: invalid type ~D; use 0 or 1.~%"
+        pontoon-type)))
+
+  (none))
+
+(defun maintain-training-pontoon! ()
+  (let ((inside
+        (when *level*
+          (level-get-target-inside *level*))))
+
+    (cond
+      ((and
+          inside
+          (= (-> inside name) 'training))
+
+        (when
+          (not *training-pontoon-spawned?*)
+
+          (spawn-pontoon-swimmer
+            (new 'static 'vector
+              :x (meters -1330.3963)
+              :y (meters 0.3323)
+              :z (meters 925.1775)
+              :w 1.0)
+            0
+            0.0)
+
+          (set! *training-pontoon-spawned?* #t)))
+
+      (else
+        (set! *training-pontoon-spawned?* #f))))
+
+  (none))
+
+(defun fisher-fish-distance ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-distance-0))
+    ((= slot 1) (-> self fish-distance-1))
+    ((= slot 2) (-> self fish-distance-2))
+    ((= slot 3) (-> self fish-distance-3))
+    ((= slot 4) (-> self fish-distance-4))
+    ((= slot 5) (-> self fish-distance-5))
+    ((= slot 6) (-> self fish-distance-6))
+    ((= slot 7) (-> self fish-distance-7))
+    ((= slot 8) (-> self fish-distance-8))
+    ((= slot 9) (-> self fish-distance-9))
+    ((= slot 10) (-> self fish-distance-10))
+    ((= slot 11) (-> self fish-distance-11))
+    ((= slot 12) (-> self fish-distance-12))
+    ((= slot 13) (-> self fish-distance-13))
+    ((= slot 14) (-> self fish-distance-14))
+    ((= slot 15) (-> self fish-distance-15))
+    ((= slot 16) (-> self fish-distance-16))
+    ((= slot 17) (-> self fish-distance-17))
+    ((= slot 18) (-> self fish-distance-18))
+    ((= slot 19) (-> self fish-distance-19))
+    ((= slot 20) (-> self fish-distance-20))
+    (else (-> self fish-distance-21))))
+
+(defun fisher-fish-lane ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-lane-0))
+    ((= slot 1) (-> self fish-lane-1))
+    ((= slot 2) (-> self fish-lane-2))
+    ((= slot 3) (-> self fish-lane-3))
+    ((= slot 4) (-> self fish-lane-4))
+    ((= slot 5) (-> self fish-lane-5))
+    ((= slot 6) (-> self fish-lane-6))
+    ((= slot 7) (-> self fish-lane-7))
+    ((= slot 8) (-> self fish-lane-8))
+    ((= slot 9) (-> self fish-lane-9))
+    ((= slot 10) (-> self fish-lane-10))
+    ((= slot 11) (-> self fish-lane-11))
+    ((= slot 12) (-> self fish-lane-12))
+    ((= slot 13) (-> self fish-lane-13))
+    ((= slot 14) (-> self fish-lane-14))
+    ((= slot 15) (-> self fish-lane-15))
+    ((= slot 16) (-> self fish-lane-16))
+    ((= slot 17) (-> self fish-lane-17))
+    ((= slot 18) (-> self fish-lane-18))
+    ((= slot 19) (-> self fish-lane-19))
+    ((= slot 20) (-> self fish-lane-20))
+    (else (-> self fish-lane-21))))
+
+(defun fisher-fish-depth ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-depth-0))
+    ((= slot 1) (-> self fish-depth-1))
+    ((= slot 2) (-> self fish-depth-2))
+    ((= slot 3) (-> self fish-depth-3))
+    ((= slot 4) (-> self fish-depth-4))
+    ((= slot 5) (-> self fish-depth-5))
+    ((= slot 6) (-> self fish-depth-6))
+    ((= slot 7) (-> self fish-depth-7))
+    ((= slot 8) (-> self fish-depth-8))
+    ((= slot 9) (-> self fish-depth-9))
+    ((= slot 10) (-> self fish-depth-10))
+    ((= slot 11) (-> self fish-depth-11))
+    ((= slot 12) (-> self fish-depth-12))
+    ((= slot 13) (-> self fish-depth-13))
+    ((= slot 14) (-> self fish-depth-14))
+    ((= slot 15) (-> self fish-depth-15))
+    ((= slot 16) (-> self fish-depth-16))
+    ((= slot 17) (-> self fish-depth-17))
+    ((= slot 18) (-> self fish-depth-18))
+    ((= slot 19) (-> self fish-depth-19))
+    ((= slot 20) (-> self fish-depth-20))
+    (else (-> self fish-depth-21))))
+
+(defun fisher-fish-direction ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-direction-0))
+    ((= slot 1) (-> self fish-direction-1))
+    ((= slot 2) (-> self fish-direction-2))
+    ((= slot 3) (-> self fish-direction-3))
+    ((= slot 4) (-> self fish-direction-4))
+    ((= slot 5) (-> self fish-direction-5))
+    ((= slot 6) (-> self fish-direction-6))
+    ((= slot 7) (-> self fish-direction-7))
+    ((= slot 8) (-> self fish-direction-8))
+    ((= slot 9) (-> self fish-direction-9))
+    ((= slot 10) (-> self fish-direction-10))
+    ((= slot 11) (-> self fish-direction-11))
+    ((= slot 12) (-> self fish-direction-12))
+    ((= slot 13) (-> self fish-direction-13))
+    ((= slot 14) (-> self fish-direction-14))
+    ((= slot 15) (-> self fish-direction-15))
+    ((= slot 16) (-> self fish-direction-16))
+    ((= slot 17) (-> self fish-direction-17))
+    ((= slot 18) (-> self fish-direction-18))
+    ((= slot 19) (-> self fish-direction-19))
+    ((= slot 20) (-> self fish-direction-20))
+    (else (-> self fish-direction-21))))
+
+(defun fisher-fish-speed ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-speed-0))
+    ((= slot 1) (-> self fish-speed-1))
+    ((= slot 2) (-> self fish-speed-2))
+    ((= slot 3) (-> self fish-speed-3))
+    ((= slot 4) (-> self fish-speed-4))
+    ((= slot 5) (-> self fish-speed-5))
+    ((= slot 6) (-> self fish-speed-6))
+    ((= slot 7) (-> self fish-speed-7))
+    ((= slot 8) (-> self fish-speed-8))
+    ((= slot 9) (-> self fish-speed-9))
+    ((= slot 10) (-> self fish-speed-10))
+    ((= slot 11) (-> self fish-speed-11))
+    ((= slot 12) (-> self fish-speed-12))
+    ((= slot 13) (-> self fish-speed-13))
+    ((= slot 14) (-> self fish-speed-14))
+    ((= slot 15) (-> self fish-speed-15))
+    ((= slot 16) (-> self fish-speed-16))
+    ((= slot 17) (-> self fish-speed-17))
+    ((= slot 18) (-> self fish-speed-18))
+    ((= slot 19) (-> self fish-speed-19))
+    ((= slot 20) (-> self fish-speed-20))
+    (else (-> self fish-speed-21))))
+
+(defun fisher-set-fish-distance! ((self fisher-game) (slot int) (value float))
+  (cond
+    ((= slot 0) (set! (-> self fish-distance-0) value))
+    ((= slot 1) (set! (-> self fish-distance-1) value))
+    ((= slot 2) (set! (-> self fish-distance-2) value))
+    ((= slot 3) (set! (-> self fish-distance-3) value))
+    ((= slot 4) (set! (-> self fish-distance-4) value))
+    ((= slot 5) (set! (-> self fish-distance-5) value))
+    ((= slot 6) (set! (-> self fish-distance-6) value))
+    ((= slot 7) (set! (-> self fish-distance-7) value))
+    ((= slot 8) (set! (-> self fish-distance-8) value))
+    ((= slot 9) (set! (-> self fish-distance-9) value))
+    ((= slot 10) (set! (-> self fish-distance-10) value))
+    ((= slot 11) (set! (-> self fish-distance-11) value))
+    ((= slot 12) (set! (-> self fish-distance-12) value))
+    ((= slot 13) (set! (-> self fish-distance-13) value))
+    ((= slot 14) (set! (-> self fish-distance-14) value))
+    ((= slot 15) (set! (-> self fish-distance-15) value))
+    ((= slot 16) (set! (-> self fish-distance-16) value))
+    ((= slot 17) (set! (-> self fish-distance-17) value))
+    ((= slot 18) (set! (-> self fish-distance-18) value))
+    ((= slot 19) (set! (-> self fish-distance-19) value))
+    ((= slot 20) (set! (-> self fish-distance-20) value))
+    (else (set! (-> self fish-distance-21) value)))
+  (none))
+
+(defun fisher-set-fish-lane! ((self fisher-game) (slot int) (value float))
+  (cond
+    ((= slot 0) (set! (-> self fish-lane-0) value))
+    ((= slot 1) (set! (-> self fish-lane-1) value))
+    ((= slot 2) (set! (-> self fish-lane-2) value))
+    ((= slot 3) (set! (-> self fish-lane-3) value))
+    ((= slot 4) (set! (-> self fish-lane-4) value))
+    ((= slot 5) (set! (-> self fish-lane-5) value))
+    ((= slot 6) (set! (-> self fish-lane-6) value))
+    ((= slot 7) (set! (-> self fish-lane-7) value))
+    ((= slot 8) (set! (-> self fish-lane-8) value))
+    ((= slot 9) (set! (-> self fish-lane-9) value))
+    ((= slot 10) (set! (-> self fish-lane-10) value))
+    ((= slot 11) (set! (-> self fish-lane-11) value))
+    ((= slot 12) (set! (-> self fish-lane-12) value))
+    ((= slot 13) (set! (-> self fish-lane-13) value))
+    ((= slot 14) (set! (-> self fish-lane-14) value))
+    ((= slot 15) (set! (-> self fish-lane-15) value))
+    ((= slot 16) (set! (-> self fish-lane-16) value))
+    ((= slot 17) (set! (-> self fish-lane-17) value))
+    ((= slot 18) (set! (-> self fish-lane-18) value))
+    ((= slot 19) (set! (-> self fish-lane-19) value))
+    ((= slot 20) (set! (-> self fish-lane-20) value))
+    (else (set! (-> self fish-lane-21) value)))
+  (none))
+
+(defun fisher-set-fish-depth! ((self fisher-game) (slot int) (value float))
+  (cond
+    ((= slot 0) (set! (-> self fish-depth-0) value))
+    ((= slot 1) (set! (-> self fish-depth-1) value))
+    ((= slot 2) (set! (-> self fish-depth-2) value))
+    ((= slot 3) (set! (-> self fish-depth-3) value))
+    ((= slot 4) (set! (-> self fish-depth-4) value))
+    ((= slot 5) (set! (-> self fish-depth-5) value))
+    ((= slot 6) (set! (-> self fish-depth-6) value))
+    ((= slot 7) (set! (-> self fish-depth-7) value))
+    ((= slot 8) (set! (-> self fish-depth-8) value))
+    ((= slot 9) (set! (-> self fish-depth-9) value))
+    ((= slot 10) (set! (-> self fish-depth-10) value))
+    ((= slot 11) (set! (-> self fish-depth-11) value))
+    ((= slot 12) (set! (-> self fish-depth-12) value))
+    ((= slot 13) (set! (-> self fish-depth-13) value))
+    ((= slot 14) (set! (-> self fish-depth-14) value))
+    ((= slot 15) (set! (-> self fish-depth-15) value))
+    ((= slot 16) (set! (-> self fish-depth-16) value))
+    ((= slot 17) (set! (-> self fish-depth-17) value))
+    ((= slot 18) (set! (-> self fish-depth-18) value))
+    ((= slot 19) (set! (-> self fish-depth-19) value))
+    ((= slot 20) (set! (-> self fish-depth-20) value))
+    (else (set! (-> self fish-depth-21) value)))
+  (none))
+
+(defun fisher-set-fish-direction! ((self fisher-game) (slot int) (value float))
+  (cond
+    ((= slot 0) (set! (-> self fish-direction-0) value))
+    ((= slot 1) (set! (-> self fish-direction-1) value))
+    ((= slot 2) (set! (-> self fish-direction-2) value))
+    ((= slot 3) (set! (-> self fish-direction-3) value))
+    ((= slot 4) (set! (-> self fish-direction-4) value))
+    ((= slot 5) (set! (-> self fish-direction-5) value))
+    ((= slot 6) (set! (-> self fish-direction-6) value))
+    ((= slot 7) (set! (-> self fish-direction-7) value))
+    ((= slot 8) (set! (-> self fish-direction-8) value))
+    ((= slot 9) (set! (-> self fish-direction-9) value))
+    ((= slot 10) (set! (-> self fish-direction-10) value))
+    ((= slot 11) (set! (-> self fish-direction-11) value))
+    ((= slot 12) (set! (-> self fish-direction-12) value))
+    ((= slot 13) (set! (-> self fish-direction-13) value))
+    ((= slot 14) (set! (-> self fish-direction-14) value))
+    ((= slot 15) (set! (-> self fish-direction-15) value))
+    ((= slot 16) (set! (-> self fish-direction-16) value))
+    ((= slot 17) (set! (-> self fish-direction-17) value))
+    ((= slot 18) (set! (-> self fish-direction-18) value))
+    ((= slot 19) (set! (-> self fish-direction-19) value))
+    ((= slot 20) (set! (-> self fish-direction-20) value))
+    (else (set! (-> self fish-direction-21) value)))
+  (none))
+
+(defun fisher-set-fish-speed! ((self fisher-game) (slot int) (value float))
+  (cond
+    ((= slot 0) (set! (-> self fish-speed-0) value))
+    ((= slot 1) (set! (-> self fish-speed-1) value))
+    ((= slot 2) (set! (-> self fish-speed-2) value))
+    ((= slot 3) (set! (-> self fish-speed-3) value))
+    ((= slot 4) (set! (-> self fish-speed-4) value))
+    ((= slot 5) (set! (-> self fish-speed-5) value))
+    ((= slot 6) (set! (-> self fish-speed-6) value))
+    ((= slot 7) (set! (-> self fish-speed-7) value))
+    ((= slot 8) (set! (-> self fish-speed-8) value))
+    ((= slot 9) (set! (-> self fish-speed-9) value))
+    ((= slot 10) (set! (-> self fish-speed-10) value))
+    ((= slot 11) (set! (-> self fish-speed-11) value))
+    ((= slot 12) (set! (-> self fish-speed-12) value))
+    ((= slot 13) (set! (-> self fish-speed-13) value))
+    ((= slot 14) (set! (-> self fish-speed-14) value))
+    ((= slot 15) (set! (-> self fish-speed-15) value))
+    ((= slot 16) (set! (-> self fish-speed-16) value))
+    ((= slot 17) (set! (-> self fish-speed-17) value))
+    ((= slot 18) (set! (-> self fish-speed-18) value))
+    ((= slot 19) (set! (-> self fish-speed-19) value))
+    ((= slot 20) (set! (-> self fish-speed-20) value))
+    (else (set! (-> self fish-speed-21) value)))
+  (none))
+
+(defun fisher-fish-turn-time ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-turn-time-0))
+    ((= slot 1) (-> self fish-turn-time-1))
+    ((= slot 2) (-> self fish-turn-time-2))
+    ((= slot 3) (-> self fish-turn-time-3))
+    ((= slot 4) (-> self fish-turn-time-4))
+    ((= slot 5) (-> self fish-turn-time-5))
+    ((= slot 6) (-> self fish-turn-time-6))
+    ((= slot 7) (-> self fish-turn-time-7))
+    ((= slot 8) (-> self fish-turn-time-8))
+    ((= slot 9) (-> self fish-turn-time-9))
+    ((= slot 10) (-> self fish-turn-time-10))
+    ((= slot 11) (-> self fish-turn-time-11))
+    ((= slot 12) (-> self fish-turn-time-12))
+    ((= slot 13) (-> self fish-turn-time-13))
+    ((= slot 14) (-> self fish-turn-time-14))
+    ((= slot 15) (-> self fish-turn-time-15))
+    ((= slot 16) (-> self fish-turn-time-16))
+    ((= slot 17) (-> self fish-turn-time-17))
+    ((= slot 18) (-> self fish-turn-time-18))
+    ((= slot 19) (-> self fish-turn-time-19))
+    ((= slot 20) (-> self fish-turn-time-20))
+    (else (-> self fish-turn-time-21))))
+
+(defun fisher-set-fish-turn-time!
+  ((self fisher-game) (slot int) (value float))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-turn-time-0) value))
+    ((= slot 1) (set! (-> self fish-turn-time-1) value))
+    ((= slot 2) (set! (-> self fish-turn-time-2) value))
+    ((= slot 3) (set! (-> self fish-turn-time-3) value))
+    ((= slot 4) (set! (-> self fish-turn-time-4) value))
+    ((= slot 5) (set! (-> self fish-turn-time-5) value))
+    ((= slot 6) (set! (-> self fish-turn-time-6) value))
+    ((= slot 7) (set! (-> self fish-turn-time-7) value))
+    ((= slot 8) (set! (-> self fish-turn-time-8) value))
+    ((= slot 9) (set! (-> self fish-turn-time-9) value))
+    ((= slot 10) (set! (-> self fish-turn-time-10) value))
+    ((= slot 11) (set! (-> self fish-turn-time-11) value))
+    ((= slot 12) (set! (-> self fish-turn-time-12) value))
+    ((= slot 13) (set! (-> self fish-turn-time-13) value))
+    ((= slot 14) (set! (-> self fish-turn-time-14) value))
+    ((= slot 15) (set! (-> self fish-turn-time-15) value))
+    ((= slot 16) (set! (-> self fish-turn-time-16) value))
+    ((= slot 17) (set! (-> self fish-turn-time-17) value))
+    ((= slot 18) (set! (-> self fish-turn-time-18) value))
+    ((= slot 19) (set! (-> self fish-turn-time-19) value))
+    ((= slot 20) (set! (-> self fish-turn-time-20) value))
+    (else (set! (-> self fish-turn-time-21) value)))
+
+  (none))
+
+(defun fisher-fish-turn-old-direction ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-turn-old-direction-0))
+    ((= slot 1) (-> self fish-turn-old-direction-1))
+    ((= slot 2) (-> self fish-turn-old-direction-2))
+    ((= slot 3) (-> self fish-turn-old-direction-3))
+    ((= slot 4) (-> self fish-turn-old-direction-4))
+    ((= slot 5) (-> self fish-turn-old-direction-5))
+    ((= slot 6) (-> self fish-turn-old-direction-6))
+    ((= slot 7) (-> self fish-turn-old-direction-7))
+    ((= slot 8) (-> self fish-turn-old-direction-8))
+    ((= slot 9) (-> self fish-turn-old-direction-9))
+    ((= slot 10) (-> self fish-turn-old-direction-10))
+    ((= slot 11) (-> self fish-turn-old-direction-11))
+    ((= slot 12) (-> self fish-turn-old-direction-12))
+    ((= slot 13) (-> self fish-turn-old-direction-13))
+    ((= slot 14) (-> self fish-turn-old-direction-14))
+    ((= slot 15) (-> self fish-turn-old-direction-15))
+    ((= slot 16) (-> self fish-turn-old-direction-16))
+    ((= slot 17) (-> self fish-turn-old-direction-17))
+    ((= slot 18) (-> self fish-turn-old-direction-18))
+    ((= slot 19) (-> self fish-turn-old-direction-19))
+    ((= slot 20) (-> self fish-turn-old-direction-20))
+    (else (-> self fish-turn-old-direction-21))))
+
+(defun fisher-set-fish-turn-old-direction!
+  ((self fisher-game) (slot int) (value float))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-turn-old-direction-0) value))
+    ((= slot 1) (set! (-> self fish-turn-old-direction-1) value))
+    ((= slot 2) (set! (-> self fish-turn-old-direction-2) value))
+    ((= slot 3) (set! (-> self fish-turn-old-direction-3) value))
+    ((= slot 4) (set! (-> self fish-turn-old-direction-4) value))
+    ((= slot 5) (set! (-> self fish-turn-old-direction-5) value))
+    ((= slot 6) (set! (-> self fish-turn-old-direction-6) value))
+    ((= slot 7) (set! (-> self fish-turn-old-direction-7) value))
+    ((= slot 8) (set! (-> self fish-turn-old-direction-8) value))
+    ((= slot 9) (set! (-> self fish-turn-old-direction-9) value))
+    ((= slot 10) (set! (-> self fish-turn-old-direction-10) value))
+    ((= slot 11) (set! (-> self fish-turn-old-direction-11) value))
+    ((= slot 12) (set! (-> self fish-turn-old-direction-12) value))
+    ((= slot 13) (set! (-> self fish-turn-old-direction-13) value))
+    ((= slot 14) (set! (-> self fish-turn-old-direction-14) value))
+    ((= slot 15) (set! (-> self fish-turn-old-direction-15) value))
+    ((= slot 16) (set! (-> self fish-turn-old-direction-16) value))
+    ((= slot 17) (set! (-> self fish-turn-old-direction-17) value))
+    ((= slot 18) (set! (-> self fish-turn-old-direction-18) value))
+    ((= slot 19) (set! (-> self fish-turn-old-direction-19) value))
+    ((= slot 20) (set! (-> self fish-turn-old-direction-20) value))
+    (else (set! (-> self fish-turn-old-direction-21) value)))
+
+  (none))
+
+(defun fisher-fish-turn-side ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-turn-side-0))
+    ((= slot 1) (-> self fish-turn-side-1))
+    ((= slot 2) (-> self fish-turn-side-2))
+    ((= slot 3) (-> self fish-turn-side-3))
+    ((= slot 4) (-> self fish-turn-side-4))
+    ((= slot 5) (-> self fish-turn-side-5))
+    ((= slot 6) (-> self fish-turn-side-6))
+    ((= slot 7) (-> self fish-turn-side-7))
+    ((= slot 8) (-> self fish-turn-side-8))
+    ((= slot 9) (-> self fish-turn-side-9))
+    ((= slot 10) (-> self fish-turn-side-10))
+    ((= slot 11) (-> self fish-turn-side-11))
+    ((= slot 12) (-> self fish-turn-side-12))
+    ((= slot 13) (-> self fish-turn-side-13))
+    ((= slot 14) (-> self fish-turn-side-14))
+    ((= slot 15) (-> self fish-turn-side-15))
+    ((= slot 16) (-> self fish-turn-side-16))
+    ((= slot 17) (-> self fish-turn-side-17))
+    ((= slot 18) (-> self fish-turn-side-18))
+    ((= slot 19) (-> self fish-turn-side-19))
+    ((= slot 20) (-> self fish-turn-side-20))
+    (else (-> self fish-turn-side-21))))
+
+(defun fisher-set-fish-turn-side!
+  ((self fisher-game) (slot int) (value float))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-turn-side-0) value))
+    ((= slot 1) (set! (-> self fish-turn-side-1) value))
+    ((= slot 2) (set! (-> self fish-turn-side-2) value))
+    ((= slot 3) (set! (-> self fish-turn-side-3) value))
+    ((= slot 4) (set! (-> self fish-turn-side-4) value))
+    ((= slot 5) (set! (-> self fish-turn-side-5) value))
+    ((= slot 6) (set! (-> self fish-turn-side-6) value))
+    ((= slot 7) (set! (-> self fish-turn-side-7) value))
+    ((= slot 8) (set! (-> self fish-turn-side-8) value))
+    ((= slot 9) (set! (-> self fish-turn-side-9) value))
+    ((= slot 10) (set! (-> self fish-turn-side-10) value))
+    ((= slot 11) (set! (-> self fish-turn-side-11) value))
+    ((= slot 12) (set! (-> self fish-turn-side-12) value))
+    ((= slot 13) (set! (-> self fish-turn-side-13) value))
+    ((= slot 14) (set! (-> self fish-turn-side-14) value))
+    ((= slot 15) (set! (-> self fish-turn-side-15) value))
+    ((= slot 16) (set! (-> self fish-turn-side-16) value))
+    ((= slot 17) (set! (-> self fish-turn-side-17) value))
+    ((= slot 18) (set! (-> self fish-turn-side-18) value))
+    ((= slot 19) (set! (-> self fish-turn-side-19) value))
+    ((= slot 20) (set! (-> self fish-turn-side-20) value))
+    (else (set! (-> self fish-turn-side-21) value)))
+
+  (none))
+
+(defun fisher-start-manipy-turn!
+  ((self fisher-game) (slot int) (new-direction float))
+
+  (fisher-set-fish-turn-old-direction! self slot (fisher-fish-direction self slot))
+
+  (fisher-set-fish-direction! self slot new-direction)
+
+  (fisher-set-fish-turn-side! self slot (if (rand-vu-percent? 0.5) 1.0 -1.0))
+
+  (fisher-set-fish-turn-time! self slot 0.0001)
+
+  (none))
+
+(defun fisher-fish-cooldown ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-cooldown-0))
+    ((= slot 1) (-> self fish-cooldown-1))
+    ((= slot 2) (-> self fish-cooldown-2))
+    ((= slot 3) (-> self fish-cooldown-3))
+    ((= slot 4) (-> self fish-cooldown-4))
+    ((= slot 5) (-> self fish-cooldown-5))
+    ((= slot 6) (-> self fish-cooldown-6))
+    ((= slot 7) (-> self fish-cooldown-7))
+    ((= slot 8) (-> self fish-cooldown-8))
+    ((= slot 9) (-> self fish-cooldown-9))
+    ((= slot 10) (-> self fish-cooldown-10))
+    ((= slot 11) (-> self fish-cooldown-11))
+    ((= slot 12) (-> self fish-cooldown-12))
+    ((= slot 13) (-> self fish-cooldown-13))
+    ((= slot 14) (-> self fish-cooldown-14))
+    ((= slot 15) (-> self fish-cooldown-15))
+    ((= slot 16) (-> self fish-cooldown-16))
+    ((= slot 17) (-> self fish-cooldown-17))
+    ((= slot 18) (-> self fish-cooldown-18))
+    ((= slot 19) (-> self fish-cooldown-19))
+    ((= slot 20) (-> self fish-cooldown-20))
+    (else (-> self fish-cooldown-21))))
+
+(defun fisher-set-fish-cooldown!
+  ((self fisher-game) (slot int) (value float))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-cooldown-0) value))
+    ((= slot 1) (set! (-> self fish-cooldown-1) value))
+    ((= slot 2) (set! (-> self fish-cooldown-2) value))
+    ((= slot 3) (set! (-> self fish-cooldown-3) value))
+    ((= slot 4) (set! (-> self fish-cooldown-4) value))
+    ((= slot 5) (set! (-> self fish-cooldown-5) value))
+    ((= slot 6) (set! (-> self fish-cooldown-6) value))
+    ((= slot 7) (set! (-> self fish-cooldown-7) value))
+    ((= slot 8) (set! (-> self fish-cooldown-8) value))
+    ((= slot 9) (set! (-> self fish-cooldown-9) value))
+    ((= slot 10) (set! (-> self fish-cooldown-10) value))
+    ((= slot 11) (set! (-> self fish-cooldown-11) value))
+    ((= slot 12) (set! (-> self fish-cooldown-12) value))
+    ((= slot 13) (set! (-> self fish-cooldown-13) value))
+    ((= slot 14) (set! (-> self fish-cooldown-14) value))
+    ((= slot 15) (set! (-> self fish-cooldown-15) value))
+    ((= slot 16) (set! (-> self fish-cooldown-16) value))
+    ((= slot 17) (set! (-> self fish-cooldown-17) value))
+    ((= slot 18) (set! (-> self fish-cooldown-18) value))
+    ((= slot 19) (set! (-> self fish-cooldown-19) value))
+    ((= slot 20) (set! (-> self fish-cooldown-20) value))
+    (else (set! (-> self fish-cooldown-21) value)))
+
+  (none))
+
+(defun fisher-golden-hour? ()
+  (let ((hour
+        (if
+          *time-of-day-context*
+          (-> *time-of-day-context* time)
+          12.0)))
+
+    (or
+      (and (>= hour 4.0) (< hour 6.0))
+      (and (>= hour 18.0) (< hour 23.0)))))
+
+(defun fisher-green-sun-hour? ()
+  (let ((hour
+        (if
+          *time-of-day-context*
+          (-> *time-of-day-context* time)
+          12.0)))
+
+    (and
+      (>= hour 4.0)
+      (< hour 5.0))))
+
+(defun fisher-fish-species ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-species-0))
+    ((= slot 1) (-> self fish-species-1))
+    ((= slot 2) (-> self fish-species-2))
+    ((= slot 3) (-> self fish-species-3))
+    ((= slot 4) (-> self fish-species-4))
+    ((= slot 5) (-> self fish-species-5))
+    ((= slot 6) (-> self fish-species-6))
+    ((= slot 7) (-> self fish-species-7))
+    ((= slot 8) (-> self fish-species-8))
+    ((= slot 9) (-> self fish-species-9))
+    ((= slot 10) (-> self fish-species-10))
+    ((= slot 11) (-> self fish-species-11))
+    ((= slot 12) (-> self fish-species-12))
+    ((= slot 13) (-> self fish-species-13))
+    ((= slot 14) (-> self fish-species-14))
+    ((= slot 15) (-> self fish-species-15))
+    ((= slot 16) (-> self fish-species-16))
+    ((= slot 17) (-> self fish-species-17))
+    ((= slot 18) (-> self fish-species-18))
+    ((= slot 19) (-> self fish-species-19))
+    ((= slot 20) (-> self fish-species-20))
+    (else (-> self fish-species-21))))
+
+(defun fisher-set-fish-species!
+  ((self fisher-game) (slot int) (value int))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-species-0) value))
+    ((= slot 1) (set! (-> self fish-species-1) value))
+    ((= slot 2) (set! (-> self fish-species-2) value))
+    ((= slot 3) (set! (-> self fish-species-3) value))
+    ((= slot 4) (set! (-> self fish-species-4) value))
+    ((= slot 5) (set! (-> self fish-species-5) value))
+    ((= slot 6) (set! (-> self fish-species-6) value))
+    ((= slot 7) (set! (-> self fish-species-7) value))
+    ((= slot 8) (set! (-> self fish-species-8) value))
+    ((= slot 9) (set! (-> self fish-species-9) value))
+    ((= slot 10) (set! (-> self fish-species-10) value))
+    ((= slot 11) (set! (-> self fish-species-11) value))
+    ((= slot 12) (set! (-> self fish-species-12) value))
+    ((= slot 13) (set! (-> self fish-species-13) value))
+    ((= slot 14) (set! (-> self fish-species-14) value))
+    ((= slot 15) (set! (-> self fish-species-15) value))
+    ((= slot 16) (set! (-> self fish-species-16) value))
+    ((= slot 17) (set! (-> self fish-species-17) value))
+    ((= slot 18) (set! (-> self fish-species-18) value))
+    ((= slot 19) (set! (-> self fish-species-19) value))
+    ((= slot 20) (set! (-> self fish-species-20) value))
+    (else (set! (-> self fish-species-21) value)))
+
+  (none))
+
+(defun fisher-fish-suffix ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-suffix-0))
+    ((= slot 1) (-> self fish-suffix-1))
+    ((= slot 2) (-> self fish-suffix-2))
+    ((= slot 3) (-> self fish-suffix-3))
+    ((= slot 4) (-> self fish-suffix-4))
+    ((= slot 5) (-> self fish-suffix-5))
+    ((= slot 6) (-> self fish-suffix-6))
+    ((= slot 7) (-> self fish-suffix-7))
+    ((= slot 8) (-> self fish-suffix-8))
+    ((= slot 9) (-> self fish-suffix-9))
+    ((= slot 10) (-> self fish-suffix-10))
+    ((= slot 11) (-> self fish-suffix-11))
+    ((= slot 12) (-> self fish-suffix-12))
+    ((= slot 13) (-> self fish-suffix-13))
+    ((= slot 14) (-> self fish-suffix-14))
+    ((= slot 15) (-> self fish-suffix-15))
+    ((= slot 16) (-> self fish-suffix-16))
+    ((= slot 17) (-> self fish-suffix-17))
+    ((= slot 18) (-> self fish-suffix-18))
+    ((= slot 19) (-> self fish-suffix-19))
+    ((= slot 20) (-> self fish-suffix-20))
+    (else (-> self fish-suffix-21))))
+
+(defun fisher-set-fish-suffix!
+  ((self fisher-game) (slot int) (value int))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-suffix-0) value))
+    ((= slot 1) (set! (-> self fish-suffix-1) value))
+    ((= slot 2) (set! (-> self fish-suffix-2) value))
+    ((= slot 3) (set! (-> self fish-suffix-3) value))
+    ((= slot 4) (set! (-> self fish-suffix-4) value))
+    ((= slot 5) (set! (-> self fish-suffix-5) value))
+    ((= slot 6) (set! (-> self fish-suffix-6) value))
+    ((= slot 7) (set! (-> self fish-suffix-7) value))
+    ((= slot 8) (set! (-> self fish-suffix-8) value))
+    ((= slot 9) (set! (-> self fish-suffix-9) value))
+    ((= slot 10) (set! (-> self fish-suffix-10) value))
+    ((= slot 11) (set! (-> self fish-suffix-11) value))
+    ((= slot 12) (set! (-> self fish-suffix-12) value))
+    ((= slot 13) (set! (-> self fish-suffix-13) value))
+    ((= slot 14) (set! (-> self fish-suffix-14) value))
+    ((= slot 15) (set! (-> self fish-suffix-15) value))
+    ((= slot 16) (set! (-> self fish-suffix-16) value))
+    ((= slot 17) (set! (-> self fish-suffix-17) value))
+    ((= slot 18) (set! (-> self fish-suffix-18) value))
+    ((= slot 19) (set! (-> self fish-suffix-19) value))
+    ((= slot 20) (set! (-> self fish-suffix-20) value))
+    (else (set! (-> self fish-suffix-21) value)))
+
+  (none))
+
+(defun fisher-roll-fish-suffix ()
+  (let ((roll
+        (rand-vu-int-range 0 99999)))
+
+    (cond
+      ((fisher-green-sun-hour?)
+        (cond
+          ((< roll 26000) 0)
+          ((< roll 47000) 1)
+          ((< roll 76000) 2)
+          ((< roll 87000) 3)
+          ((< roll 96750) 4)
+          ((< roll 99750) 5)
+          (else 6)))
+
+      ((fisher-golden-hour?)
+        (cond
+          ((< roll 31000) 0)
+          ((< roll 55500) 1)
+          ((< roll 85000) 2)
+          ((< roll 92500) 3)
+          ((< roll 97900) 4)
+          ((< roll 99900) 5)
+          (else 6)))
+
+      (else
+        (cond
+          ((< roll 35000) 0)
+          ((< roll 62000) 1)
+          ((< roll 93000) 2)
+          ((< roll 97000) 3)
+          ((< roll 99490) 4)
+          ((< roll 99990) 5)
+          (else 6))))))
+
+(defun fisher-suffix-name ((suffix int))
+  (cond
+    ((= suffix 0) "MALNUTRITIONED")
+    ((= suffix 1) "STRESSED")
+    ((= suffix 2) "HEALTHY")
+    ((= suffix 3) "MUTANT")
+    ((= suffix 4) "RARE")
+    ((= suffix 5) "LEGENDARY")
+    (else "GOLDEN")))
+
+(defun fisher-species-name
+  ((self fisher-game) (species int))
+
+  (cond
+    ((= species 1)
+      (if
+        (= (-> self location-id) 2)
+        "GOLDEN HOUR"
+        "LARGEMOUTH ECOFISH"))
+
+    ((= species 2)
+      "BABAK ECOFISH")
+
+    (else
+      "ECO DRUM")))
+
+(defun fisher-suffix-value-multiplier ((suffix int))
+  (cond
+    ((= suffix 0) 0.50)
+    ((= suffix 1) 0.75)
+    ((= suffix 2) 1.00)
+    ((= suffix 3) 1.50)
+    ((= suffix 4) 2.00)
+    ((= suffix 5) 3.00)
+    (else 5.00)))
+
+(defun fisher-assign-table-slots!
+  ((self fisher-game) (eco-count int) (largemouth-count int) (babak-count int))
+
+  (let* ((requested-count
+        (+ eco-count largemouth-count babak-count))
+
+      (new-count (min 22 requested-count))
+
+      (babak-slots (min babak-count new-count))
+
+      (largemouth-slots (min largemouth-count (- new-count babak-slots)))
+
+      (i
+        0))
+
+    (set! (-> self fish-count) new-count)
+
+    (while (< i new-count)
+      (cond
+        ((< i babak-slots) (fisher-set-fish-species! self i 2))
+
+        ((< i (+ babak-slots largemouth-slots)) (fisher-set-fish-species! self i 1))
+
+        (else
+          (fisher-set-fish-species!
+            self
+            i
+            0)))
+
+      (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix))
+
+      (+! i 1)))
+
+  (none))
+
+(defun fisher-configure-sandover-table! ((self fisher-game))
+  (let ((eco-count 0)
+      (largemouth-count 0))
+
+    (cond
+      ((fisher-golden-hour?) (set! eco-count (rand-vu-int-range 6 8)) (set! largemouth-count (rand-vu-int-range 2 6)))
+
+      (else
+        (set! eco-count (rand-vu-int-range 2 3))
+        (set! largemouth-count (rand-vu-int-range 1 3))))
+
+    (set! (-> self sandover-eco-count) eco-count)
+    (set! (-> self sandover-largemouth-count) largemouth-count)
+
+    (fisher-assign-table-slots!
+      self
+      eco-count
+      largemouth-count
+      0))
+
+  (none))
+
+(defun fisher-configure-training-lagoon-table! ((self fisher-game))
+  (let ((eco-count
+        (rand-vu-int-range 2 3))
+
+      (golden-hour-count
+        (rand-vu-int-range 4 5)))
+
+    (set! (-> self sandover-eco-count) eco-count)
+
+    ;; Reuse the secondary species slot for Golden Hour in this location.
+    (set! (-> self sandover-largemouth-count) golden-hour-count)
+
+    (fisher-assign-table-slots!
+      self
+      eco-count
+      golden-hour-count
+      0))
+
+  (none))
+
+(defun fisher-configure-jungle-pillar-table! ((self fisher-game))
+  (let ((total-count 0)
+      (eco-count 0)
+      (largemouth-count 0)
+      (babak-count 0)
+      (remaining-count 0))
+
+    (cond
+      ((fisher-golden-hour?) (set! total-count (rand-vu-int-range 16 23)) (set! babak-count (rand-vu-int-range 4 7)))
+
+      (else
+        (set! total-count (rand-vu-int-range 8 15))
+        (set! babak-count (rand-vu-int-range 1 4))))
+
+    (set! remaining-count (- total-count babak-count))
+
+    (set! largemouth-count (rand-vu-int-range 1 remaining-count))
+
+    (set! eco-count (- remaining-count largemouth-count))
+
+    (set! (-> self sandover-eco-count) eco-count)
+    (set! (-> self sandover-largemouth-count) largemouth-count)
+
+    (fisher-assign-table-slots!
+      self
+      eco-count
+      largemouth-count
+      babak-count))
+
+  (none))
+
+(defun fisher-configure-location-table! ((self fisher-game))
+  (cond
+    ((= (-> self location-id) 1)
+      (fisher-configure-jungle-pillar-table! self))
+
+    ((= (-> self location-id) 2)
+      (fisher-configure-training-lagoon-table! self))
+
+    (else
+      (fisher-configure-sandover-table! self)))
+
+  (none))
+
+(defun fisher-apply-slot-appearance!
+  ((self fisher-game) (slot int) (fish-proc manipy) (catch-display? symbol))
+
+  (let* ((suffix
+        (fisher-fish-suffix self slot))
+
+      (species (fisher-fish-species self slot))
+
+      (base-scale
+        (cond
+          ((= species 2) (if catch-display? 0.95 0.75))
+
+          (catch-display? 0.55)
+
+          (else
+            0.30)))
+
+      (x-scale 1.0)
+
+      (y-scale 1.0)
+
+      (z-scale 1.0)
+
+      (r (cond ((= species 1) 0.32) ((= species 2) 1.00) (else 0.25)))
+
+      (g (cond ((= species 1) 0.78) ((= species 2) 1.00) (else 0.88)))
+
+      (b
+        (cond
+          ((= species 1) 0.25)
+          ((= species 2) 1.00)
+          (else 1.00))))
+
+    (cond
+      ((= suffix 0) (set! x-scale 0.84) (set! z-scale 1.10))
+
+      ((= suffix 1) (*! r 0.72) (*! g 0.72) (*! b 0.72))
+
+      ((= suffix 3)
+        (let ((color-roll
+              (mod
+                (+ (* slot 3) species)
+                5)))
+
+          (cond
+            ((= color-roll 0) (set! r 0.20) (set! g 0.95) (set! b 0.25))
+
+            ((= color-roll 1) (set! r 0.65) (set! g 0.20) (set! b 1.00))
+
+            ((= color-roll 2) (set! r 0.10) (set! g 0.85) (set! b 0.95))
+
+            ((= color-roll 3) (set! r 0.95) (set! g 0.15) (set! b 0.55))
+
+            (else
+              (set! r 0.85)
+              (set! g 0.85)
+              (set! b 0.15)))))
+
+      ((= suffix 4) (*! r 1.10) (*! g 1.10) (*! b 1.10))
+
+      ((= suffix 5) (*! x-scale 2.0) (*! y-scale 2.0) (*! z-scale 2.0))
+
+      ((= suffix 6)
+        (set! r 1.00)
+        (set! g 0.72)
+        (set! b 0.06)))
+
+    (set-vector! (-> fish-proc root scale) (* base-scale x-scale) (* base-scale y-scale) (* base-scale z-scale) 1.0)
+
+    (set! (-> fish-proc draw color-mult r) r)
+    (set! (-> fish-proc draw color-mult g) g)
+    (set! (-> fish-proc draw color-mult b) b)
+    (set! (-> fish-proc draw color-mult a) 1.0))
+
+  (none))
+
+(defun fisher-fish-pointer
+  ((self fisher-game) (slot int))
+
+  (cond
+    ((= slot 0) (-> self fish-0))
+    ((= slot 1) (-> self fish-1))
+    ((= slot 2) (-> self fish-2))
+    ((= slot 3) (-> self fish-3))
+    ((= slot 4) (-> self fish-4))
+    ((= slot 5) (-> self fish-5))
+    ((= slot 6) (-> self fish-6))
+    ((= slot 7) (-> self fish-7))
+    ((= slot 8) (-> self fish-8))
+    ((= slot 9) (-> self fish-9))
+    ((= slot 10) (-> self fish-10))
+    ((= slot 11) (-> self fish-11))
+    ((= slot 12) (-> self fish-12))
+    ((= slot 13) (-> self fish-13))
+    ((= slot 14) (-> self fish-14))
+    ((= slot 15) (-> self fish-15))
+    ((= slot 16) (-> self fish-16))
+    ((= slot 17) (-> self fish-17))
+    ((= slot 18) (-> self fish-18))
+    ((= slot 19) (-> self fish-19))
+    ((= slot 20) (-> self fish-20))
+    (else (-> self fish-21))))
+
+(defun fisher-set-fish-pointer!
+  ((self fisher-game) (slot int) (fish (pointer manipy)))
+
+  (cond
+    ((= slot 0) (set! (-> self fish-0) fish))
+    ((= slot 1) (set! (-> self fish-1) fish))
+    ((= slot 2) (set! (-> self fish-2) fish))
+    ((= slot 3) (set! (-> self fish-3) fish))
+    ((= slot 4) (set! (-> self fish-4) fish))
+    ((= slot 5) (set! (-> self fish-5) fish))
+    ((= slot 6) (set! (-> self fish-6) fish))
+    ((= slot 7) (set! (-> self fish-7) fish))
+    ((= slot 8) (set! (-> self fish-8) fish))
+    ((= slot 9) (set! (-> self fish-9) fish))
+    ((= slot 10) (set! (-> self fish-10) fish))
+    ((= slot 11) (set! (-> self fish-11) fish))
+    ((= slot 12) (set! (-> self fish-12) fish))
+    ((= slot 13) (set! (-> self fish-13) fish))
+    ((= slot 14) (set! (-> self fish-14) fish))
+    ((= slot 15) (set! (-> self fish-15) fish))
+    ((= slot 16) (set! (-> self fish-16) fish))
+    ((= slot 17) (set! (-> self fish-17) fish))
+    ((= slot 18) (set! (-> self fish-18) fish))
+    ((= slot 19) (set! (-> self fish-19) fish))
+    ((= slot 20) (set! (-> self fish-20) fish))
+    (else (set! (-> self fish-21) fish)))
+
+  (none))
+
+(defun fisher-randomize-fish-slot!
+  ((self fisher-game) (slot int))
+
+  (fisher-set-fish-distance! self slot (rand-vu-float-range (meters 4.0) (meters 55.0)))
+
+  (fisher-set-fish-lane! self slot (rand-vu-float-range (meters -1.35) (meters 1.35)))
+
+  (fisher-set-fish-depth!
+    self
+    slot
+    (cond
+      ((= (fisher-fish-species self slot) 1) (rand-vu-float-range (meters 18.0) (meters 21.0)))
+
+      ((= (fisher-fish-species self slot) 2) (rand-vu-float-range (meters 26.0) (meters 29.0)))
+
+      (else
+        (rand-vu-float-range
+          (meters 10.0)
+          (meters 13.0)))))
+
+  (fisher-set-fish-direction! self slot (if (rand-vu-percent? 0.5) 1.0 -1.0))
+
+  (fisher-set-fish-speed! self slot (rand-vu-float-range (meters 0.75) (meters 1.55)))
+
+  (fisher-set-fish-cooldown! self slot 0.0)
+
+  (fisher-set-fish-turn-time! self slot 0.0)
+
+  (fisher-set-fish-turn-old-direction! self slot (fisher-fish-direction self slot))
+
+  (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+
+  (none))
+
+(defun fisher-fish-position!
+  ((self fisher-game) (slot int) (dst vector))
+
+  (let ((side-axis
+        (new 'stack-no-clear 'vector)))
+
+    (set! (-> side-axis x) (-> self playfield-axis z))
+    (set! (-> side-axis y) 0.0)
+    (set! (-> side-axis z) (- (-> self playfield-axis x)))
+    (set! (-> side-axis w) 0.0)
+
+    (singlefish-vector-normalize-safe! side-axis 1.0)
+
+    (singlefish-vector-add-scaled-safe! dst (-> self fishing-player-pos) (-> self playfield-axis) (fisher-fish-distance self slot))
+
+    (singlefish-vector-add-scaled-safe! dst dst side-axis (fisher-fish-lane self slot))
+
+    (set! (-> dst y) (- (-> self water-level) (fisher-fish-depth self slot)))
+
+    (set! (-> dst w) 1.0))
+
+  dst)
+
+(defun fisher-set-manipy-facing!
+  ((self fisher-game) (slot int) (fish-proc manipy))
+
+  (let ((forward
+        (new 'stack-no-clear 'vector))
+
+      (side-forward (new 'stack-no-clear 'vector))
+
+      (side-axis (new 'stack-no-clear 'vector))
+
+      (down (new 'stack-no-clear 'vector))
+
+      (rot (new 'stack-no-clear 'matrix))
+
+      (turn-time
+        (fisher-fish-turn-time self slot)))
+
+    (cond
+      ((> turn-time 0.0)
+        (let* ((duration
+              0.42)
+
+            (progress (fmin 1.0 (/ turn-time duration)))
+
+            (angle
+              (* (degrees 180.0) progress)))
+
+          (singlefish-vector-scale-safe! forward (-> self playfield-axis) (* (fisher-fish-turn-old-direction self slot) (cos angle)))
+
+          (set! (-> side-axis x) (-> self playfield-axis z))
+          (set! (-> side-axis y) 0.0)
+          (set! (-> side-axis z) (- (-> self playfield-axis x)))
+          (set! (-> side-axis w) 0.0)
+
+          (singlefish-vector-normalize-safe! side-axis 1.0)
+
+          (singlefish-vector-scale-safe! side-forward side-axis (* (fisher-fish-turn-side self slot) (sin angle)))
+
+          (singlefish-vector-add-safe! forward forward side-forward)
+
+          (+! turn-time (-> *display* seconds-per-frame))
+
+          (if
+            (>= turn-time duration)
+
+            (fisher-set-fish-turn-time! self slot 0.0)
+
+            (fisher-set-fish-turn-time!
+              self
+              slot
+              turn-time))))
+
+      (else
+        (singlefish-vector-scale-safe!
+          forward
+          (-> self playfield-axis)
+          (fisher-fish-direction self slot))))
+
+    (set! (-> forward y) 0.0)
+    (set! (-> forward w) 0.0)
+
+    (singlefish-vector-normalize-safe! forward 1.0)
+
+    (set-vector! down 0.0 -1.0 0.0 0.0)
+
+    (forward-down->inv-matrix rot forward down)
+
+    (matrix->quaternion
+      (-> fish-proc root quat)
+      rot))
+
+  (none))
+
+(defun fisher-spawn-gameplay-fish
+  ((owner fisher-game) (slot int))
+
+  (let ((pos
+        (new 'stack-no-clear 'vector))
+
+      (fish
+        (the-as (pointer manipy) #f)))
+
+    (fisher-fish-position! owner slot pos)
+
+    (set!
+      fish
+      (the-as
+        (pointer manipy)
+        (manipy-spawn
+          pos
+          #f
+          (cond
+            ((= (fisher-fish-species owner slot) 1) *catch-fishb-sgc*)
+
+            ((= (fisher-fish-species owner slot) 2) *fisher-junglefish-sg*)
+
+            (else
+              *catch-fisha-sgc*))
+          #f
+          :from *default-dead-pool*
+          :to *default-pool*
+          :name "fisher-gameplay-fish")))
+
+    (when fish
+      (let ((fish-proc
+            (-> fish 0 self)))
+
+        (when fish-proc
+          (send-event fish-proc 'anim-mode 'loop)
+          (send-event fish-proc 'max-vis-dist (meters 999999.0))
+
+          (set! (-> (the-as manipy fish-proc) root trans quad) (-> pos quad))
+
+          (fisher-apply-slot-appearance! owner slot (the-as manipy fish-proc) #f)
+
+          (fisher-set-manipy-facing!
+            owner
+            slot
+            (the-as manipy fish-proc)))))
+
+    fish))
+
+(defun fisher-refill-missing-fish! ((self fisher-game))
+  (dotimes (i 22)
+    (when
+      (and (< i (-> self fish-count)) (not (fisher-fish-pointer self i)))
+
+      (fisher-randomize-fish-slot! self i)
+
+      (fisher-set-fish-pointer!
+        self
+        i
+        (fisher-spawn-gameplay-fish
+          self
+          i))))
+
+  (none))
+
+(defun singlefish-start-session! ((self fisher-game))
+  (dotimes (i 22)
+    (let ((old-fish
+          (fisher-fish-pointer self i)))
+
+      (when old-fish (deactivate (-> old-fish 0)))
+
+      (fisher-set-fish-pointer!
+        self
+        i
+        (the-as (pointer manipy) #f))))
+
+  (+! *singlefish-session-id* 1)
+  (set! *singlefish-session-active?* #t)
+  (set! (-> self hooked-fish) #f)
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self fish-state) 'free)
+
+  (fisher-configure-location-table! self)
+
+  (set! (-> self fish-hook-time) 0.0)
+  (set! (-> self fish-reel-progress) 0.0)
+  (set! (-> self fish-fight-time) 0.0)
+  (set! (-> self fish-fighting?) #f)
+
+  (dotimes (i 22)
+    (fisher-randomize-fish-slot! self i)
+
+    (fisher-set-fish-pointer!
+      self
+      i
+      (if
+        (< i (-> self fish-count))
+        (fisher-spawn-gameplay-fish self i)
+        (the-as (pointer manipy) #f))))
+
+  (none))
+
+(defun fisher-manipy-distance-to-lure
+  ((self fisher-game) (fish-proc manipy))
+
+  (let ((delta
+        (new 'stack-no-clear 'vector)))
+
+    (singlefish-vector-sub-safe! delta (-> self lure-pos) (-> fish-proc root trans))
+
+    (singlefish-vector-length-safe
+      delta)))
+
+(defun fisher-debug-draw-logical-fish-marker!
+  ((self fisher-game) (slot int))
+
+  (when
+    (and *fisher-in-debug?* (< slot (-> self fish-count)))
+
+    (let ((center (new 'stack-no-clear 'vector))
+        (left (new 'stack-no-clear 'vector))
+        (right (new 'stack-no-clear 'vector))
+        (top (new 'stack-no-clear 'vector))
+        (bottom (new 'stack-no-clear 'vector))
+        (front (new 'stack-no-clear 'vector))
+        (back (new 'stack-no-clear 'vector))
+        (color
+          (if
+            (= (fisher-fish-species self slot) 2)
+            (new 'static 'rgba :r #xff :g #x20 :b #xff :a #xff)
+            (new 'static 'rgba :r #xff :g #xff :b #xff :a #xff))))
+
+      (fisher-fish-position! self slot center)
+      (singlefish-vector-copy-safe! left center)
+      (singlefish-vector-copy-safe! right center)
+      (singlefish-vector-copy-safe! top center)
+      (singlefish-vector-copy-safe! bottom center)
+      (singlefish-vector-copy-safe! front center)
+      (singlefish-vector-copy-safe! back center)
+
+      (-! (-> left x) (meters 0.6))
+      (+! (-> right x) (meters 0.6))
+      (+! (-> top y) (meters 0.6))
+      (-! (-> bottom y) (meters 0.6))
+      (+! (-> front z) (meters 0.6))
+      (-! (-> back z) (meters 0.6))
+
+      (fisher-debug-line! left right color)
+      (fisher-debug-line! top bottom color)
+      (fisher-debug-line! front back color)))
+
+  (none))
+
+(defun fisher-debug-draw-fish-cone!
+  ((self fisher-game) (slot int) (fish-proc manipy))
+
+  (when *fisher-in-debug?*
+    (let ((origin
+          (new 'stack-no-clear 'vector))
+
+        (forward (new 'stack-no-clear 'vector))
+
+        (upper-edge (new 'stack-no-clear 'vector))
+
+        (forward-end (new 'stack-no-clear 'vector))
+
+        (upper-end (new 'stack-no-clear 'vector))
+
+        (arc-a (new 'stack-no-clear 'vector))
+
+        (arc-b (new 'stack-no-clear 'vector))
+
+        (color (new 'static 'rgba :r #x20 :g #xff :b #xff :a #xff))
+
+        (range
+          (meters 4.0)))
+
+      (singlefish-vector-copy-safe! origin (-> fish-proc root trans))
+
+      (singlefish-vector-scale-safe! forward (-> self playfield-axis) (fisher-fish-direction self slot))
+
+      (set! (-> forward y) 0.0)
+      (set! (-> forward w) 0.0)
+
+      (singlefish-vector-normalize-safe! forward 1.0)
+
+      (set! (-> upper-edge x) (* (-> forward x) 0.8191520))
+
+      (set! (-> upper-edge y) 0.5735764)
+
+      (set! (-> upper-edge z) (* (-> forward z) 0.8191520))
+
+      (set! (-> upper-edge w) 0.0)
+
+      (singlefish-vector-normalize-safe! upper-edge 1.0)
+
+      (singlefish-vector-add-scaled-safe! forward-end origin forward range)
+
+      (singlefish-vector-add-scaled-safe! upper-end origin upper-edge range)
+
+      (fisher-debug-line! origin forward-end color)
+
+      (fisher-debug-line! origin upper-end color)
+
+      (dotimes (i 7)
+        (let ((angle-a
+              (* 5.0 (the float i)))
+
+            (angle-b (* 5.0 (the float (+ i 1))))
+
+            (dir-a (new 'stack-no-clear 'vector))
+
+            (dir-b
+              (new 'stack-no-clear 'vector)))
+
+          (set! (-> dir-a x) (* (-> forward x) (cos (degrees angle-a))))
+
+          (set! (-> dir-a y) (sin (degrees angle-a)))
+
+          (set! (-> dir-a z) (* (-> forward z) (cos (degrees angle-a))))
+
+          (set! (-> dir-a w) 0.0)
+
+          (set! (-> dir-b x) (* (-> forward x) (cos (degrees angle-b))))
+
+          (set! (-> dir-b y) (sin (degrees angle-b)))
+
+          (set! (-> dir-b z) (* (-> forward z) (cos (degrees angle-b))))
+
+          (set! (-> dir-b w) 0.0)
+
+          (singlefish-vector-add-scaled-safe! arc-a origin dir-a range)
+
+          (singlefish-vector-add-scaled-safe! arc-b origin dir-b range)
+
+          (fisher-debug-line!
+            arc-a
+            arc-b
+            color)))))
+
+  (none))
+
+(defun fisher-manipy-can-sense-lure?
+  ((self fisher-game) (slot int) (fish-proc manipy))
+
+  (let ((to-lure
+        (new 'stack-no-clear 'vector))
+
+      (forward (new 'stack-no-clear 'vector))
+
+      (distance 0.0)
+
+      (horizontal-distance 0.0)
+
+      (facing-dot
+        0.0))
+
+    (singlefish-vector-sub-safe! to-lure (-> self lure-pos) (-> fish-proc root trans))
+
+    (set! distance (singlefish-vector-length-safe to-lure))
+
+    (set! (-> to-lure y) 0.0)
+    (set! (-> to-lure w) 0.0)
+
+    (set! horizontal-distance (singlefish-vector-length-safe to-lure))
+
+    (when (> horizontal-distance (meters 0.001)) (singlefish-vector-normalize-safe! to-lure 1.0))
+
+    (singlefish-vector-scale-safe! forward (-> self playfield-axis) (fisher-fish-direction self slot))
+
+    (set! (-> forward y) 0.0)
+    (set! (-> forward w) 0.0)
+
+    (singlefish-vector-normalize-safe! forward 1.0)
+
+    (set! facing-dot (vector-dot forward to-lure))
+
+    (and
+      (<= distance (meters 5.0))
+      (> horizontal-distance (meters 0.001))
+      (>= facing-dot 0.8191520))))
+
+(defun fisher-move-manipy-toward!
+  ((fish-proc manipy) (target vector) (speed float))
+
+  (let ((delta
+        (new 'stack-no-clear 'vector))
+
+      (distance 0.0)
+
+      (step
+        0.0))
+
+    (singlefish-vector-sub-safe! delta target (-> fish-proc root trans))
+
+    (set! distance (singlefish-vector-length-safe delta))
+
+    (when (> distance (meters 0.001))
+      (singlefish-vector-normalize-safe! delta 1.0)
+
+      (set! step (fmin distance (* speed (-> *display* seconds-per-frame))))
+
+      (singlefish-vector-add-scaled-safe!
+        (-> fish-proc root trans)
+        (-> fish-proc root trans)
+        delta
+        step))
+
+    distance))
+
+(defun fisher-fish-scared-off!
+  ((self fisher-game) (slot int))
+
+  (let ((fish
+        (fisher-fish-pointer
+          self
+          slot))
+
+      (from-origin (new 'stack-no-clear 'vector))
+
+      (side-axis
+        (new 'stack-no-clear 'vector)))
+
+    (when fish
+      (let ((fish-proc
+            (the-as manipy
+              (-> fish 0 self))))
+
+        (singlefish-vector-sub-safe! from-origin (-> fish-proc root trans) (-> self fishing-player-pos))
+
+        (set! (-> side-axis x) (-> self playfield-axis z))
+        (set! (-> side-axis y) 0.0)
+        (set! (-> side-axis z) (- (-> self playfield-axis x)))
+        (set! (-> side-axis w) 0.0)
+
+        (singlefish-vector-normalize-safe! side-axis 1.0)
+
+        (fisher-set-fish-distance! self slot (fmax (meters 3.5) (fmin (meters 55.5) (vector-dot from-origin (-> self playfield-axis)))))
+
+        (fisher-set-fish-lane! self slot (fmax (meters -1.5) (fmin (meters 1.5) (vector-dot from-origin side-axis))))
+
+        (fisher-set-fish-depth!
+          self
+          slot
+          (-
+            (-> self water-level)
+            (-> fish-proc root trans y))))))
+
+  (fisher-set-fish-direction! self slot (if (rand-vu-percent? 0.5) 1.0 -1.0))
+
+  (fisher-set-fish-turn-time! self slot 0.0)
+
+  (fisher-set-fish-cooldown! self slot 2.0)
+
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self fish-state) 'free)
+  (set! (-> self fish-scare-on-arrival?) #f)
+  (set! (-> self fish-hook-time) 0.0)
+  (set! (-> self fish-reel-progress) 0.0)
+  (set! (-> self fish-fighting?) #f)
+  (set! (-> self fish-fight-time) 0.0)
+  (set! (-> self fish-fight-phase) 0.0)
+  (set! (-> self fish-message) "SCARED OFF")
+  (set! (-> self fish-message-time) 1.5)
+
+  (none))
+
+(defun fisher-finish-manipy-catch!
+  ((self fisher-game) (slot int))
+
+  (fisher-play-fish-win-sound!)
+
+  (let* ((species
+        (fisher-fish-species self slot))
+
+      (suffix (fisher-fish-suffix self slot))
+
+      (base-weight
+        (cond
+          ((= species 1) (rand-vu-int-range 20 50))
+
+          ((= species 2) (rand-vu-int-range 20 41))
+
+          (else
+            (rand-vu-int-range 10 20))))
+
+      (weight
+        (cond
+          ((= suffix 0) (max 1 (the int (* (the float base-weight) (rand-vu-float-range 0.45 0.65)))))
+
+          ((= suffix 1) (max 1 (the int (* (the float base-weight) (rand-vu-float-range 0.72 0.88)))))
+
+          ((= suffix 5) (* base-weight 2))
+
+          ((= suffix 6) (* base-weight 18))
+
+          (else
+            base-weight)))
+
+      (value-mult (fisher-suffix-value-multiplier suffix))
+
+      (base-value
+        (if
+          (or (= species 1) (= species 2))
+          2.0
+          1.0)))
+
+    (set! (-> self caught-fish-species) species)
+
+    (set! (-> self caught-fish-suffix) suffix)
+
+    (set! (-> self caught-weight-tenths) weight)
+
+    (set!
+      (-> self caught-orb-value)
+      (max
+        1
+        (the int
+          (+
+            (* (the float weight) 0.1 base-value value-mult 0.5)
+            0.5)))))
+
+  (set! (-> self fish-state) 'catch-return)
+  (set! (-> self cast-state) 'catch-transition)
+  (set! (-> self catch-transition-time) 0.0)
+  (set! (-> self catch-menu-offset) 150.0)
+  (set! (-> self camera-state) 'before-cast)
+  (set! (-> self casted?) #f)
+  (set! (-> self fish-fighting?) #f)
+  (set! (-> self fish-fight-time) 0.0)
+  (set! (-> self fish-fight-phase) 0.0)
+  (set! (-> self fish-fight-base-y) 0.0)
+  (stop-sound-file "water-waves.wav")
+  (fisher-remove-lure-snake! self)
+
+  (none))
+
+

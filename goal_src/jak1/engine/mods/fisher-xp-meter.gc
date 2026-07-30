@@ -1,0 +1,229 @@
+;;-*-Lisp-*-
+(in-package goal)
+(bundles "JUN.DGO")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Fishing XP meter
+;;
+;; Fishing level:
+;;   (-> *game-info* auto-save-count)
+;;
+;; Current fishing XP:
+;;   (-> *game-info* total-deaths)
+;;
+;; Call:
+;;   (fisher-draw-xp-meter!)
+;;
+;; from the active fisher-game update loop.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define *fisher-xp-text*
+  (new 'global 'string 64 (the string #f)))
+
+(define *fisher-level-text*
+  (new 'global 'string 32 (the string #f)))
+
+(define *fisher-xp-encoded-text*
+  (new 'global 'string 64 (the string #f)))
+
+(define *fisher-level-encoded-text*
+  (new 'global 'string 32 (the string #f)))
+
+(defun fisher-xp-needed-for-level
+  ((level int))
+
+  ;; Linear requirement:
+  ;; level 0 -> 100 XP
+  ;; level 1 -> 200 XP
+  ;; level 2 -> 300 XP
+  ;; and so on.
+  (*
+    (+
+      level
+      1)
+    100)
+)
+
+(defun fisher-draw-xp-meter! ()
+  (when
+    (and
+      *game-info*
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let* ((level
+            (max
+              0
+              (-> *game-info* auto-save-count)))
+
+        (current-xp
+          (max
+            0
+            (-> *game-info* total-deaths)))
+
+        (xp-needed
+          (max
+            1
+            (fisher-xp-needed-for-level level)))
+
+        (clamped-xp
+          (min
+            current-xp
+            xp-needed))
+
+        (xp-ratio
+          (fmax
+            0.0
+            (fmin
+              1.0
+              (/
+                (the float clamped-xp)
+                (the float xp-needed)))))
+
+        ;; 280-pixel total bar width.
+        (fill-width
+          (the int
+            (* 276.0 xp-ratio))))
+
+      (clear *fisher-level-text*)
+      (clear *fisher-xp-text*)
+      (clear *fisher-level-encoded-text*)
+      (clear *fisher-xp-encoded-text*)
+
+      ;; Only the level number is shown above the bar.
+      (format
+        *fisher-level-text*
+        "~D"
+        level)
+
+      ;; Only current XP / required XP is shown inside the bar.
+      (format
+        *fisher-xp-text*
+        "~D/~D"
+        current-xp
+        xp-needed)
+
+      (pc-encode-utf8-string
+        *fisher-level-text*
+        *fisher-level-encoded-text*)
+
+      (pc-encode-utf8-string
+        *fisher-xp-text*
+        *fisher-xp-encoded-text*)
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        ;; Outer shadow.
+        (draw-sprite2d-xy
+          buf
+          114
+          204
+          284
+          20
+          (new 'static 'rgba
+            :r #x08
+            :g #x08
+            :b #x08
+            :a #xb8))
+
+        ;; Dark border.
+        (draw-sprite2d-xy
+          buf
+          116
+          206
+          280
+          16
+          (new 'static 'rgba
+            :r #x48
+            :g #x28
+            :b #x10
+            :a #xe0))
+
+        ;; Empty portion.
+        (draw-sprite2d-xy
+          buf
+          118
+          208
+          276
+          12
+          (new 'static 'rgba
+            :r #x24
+            :g #x18
+            :b #x10
+            :a #xd0))
+
+        ;; Filled XP portion: medium light orange.
+        (when
+          (> fill-width 0)
+
+          (draw-sprite2d-xy
+            buf
+            118
+            208
+            fill-width
+            12
+            (new 'static 'rgba
+              :r #xd8
+              :g #x78
+              :b #x28
+              :a #xe0)))
+
+        ;; Small highlight along the filled portion.
+        (when
+          (> fill-width 0)
+
+          (draw-sprite2d-xy
+            buf
+            118
+            208
+            fill-width
+            2
+            (new 'static 'rgba
+              :r #xf0
+              :g #xa0
+              :b #x48
+              :a #xc0)))
+
+        ;; Fishing level, centered above the bar.
+        (let ((level-font
+              (new 'stack
+                'font-context
+                *font-default-matrix*
+                256
+                190
+                0.0
+                (font-color orange)
+                (font-flags
+                  large
+                  middle
+                  shadow
+                  kerning))))
+
+          (draw-string
+            *fisher-level-encoded-text*
+            buf
+            level-font))
+
+        ;; Current XP / XP needed, centered inside the bar.
+        (let ((xp-font
+              (new 'stack
+                'font-context
+                *font-default-matrix*
+                256
+                207
+                0.0
+                (font-color white)
+                (font-flags
+                  middle
+                  shadow
+                  kerning))))
+
+          (draw-string
+            *fisher-xp-encoded-text*
+            buf
+            xp-font)))))
+
+  (none)
+)

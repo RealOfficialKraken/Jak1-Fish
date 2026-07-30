@@ -1,0 +1,4416 @@
+;;-*-Lisp-*-
+(in-package goal)
+(bundles "JUN.DGO")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Core fishing minigame, lure, casting, reeling, catches, fish behavior, camera and UI
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun spawn-fisher-net-at ((pos vector))
+  (let ((net
+        (manipy-spawn
+          pos
+          #f
+          *fish-net-sgc*
+          #f
+          :from *default-dead-pool*
+          :to *default-pool*
+          :name "test-fisher-net")))
+
+    (when net
+      (let ((net-proc
+            (-> net 0 self))
+
+          (rot
+            (new 'stack-no-clear 'matrix)))
+
+        (send-event net-proc 'anim-mode 'still)
+
+        (send-event net-proc 'set-frame-num 10.0)
+
+        (set! (-> (the-as manipy net-proc) root trans quad) (-> pos quad))
+
+        (matrix-rotate-x! rot (degrees 180))
+
+        (matrix->quaternion (-> (the-as manipy net-proc) root quat) rot)
+
+        (send-event
+          net-proc
+          'max-vis-dist
+          (meters 999999.0))))
+
+    net)
+)
+
+(defun spawn-fisher-lure-snake ((pos vector))
+  (let ((snake
+        (manipy-spawn
+          pos
+          #f
+          *junglesnake-sgc*
+          #f
+          :from *default-dead-pool*
+          :to *default-pool*
+          :name "fisher-lure-snake")))
+
+    (when snake
+      (let ((snake-proc
+            (-> snake 0 self)))
+
+        (send-event snake-proc 'anim-mode 'loop)
+
+        (set! (-> (the-as manipy snake-proc) root trans quad) (-> pos quad))
+
+        (set-vector! (-> (the-as manipy snake-proc) root scale) 0.0333333 0.0333333 0.0333333 1.0)
+
+        (send-event
+          snake-proc
+          'max-vis-dist
+          (meters 999999.0))))
+
+    snake)
+)
+
+(defun fisher-restore-normal-background! ()
+  (set! *fisher-underwater-haze-override?* #f)
+
+  (none)
+)
+
+(defbehavior fisher-game-init-by-other fisher-game
+  ((location-id int)
+   (vec vector)
+   (camera-vec vector)
+   (water-height float)
+   (angles vector))
+
+  (set! (-> self location-id) location-id)
+
+  (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
+  (vector-copy! (-> self pos) vec)
+
+  (vector-copy!
+    (-> self fishing-player-pos)
+    *fisher-spawn-player-pos*)
+
+  (vector-copy! (-> self fisher-cam) camera-vec)
+
+  (let ((camera-offset
+        (new 'stack-no-clear 'vector)))
+
+    (vector-! camera-offset camera-vec vec)
+
+    (set! (-> camera-offset y) 0.0)
+
+    (set! (-> camera-offset w) 0.0)
+
+    (set! (-> self camera-radius) (vector-length camera-offset))
+  )
+
+  (vector-reset! (-> self lure-snake-angle))
+
+  (vector-reset! (-> self lure-snake-angular-speed))
+
+  (vector-reset! (-> self lure-snake-last-anchor))
+
+  (set! (-> self lure-snake-flow-time) 0.0)
+
+  (set! (-> self water-level) water-height)
+
+  (set! (-> self camera-angle) (-> angles x))
+
+  (set! (-> self playfield-angle) (-> angles y))
+
+  (set! (-> self camera-axis x) (sin (-> self camera-angle)))
+
+  (set! (-> self camera-axis y) 0.0)
+
+  (set! (-> self camera-axis z) (cos (-> self camera-angle)))
+
+  (set! (-> self camera-axis w) 0.0)
+
+  (vector-normalize! (-> self camera-axis) 1.0)
+
+  (set! (-> self playfield-axis x) (sin (-> self playfield-angle)))
+
+  (set! (-> self playfield-axis y) 0.0)
+
+  (set! (-> self playfield-axis z) (cos (-> self playfield-angle)))
+
+  (set! (-> self playfield-axis w) 0.0)
+
+  (vector-normalize! (-> self playfield-axis) 1.0)
+
+  (set! (-> self saved-camera-read-analog) #t)
+
+  (set! (-> self saved-external-cam-mode) #f)
+
+  (set! (-> self casted?) #f)
+
+  (set! (-> self camera-state) 'before-cast)
+
+  (set! (-> self camera-underwater?) #f)
+
+  (set! (-> self cast-state) 'ready)
+
+  (set! (-> self cast-charge) 0.0)
+
+  (set! (-> self cast-charge-direction) 0.0)
+
+  (set! (-> self cast-time) 0.0)
+
+  (set! (-> self cast-duration) 1.0)
+
+  (set! (-> self camera-blend) 0.0)
+
+  (set! (-> self lure-fall-speed) 1.25)
+
+  (set! (-> self lure-reel-x-speed) 4.0)
+
+  (set! (-> self lure-reel-y-speed) 3.0)
+
+  (set! (-> self lure-x-velocity) 0.0)
+
+  (set! (-> self reel-hint-time) 0.0)
+
+  (set! (-> self lure-y-velocity) 0.0)
+
+  (set! (-> self bubble-time) -2.0)
+
+  (set! (-> self underwater-wave-time) 0.0)
+
+  (set! (-> self background-mist-time) 0.0)
+
+  (set! (-> self hooked-fish) #f)
+  (set! (-> self fish-state) 'free)
+  (set! (-> self fish-scare-on-arrival?) #f)
+  (set! (-> self fish-message) #f)
+  (set! (-> self fish-message-time) 0.0)
+  (set! (-> self fish-count) 0)
+  (set! (-> self fish-0) (the-as (pointer manipy) #f))
+  (set! (-> self fish-1) (the-as (pointer manipy) #f))
+  (set! (-> self fish-2) (the-as (pointer manipy) #f))
+  (set! (-> self fish-3) (the-as (pointer manipy) #f))
+  (set! (-> self fish-4) (the-as (pointer manipy) #f))
+  (set! (-> self fish-5) (the-as (pointer manipy) #f))
+  (set! (-> self fish-6) (the-as (pointer manipy) #f))
+  (set! (-> self fish-7) (the-as (pointer manipy) #f))
+  (set! (-> self fish-8) (the-as (pointer manipy) #f))
+  (set! (-> self fish-9) (the-as (pointer manipy) #f))
+  (set! (-> self fish-10) (the-as (pointer manipy) #f))
+  (set! (-> self fish-11) (the-as (pointer manipy) #f))
+  (set! (-> self fish-12) (the-as (pointer manipy) #f))
+  (set! (-> self fish-13) (the-as (pointer manipy) #f))
+  (set! (-> self fish-14) (the-as (pointer manipy) #f))
+  (set! (-> self fish-15) (the-as (pointer manipy) #f))
+  (set! (-> self fish-16) (the-as (pointer manipy) #f))
+  (set! (-> self fish-17) (the-as (pointer manipy) #f))
+  (set! (-> self fish-18) (the-as (pointer manipy) #f))
+  (set! (-> self fish-19) (the-as (pointer manipy) #f))
+  (set! (-> self fish-20) (the-as (pointer manipy) #f))
+  (set! (-> self fish-21) (the-as (pointer manipy) #f))
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self fish-hook-time) 0.0)
+  (set! (-> self fish-reel-progress) 0.0)
+  (set! (-> self fish-fight-time) 0.0)
+  (set! (-> self fish-fight-phase) 0.0)
+  (set! (-> self fish-fight-base-y) 0.0)
+  (set! (-> self reel-camera-blend) 0.0)
+  (vector-copy! (-> self hooked-fish-facing) (-> self lure-cast-axis))
+  (vector-reset! (-> self hooked-fish-last-hook-pos))
+  (set! (-> self fish-fighting?) #f)
+  (set! (-> self fish-scare-on-arrival?) #f)
+  (set! (-> self caught-weight-tenths) 0)
+  (set! (-> self caught-orb-value) 0)
+  (set! (-> self caught-fish-species) 0)
+  (set! (-> self caught-fish-suffix) 2)
+  (set! (-> self catch-transition-time) 0.0)
+  (set! (-> self catch-menu-offset) 0.0)
+  (set! (-> self sandover-eco-count) 0)
+  (set! (-> self sandover-largemouth-count) 0)
+  (set! (-> self fish-species-0) 0)
+  (set! (-> self fish-species-1) 0)
+  (set! (-> self fish-species-2) 0)
+  (set! (-> self fish-species-3) 0)
+  (set! (-> self fish-species-4) 0)
+  (set! (-> self fish-species-5) 0)
+  (set! (-> self fish-species-6) 0)
+  (set! (-> self fish-species-7) 0)
+  (set! (-> self fish-species-8) 0)
+  (set! (-> self fish-species-9) 0)
+  (set! (-> self fish-species-10) 0)
+  (set! (-> self fish-species-11) 0)
+  (set! (-> self fish-species-12) 0)
+  (set! (-> self fish-species-13) 0)
+  (set! (-> self fish-species-14) 0)
+  (set! (-> self fish-species-15) 0)
+  (set! (-> self fish-species-16) 0)
+  (set! (-> self fish-species-17) 0)
+  (set! (-> self fish-species-18) 0)
+  (set! (-> self fish-species-19) 0)
+  (set! (-> self fish-species-20) 0)
+  (set! (-> self fish-species-21) 0)
+  (set! (-> self fish-suffix-0) 2)
+  (set! (-> self fish-suffix-1) 2)
+  (set! (-> self fish-suffix-2) 2)
+  (set! (-> self fish-suffix-3) 2)
+  (set! (-> self fish-suffix-4) 2)
+  (set! (-> self fish-suffix-5) 2)
+  (set! (-> self fish-suffix-6) 2)
+  (set! (-> self fish-suffix-7) 2)
+  (set! (-> self fish-suffix-8) 2)
+  (set! (-> self fish-suffix-9) 2)
+  (set! (-> self fish-suffix-10) 2)
+  (set! (-> self fish-suffix-11) 2)
+  (set! (-> self fish-suffix-12) 2)
+  (set! (-> self fish-suffix-13) 2)
+  (set! (-> self fish-suffix-14) 2)
+  (set! (-> self fish-suffix-15) 2)
+  (set! (-> self fish-suffix-16) 2)
+  (set! (-> self fish-suffix-17) 2)
+  (set! (-> self fish-suffix-18) 2)
+  (set! (-> self fish-suffix-19) 2)
+  (set! (-> self fish-suffix-20) 2)
+  (set! (-> self fish-suffix-21) 2)
+  (set! (-> self fish-distance-0) 0.0)
+  (set! (-> self fish-lane-0) 0.0)
+  (set! (-> self fish-depth-0) 0.0)
+  (set! (-> self fish-direction-0) 1.0)
+  (set! (-> self fish-speed-0) 1.0)
+  (set! (-> self fish-distance-1) 0.0)
+  (set! (-> self fish-lane-1) 0.0)
+  (set! (-> self fish-depth-1) 0.0)
+  (set! (-> self fish-direction-1) 1.0)
+  (set! (-> self fish-speed-1) 1.0)
+  (set! (-> self fish-distance-2) 0.0)
+  (set! (-> self fish-lane-2) 0.0)
+  (set! (-> self fish-depth-2) 0.0)
+  (set! (-> self fish-direction-2) 1.0)
+  (set! (-> self fish-speed-2) 1.0)
+  (set! (-> self fish-distance-3) 0.0)
+  (set! (-> self fish-lane-3) 0.0)
+  (set! (-> self fish-depth-3) 0.0)
+  (set! (-> self fish-direction-3) 1.0)
+  (set! (-> self fish-speed-3) 1.0)
+  (set! (-> self fish-distance-4) 0.0)
+  (set! (-> self fish-lane-4) 0.0)
+  (set! (-> self fish-depth-4) 0.0)
+  (set! (-> self fish-direction-4) 1.0)
+  (set! (-> self fish-speed-4) 1.0)
+  (set! (-> self fish-distance-5) 0.0)
+  (set! (-> self fish-lane-5) 0.0)
+  (set! (-> self fish-depth-5) 0.0)
+  (set! (-> self fish-direction-5) 1.0)
+  (set! (-> self fish-speed-5) 1.0)
+  (set! (-> self fish-distance-6) 0.0)
+  (set! (-> self fish-lane-6) 0.0)
+  (set! (-> self fish-depth-6) 0.0)
+  (set! (-> self fish-direction-6) 1.0)
+  (set! (-> self fish-speed-6) 1.0)
+  (set! (-> self fish-distance-7) 0.0)
+  (set! (-> self fish-distance-8) 0.0)
+  (set! (-> self fish-distance-9) 0.0)
+  (set! (-> self fish-distance-10) 0.0)
+  (set! (-> self fish-distance-11) 0.0)
+  (set! (-> self fish-distance-12) 0.0)
+  (set! (-> self fish-distance-13) 0.0)
+  (set! (-> self fish-distance-14) 0.0)
+  (set! (-> self fish-distance-15) 0.0)
+  (set! (-> self fish-distance-16) 0.0)
+  (set! (-> self fish-distance-17) 0.0)
+  (set! (-> self fish-distance-18) 0.0)
+  (set! (-> self fish-distance-19) 0.0)
+  (set! (-> self fish-distance-20) 0.0)
+  (set! (-> self fish-distance-21) 0.0)
+  (set! (-> self fish-lane-7) 0.0)
+  (set! (-> self fish-lane-8) 0.0)
+  (set! (-> self fish-lane-9) 0.0)
+  (set! (-> self fish-lane-10) 0.0)
+  (set! (-> self fish-lane-11) 0.0)
+  (set! (-> self fish-lane-12) 0.0)
+  (set! (-> self fish-lane-13) 0.0)
+  (set! (-> self fish-lane-14) 0.0)
+  (set! (-> self fish-lane-15) 0.0)
+  (set! (-> self fish-lane-16) 0.0)
+  (set! (-> self fish-lane-17) 0.0)
+  (set! (-> self fish-lane-18) 0.0)
+  (set! (-> self fish-lane-19) 0.0)
+  (set! (-> self fish-lane-20) 0.0)
+  (set! (-> self fish-lane-21) 0.0)
+  (set! (-> self fish-depth-7) 0.0)
+  (set! (-> self fish-depth-8) 0.0)
+  (set! (-> self fish-depth-9) 0.0)
+  (set! (-> self fish-depth-10) 0.0)
+  (set! (-> self fish-depth-11) 0.0)
+  (set! (-> self fish-depth-12) 0.0)
+  (set! (-> self fish-depth-13) 0.0)
+  (set! (-> self fish-depth-14) 0.0)
+  (set! (-> self fish-depth-15) 0.0)
+  (set! (-> self fish-depth-16) 0.0)
+  (set! (-> self fish-depth-17) 0.0)
+  (set! (-> self fish-depth-18) 0.0)
+  (set! (-> self fish-depth-19) 0.0)
+  (set! (-> self fish-depth-20) 0.0)
+  (set! (-> self fish-depth-21) 0.0)
+  (set! (-> self fish-direction-7) 1.0)
+  (set! (-> self fish-direction-8) 1.0)
+  (set! (-> self fish-direction-9) 1.0)
+  (set! (-> self fish-direction-10) 1.0)
+  (set! (-> self fish-direction-11) 1.0)
+  (set! (-> self fish-direction-12) 1.0)
+  (set! (-> self fish-direction-13) 1.0)
+  (set! (-> self fish-direction-14) 1.0)
+  (set! (-> self fish-direction-15) 1.0)
+  (set! (-> self fish-direction-16) 1.0)
+  (set! (-> self fish-direction-17) 1.0)
+  (set! (-> self fish-direction-18) 1.0)
+  (set! (-> self fish-direction-19) 1.0)
+  (set! (-> self fish-direction-20) 1.0)
+  (set! (-> self fish-direction-21) 1.0)
+  (set! (-> self fish-speed-7) 1.0)
+  (set! (-> self fish-speed-8) 1.0)
+  (set! (-> self fish-speed-9) 1.0)
+  (set! (-> self fish-speed-10) 1.0)
+  (set! (-> self fish-speed-11) 1.0)
+  (set! (-> self fish-speed-12) 1.0)
+  (set! (-> self fish-speed-13) 1.0)
+  (set! (-> self fish-speed-14) 1.0)
+  (set! (-> self fish-speed-15) 1.0)
+  (set! (-> self fish-speed-16) 1.0)
+  (set! (-> self fish-speed-17) 1.0)
+  (set! (-> self fish-speed-18) 1.0)
+  (set! (-> self fish-speed-19) 1.0)
+  (set! (-> self fish-speed-20) 1.0)
+  (set! (-> self fish-speed-21) 1.0)
+  (set! (-> self fish-cooldown-0) 0.0)
+  (set! (-> self fish-cooldown-1) 0.0)
+  (set! (-> self fish-cooldown-2) 0.0)
+  (set! (-> self fish-cooldown-3) 0.0)
+  (set! (-> self fish-cooldown-4) 0.0)
+  (set! (-> self fish-cooldown-5) 0.0)
+  (set! (-> self fish-cooldown-6) 0.0)
+  (set! (-> self fish-cooldown-7) 0.0)
+  (set! (-> self fish-cooldown-8) 0.0)
+  (set! (-> self fish-cooldown-9) 0.0)
+  (set! (-> self fish-cooldown-10) 0.0)
+  (set! (-> self fish-cooldown-11) 0.0)
+  (set! (-> self fish-cooldown-12) 0.0)
+  (set! (-> self fish-cooldown-13) 0.0)
+  (set! (-> self fish-cooldown-14) 0.0)
+  (set! (-> self fish-cooldown-15) 0.0)
+  (set! (-> self fish-cooldown-16) 0.0)
+  (set! (-> self fish-cooldown-17) 0.0)
+  (set! (-> self fish-cooldown-18) 0.0)
+  (set! (-> self fish-cooldown-19) 0.0)
+  (set! (-> self fish-cooldown-20) 0.0)
+  (set! (-> self fish-cooldown-21) 0.0)
+  (set! (-> self fish-turn-time-0) 0.0)
+  (set! (-> self fish-turn-time-1) 0.0)
+  (set! (-> self fish-turn-time-2) 0.0)
+  (set! (-> self fish-turn-time-3) 0.0)
+  (set! (-> self fish-turn-time-4) 0.0)
+  (set! (-> self fish-turn-time-5) 0.0)
+  (set! (-> self fish-turn-time-6) 0.0)
+  (set! (-> self fish-turn-time-7) 0.0)
+  (set! (-> self fish-turn-time-8) 0.0)
+  (set! (-> self fish-turn-time-9) 0.0)
+  (set! (-> self fish-turn-time-10) 0.0)
+  (set! (-> self fish-turn-time-11) 0.0)
+  (set! (-> self fish-turn-time-12) 0.0)
+  (set! (-> self fish-turn-time-13) 0.0)
+  (set! (-> self fish-turn-time-14) 0.0)
+  (set! (-> self fish-turn-time-15) 0.0)
+  (set! (-> self fish-turn-time-16) 0.0)
+  (set! (-> self fish-turn-time-17) 0.0)
+  (set! (-> self fish-turn-time-18) 0.0)
+  (set! (-> self fish-turn-time-19) 0.0)
+  (set! (-> self fish-turn-time-20) 0.0)
+  (set! (-> self fish-turn-time-21) 0.0)
+  (set! (-> self fish-turn-old-direction-0) 1.0)
+  (set! (-> self fish-turn-old-direction-1) 1.0)
+  (set! (-> self fish-turn-old-direction-2) 1.0)
+  (set! (-> self fish-turn-old-direction-3) 1.0)
+  (set! (-> self fish-turn-old-direction-4) 1.0)
+  (set! (-> self fish-turn-old-direction-5) 1.0)
+  (set! (-> self fish-turn-old-direction-6) 1.0)
+  (set! (-> self fish-turn-old-direction-7) 1.0)
+  (set! (-> self fish-turn-old-direction-8) 1.0)
+  (set! (-> self fish-turn-old-direction-9) 1.0)
+  (set! (-> self fish-turn-old-direction-10) 1.0)
+  (set! (-> self fish-turn-old-direction-11) 1.0)
+  (set! (-> self fish-turn-old-direction-12) 1.0)
+  (set! (-> self fish-turn-old-direction-13) 1.0)
+  (set! (-> self fish-turn-old-direction-14) 1.0)
+  (set! (-> self fish-turn-old-direction-15) 1.0)
+  (set! (-> self fish-turn-old-direction-16) 1.0)
+  (set! (-> self fish-turn-old-direction-17) 1.0)
+  (set! (-> self fish-turn-old-direction-18) 1.0)
+  (set! (-> self fish-turn-old-direction-19) 1.0)
+  (set! (-> self fish-turn-old-direction-20) 1.0)
+  (set! (-> self fish-turn-old-direction-21) 1.0)
+  (set! (-> self fish-turn-side-0) 1.0)
+  (set! (-> self fish-turn-side-1) 1.0)
+  (set! (-> self fish-turn-side-2) 1.0)
+  (set! (-> self fish-turn-side-3) 1.0)
+  (set! (-> self fish-turn-side-4) 1.0)
+  (set! (-> self fish-turn-side-5) 1.0)
+  (set! (-> self fish-turn-side-6) 1.0)
+  (set! (-> self fish-turn-side-7) 1.0)
+  (set! (-> self fish-turn-side-8) 1.0)
+  (set! (-> self fish-turn-side-9) 1.0)
+  (set! (-> self fish-turn-side-10) 1.0)
+  (set! (-> self fish-turn-side-11) 1.0)
+  (set! (-> self fish-turn-side-12) 1.0)
+  (set! (-> self fish-turn-side-13) 1.0)
+  (set! (-> self fish-turn-side-14) 1.0)
+  (set! (-> self fish-turn-side-15) 1.0)
+  (set! (-> self fish-turn-side-16) 1.0)
+  (set! (-> self fish-turn-side-17) 1.0)
+  (set! (-> self fish-turn-side-18) 1.0)
+  (set! (-> self fish-turn-side-19) 1.0)
+  (set! (-> self fish-turn-side-20) 1.0)
+  (set! (-> self fish-turn-side-21) 1.0)
+
+  (vector-reset! (-> self lure-pos))
+
+  (vector-reset! (-> self lure-cast-start))
+
+  (vector-reset! (-> self lure-cast-end))
+
+  (vector-reset! (-> self lure-cast-axis))
+
+  (vector-reset! (-> self lure-camera-offset))
+
+  (vector-reset! (-> self lure-camera-pos))
+
+  (vector-reset! (-> self lure-camera-look))
+
+  (spawn-fisher-net-at (-> self pos))
+
+  (set! (-> self lure-snake) (the-as (pointer manipy) #f))
+
+  (go-virtual idle)
+)
+
+
+(defun spawn-fisher-game
+  ((location-id int)
+   (fishnet-pos vector)
+   (player-pos vector)
+   (camera-pos vector)
+   (water-height float)
+   (camera-angle float)
+   (playfield-angle float))
+
+  (let ((angles
+        (new 'stack-no-clear 'vector)))
+
+    (set! (-> angles x) camera-angle)
+    (set! (-> angles y) playfield-angle)
+    (set! (-> angles z) 0.0)
+    (set! (-> angles w) 0.0)
+
+    ;; Match the existing working fishing-area spawn path.
+    (vector-copy!
+      *fisher-spawn-player-pos*
+      player-pos)
+
+    (set!
+      *fisher-game*
+      (process-spawn
+        fisher-game
+        location-id
+        fishnet-pos
+        camera-pos
+        water-height
+        angles
+        :name "fisher-game"
+        *active-pool*)))
+
+  (none))
+
+(defun fisher-update-underwater-waves! ((self fisher-game))
+  (let ((dt
+        (-> *display* seconds-per-frame)))
+
+    (when
+      (> (-> self underwater-wave-time) 0.0)
+
+      (-! (-> self underwater-wave-time) dt)
+
+      (when
+        (< (-> self underwater-wave-time) 0.0)
+
+        (set!
+          (-> self underwater-wave-time)
+          0.0))
+    )
+
+    (when
+      (and (-> self camera-underwater?) (<= (-> self underwater-wave-time) 0.0))
+
+      (play-sound-file "water-waves.mp3" (the int (* (the float (-> *setting-control* current sfx-volume)) 1.0)))
+
+      (set!
+        (-> self underwater-wave-time)
+        49.0))
+  )
+
+  (none)
+)
+
+(defun fisher-force-underwater-horizon!
+  ((r float) (g float) (b float))
+
+  (set-vector! *fisher-underwater-haze-color* r g b 128.0)
+
+  (set! *fisher-underwater-haze-override?* #t)
+
+  (none)
+)
+
+(defun fisher-remove-lure-snake! ((self fisher-game))
+  (when
+    (-> self lure-snake)
+
+    (deactivate (-> (-> self lure-snake) 0))
+
+    (set! (-> self lure-snake) (the-as (pointer manipy) #f))
+  )
+  (vector-reset! (-> self lure-snake-angle))
+
+  (vector-reset! (-> self lure-snake-angular-speed))
+
+  (vector-reset! (-> self lure-snake-last-anchor))
+
+  (set! (-> self lure-snake-flow-time) 0.0)
+
+  (none)
+)
+
+(defun fisher-draw-hook-point-debug!
+  ((self fisher-game))
+
+  (when *fisher-in-debug?*
+    (let ((hook-point
+          (new 'stack-no-clear 'vector))
+
+        (left (new 'stack-no-clear 'vector))
+
+        (right (new 'stack-no-clear 'vector))
+
+        (top (new 'stack-no-clear 'vector))
+
+        (bottom (new 'stack-no-clear 'vector))
+
+        (front (new 'stack-no-clear 'vector))
+
+        (back (new 'stack-no-clear 'vector))
+
+        (color
+          (new 'static 'rgba
+            :r #xff
+            :g #x30
+            :b #xff
+            :a #xff)))
+
+      (fisher-hook-target! self hook-point)
+
+      (singlefish-vector-copy-safe! left hook-point)
+      (singlefish-vector-copy-safe! right hook-point)
+      (singlefish-vector-copy-safe! top hook-point)
+      (singlefish-vector-copy-safe! bottom hook-point)
+      (singlefish-vector-copy-safe! front hook-point)
+      (singlefish-vector-copy-safe! back hook-point)
+
+      (-! (-> left x) (meters 0.35))
+      (+! (-> right x) (meters 0.35))
+      (+! (-> top y) (meters 0.35))
+      (-! (-> bottom y) (meters 0.35))
+      (+! (-> front z) (meters 0.35))
+      (-! (-> back z) (meters 0.35))
+
+      (fisher-debug-line! left right color)
+      (fisher-debug-line! top bottom color)
+      (fisher-debug-line! front back color)))
+
+  (none))
+
+(defun fisher-update-lure-snake! ((self fisher-game))
+  (when
+    (and (-> self casted?) (-> self lure-snake))
+
+    (let* ((snake-proc
+          (-> (-> self lure-snake) 0 self))
+
+        (snake (the-as manipy snake-proc))
+
+        (dt (-> *display* seconds-per-frame))
+
+        (anchor (new 'stack-no-clear 'vector))
+
+        (movement (new 'stack-no-clear 'vector))
+
+        (target-angle (new 'stack-no-clear 'vector))
+
+        (pivot-offset (new 'stack-no-clear 'vector))
+
+        (rotated-pivot (new 'stack-no-clear 'vector))
+
+        (root-pos (new 'stack-no-clear 'vector))
+
+        (rot (new 'stack-no-clear 'matrix))
+
+        (forward-speed 0.0)
+
+        (vertical-speed 0.0)
+
+        (spring 0.0)
+
+        (damping
+          0.0))
+
+      (vector-copy! anchor (-> self lure-pos))
+
+      (set! (-> anchor w) 1.0)
+
+      (vector-! movement anchor (-> self lure-snake-last-anchor))
+
+      (when (> dt 0.0)
+        (set! forward-speed (/ (/ (vector-dot movement (-> self lure-cast-axis)) (meters 1.0)) dt))
+
+        (set! vertical-speed (/ (/ (-> movement y) (meters 1.0)) dt))
+      )
+
+      (+! (-> self lure-snake-flow-time) dt)
+
+      (cond
+        ((= (-> self cast-state) 'casting)
+          (set! spring 4.0)
+
+          (set! damping 1.4)
+
+          (set! (-> target-angle x) (degrees (fmax -75.0 (fmin 75.0 (* vertical-speed 15.0)))))
+
+          (set!
+            (-> target-angle y)
+            (degrees
+              (+
+                (* forward-speed 11.0)
+
+                (* 28.0
+                  (sin
+                    (*
+                      (degrees 210.0)
+                      (-> self lure-snake-flow-time)))))))
+
+          (set! (-> target-angle z) (degrees (fmax -65.0 (fmin 65.0 (* forward-speed -13.0)))))
+        )
+
+        (else
+          (set! spring 19.0)
+
+          (set! damping 2.0)
+
+          (set!
+            (-> target-angle x)
+            (degrees
+              (+
+                (fmax -24.0 (fmin 24.0 (* vertical-speed 3.0)))
+
+                (* 7.0
+                  (sin
+                    (*
+                      (degrees 38.0)
+                      (-> self lure-snake-flow-time)))))))
+
+          (set!
+            (-> target-angle y)
+            (degrees
+              (+
+                (* forward-speed 1.8)
+
+                (* 10.0
+                  (sin
+                    (*
+                      (degrees 25.0)
+                      (-> self lure-snake-flow-time)))))))
+
+          (set!
+            (-> target-angle z)
+            (degrees
+              (+
+                (fmax -28.0 (fmin 28.0 (* forward-speed -3.2)))
+
+                (* 6.0
+                  (cos
+                    (*
+                      (degrees 31.0)
+                      (-> self lure-snake-flow-time)))))))
+        )
+      )
+
+      (set! (-> target-angle w) 0.0)
+
+      (+!
+        (-> self lure-snake-angular-speed x)
+        (*
+          (-
+            (* (- (-> target-angle x) (-> self lure-snake-angle x)) spring)
+
+            (*
+              (-> self lure-snake-angular-speed x)
+              damping))
+          dt))
+
+      (+!
+        (-> self lure-snake-angular-speed y)
+        (*
+          (-
+            (* (- (-> target-angle y) (-> self lure-snake-angle y)) spring)
+
+            (*
+              (-> self lure-snake-angular-speed y)
+              damping))
+          dt))
+
+      (+!
+        (-> self lure-snake-angular-speed z)
+        (*
+          (-
+            (* (- (-> target-angle z) (-> self lure-snake-angle z)) spring)
+
+            (*
+              (-> self lure-snake-angular-speed z)
+              damping))
+          dt))
+
+      (+! (-> self lure-snake-angle x) (* (-> self lure-snake-angular-speed x) dt))
+
+      (+! (-> self lure-snake-angle y) (* (-> self lure-snake-angular-speed y) dt))
+
+      (+! (-> self lure-snake-angle z) (* (-> self lure-snake-angular-speed z) dt))
+
+      (cond
+        ((and
+            (= (-> self fish-state) 'reeling)
+            (>= (-> self hooked-fish-slot) 0))
+
+          (let ((hook-facing
+                (new 'stack-no-clear 'vector))
+
+              (hook-down
+                (new 'stack-no-clear 'vector)))
+
+            (singlefish-vector-copy-safe! hook-facing (-> self hooked-fish-facing))
+
+            (set! (-> hook-facing w) 0.0)
+
+            (when
+              (<= (singlefish-vector-length-safe hook-facing) 0.001)
+
+              (singlefish-vector-scale-safe! hook-facing (-> self playfield-axis) -1.0)
+
+              (set! (-> hook-facing y) 0.72))
+
+            (singlefish-vector-normalize-safe! hook-facing -1.0)
+
+            (set-vector! hook-down 0.0 -1.0 0.0 0.0)
+
+            (forward-down->inv-matrix
+              rot
+              hook-facing
+              hook-down)))
+
+        (else
+          (matrix-rotate-xyz!
+            rot
+            (-> self lure-snake-angle))))
+
+      (matrix->quaternion (-> snake root quat) rot)
+
+      (set-vector! pivot-offset 0.0 (meters 1.0666667) 0.0 0.0)
+
+      (vector-matrix*! rotated-pivot pivot-offset rot)
+
+      (vector-! root-pos anchor rotated-pivot)
+
+      (set! (-> root-pos w) 1.0)
+
+      (set! (-> snake root trans quad) (-> root-pos quad))
+
+      (fisher-draw-hook-point-debug! self)
+
+      (set-vector! (-> snake root scale) 0.0333333 0.0333333 0.0333333 1.0)
+
+      (vector-copy! (-> self lure-snake-last-anchor) anchor)
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-reset-line-hp! ()
+  (set! *fisher-line-hp* *fisher-line-hp-max*)
+
+  (set! *fisher-line-broken?* #f)
+
+  (none)
+)
+
+(defun fisher-damage-line! ((damage float))
+  (-! *fisher-line-hp* damage)
+
+  (when
+    (<= *fisher-line-hp* 0.0)
+
+    (set! *fisher-line-hp* 0.0)
+
+    (set!
+      *fisher-line-broken?*
+      #t))
+
+  (none)
+)
+
+(defun fisher-heal-line! ((amount float))
+  (+! *fisher-line-hp* amount)
+
+  (when
+    (> *fisher-line-hp* *fisher-line-hp-max*)
+
+    (set!
+      *fisher-line-hp*
+      *fisher-line-hp-max*))
+
+  (when
+    (> *fisher-line-hp* 0.0)
+
+    (set!
+      *fisher-line-broken?*
+      #f))
+
+  (none)
+)
+
+(defun fisher-set-line-color!
+  ((color rgba))
+
+  (let ((health-ratio
+        (fmax
+          0.0
+          (fmin
+            1.0
+            (/
+              *fisher-line-hp*
+              *fisher-line-hp-max*))))
+
+      (blend
+        0.0))
+
+    (cond
+      ;; 100% HP = green.
+      ;; 50% HP  = yellow.
+      ((>= health-ratio 0.5)
+        (set!
+          blend
+          (* (- 1.0 health-ratio) 2.0))
+
+        (set!
+          (-> color r)
+          (the uint8
+            (+
+              32.0
+              (* (- 255.0 32.0) blend))))
+
+        (set!
+          (-> color g)
+          224)
+
+        (set!
+          (-> color b)
+          (the uint8
+            (+
+              64.0
+              (* (- 32.0 64.0) blend)))))
+
+      ;; 50% HP = yellow.
+      ;; 0% HP  = red.
+      (else
+        (set!
+          blend
+          (* (- 0.5 health-ratio) 2.0))
+
+        (set!
+          (-> color r)
+          (the uint8
+            (+
+              255.0
+              (* (- 240.0 255.0) blend))))
+
+        (set!
+          (-> color g)
+          (the uint8
+            (+
+              224.0
+              (* (- 32.0 224.0) blend))))
+
+        (set!
+          (-> color b)
+          32)))
+
+    (set! (-> color a) #xc0))
+
+  (none)
+)
+
+(defun fisher-draw-line-hp-number ()
+  (let ((display-hp
+        (the int
+          (fmax
+            0.0
+            (fmin
+              *fisher-line-hp-max*
+              *fisher-line-hp*)))))
+
+    (clear matt-str)
+    (clear *pc-encoded-matt-str*)
+
+    (format matt-str "~D" display-hp)
+
+    (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+
+      (let ((font-ctx
+            (new 'stack
+              'font-context
+              *font-default-matrix*
+              472
+              39
+              0.0
+              (font-color white)
+              (font-flags large middle shadow kerning))))
+
+        (draw-string *pc-encoded-matt-str* buf font-ctx)
+      )
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-draw-line-hp-bar ()
+  (let* ((health-ratio
+        (fmax
+          0.0
+          (fmin
+            1.0
+            (/ *fisher-line-hp*
+              *fisher-line-hp-max*))))
+
+      (fill-height (the int (* 120.0 health-ratio)))
+
+      (fill-y (the int (- 188.0 fill-height)))
+
+      (hp-color
+        (new 'static 'rgba
+          :r #x20
+          :g #xe0
+          :b #x40
+          :a #xc0)))
+
+    (fisher-set-line-color! hp-color)
+
+    (fisher-draw-line-hp-number)
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+
+      (draw-sprite2d-xy buf 455 61 34 134 (new 'static 'rgba :r #x08 :g #x0c :b #x10 :a #xb0))
+
+      (draw-sprite2d-xy buf 458 64 28 128 (new 'static 'rgba :r #x58 :g #x60 :b #x68 :a #xd0))
+
+      (draw-sprite2d-xy buf 462 68 20 120 (new 'static 'rgba :r #x08 :g #x0a :b #x0c :a #xd0))
+
+      (when (> fill-height 0)
+        (draw-sprite2d-xy buf 464 fill-y 16 fill-height hp-color)
+
+        (draw-sprite2d-xy buf 462 (- fill-y 2) 20 4 hp-color)
+      )
+
+      (draw-sprite2d-xy buf 458 58 28 6 (new 'static 'rgba :r #x78 :g #x80 :b #x88 :a #xd0))
+
+      (draw-sprite2d-xy buf 458 192 28 6 (new 'static 'rgba :r #x78 :g #x80 :b #x88 :a #xd0))
+
+      (dotimes (i 11)
+        (let ((stud-y
+              (+ 67
+                (* i 12))))
+
+          (draw-sprite2d-xy buf 452 stud-y 6 3 (new 'static 'rgba :r #x98 :g #xa0 :b #xa8 :a #xe0))
+
+          (draw-sprite2d-xy buf 486 stud-y 6 3 (new 'static 'rgba :r #x98 :g #xa0 :b #xa8 :a #xe0))
+        )
+      )
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-reel-hint! ((self fisher-game))
+  (when
+    (> (-> self reel-hint-time) 0.0)
+
+    (draw-mod-menu-text-custom ;;change this for progression skills
+      "<PAD_X> TO REEL"
+      10
+      200
+      #t
+      #f
+      #f)
+
+    (-! (-> self reel-hint-time) (-> *display* seconds-per-frame))
+
+    (when
+      (< (-> self reel-hint-time) 0.0)
+
+      (set!
+        (-> self reel-hint-time)
+        0.0))
+  )
+
+  (none)
+)
+
+(defun fisher-launch-water-entry-bubbles! ((self fisher-game))
+  (let ((spray-pos
+        (new 'stack-no-clear 'vector)))
+
+    (vector-copy! spray-pos (-> self lure-pos))
+
+    (set! (-> spray-pos y) (- (-> self water-level) (meters 0.05)))
+
+    (set! (-> spray-pos w) 1.0)
+
+    (launch-particles :system *sp-particle-system-2d* (-> *part-id-table* 3571) spray-pos)
+  )
+
+  (none)
+)
+
+(defun fisher-background-color!
+  ((dst vector))
+
+  (let ((hour
+        (if
+          *time-of-day-context*
+          (-> *time-of-day-context* time)
+          12.0))
+
+      (blend
+        0.0))
+
+    (cond
+      ((and
+          (>= hour 4.0)
+          (< hour 7.0))
+
+        (set! blend (/ (- hour 4.0) 3.0))
+
+        (set! (-> dst x) (+ 9.0 (* (- 34.0 9.0) blend)))
+
+        (set! (-> dst y) (+ 88.0 (* (- 110.0 88.0) blend)))
+
+        (set!
+          (-> dst z)
+          97.0))
+
+      ((and
+          (>= hour 7.0)
+          (< hour 9.0))
+
+        (set! blend (/ (- hour 7.0) 2.0))
+
+        (set! (-> dst x) (+ 34.0 (* (- 62.0 34.0) blend)))
+
+        (set! (-> dst y) (+ 110.0 (* (- 164.0 110.0) blend)))
+
+        (set!
+          (-> dst z)
+          (+ 97.0
+            (* (- 175.0 97.0)
+              blend))))
+
+      ((and
+          (>= hour 9.0)
+          (< hour 12.0))
+
+        (set! (-> dst x) 62.0)
+        (set! (-> dst y) 164.0)
+        (set! (-> dst z) 175.0))
+
+      ((and
+          (>= hour 12.0)
+          (< hour 18.0))
+
+        (set! blend (/ (- hour 12.0) 6.0))
+
+        (set! (-> dst x) (+ 62.0 (* (- 30.0 62.0) blend)))
+
+        (set! (-> dst y) (+ 164.0 (* (- 72.0 164.0) blend)))
+
+        (set!
+          (-> dst z)
+          (+ 175.0
+            (* (- 57.0 175.0)
+              blend))))
+
+      ((and
+          (>= hour 18.0)
+          (< hour 19.0))
+
+        (set! blend (- hour 18.0))
+
+        (set! (-> dst x) (+ 30.0 (* (- 11.0 30.0) blend)))
+
+        (set! (-> dst y) (+ 72.0 (* (- 44.0 72.0) blend)))
+
+        (set!
+          (-> dst z)
+          (+ 57.0
+            (* (- 96.0 57.0)
+              blend))))
+
+      ((or
+          (>= hour 19.0)
+          (< hour 3.0))
+
+        (set! (-> dst x) 11.0)
+        (set! (-> dst y) 44.0)
+        (set! (-> dst z) 96.0))
+
+      (else
+        (set! blend (- hour 3.0))
+
+        (set! (-> dst x) (+ 11.0 (* (- 9.0 11.0) blend)))
+
+        (set! (-> dst y) (+ 44.0 (* (- 88.0 44.0) blend)))
+
+        (set!
+          (-> dst z)
+          (+ 96.0
+            (* (- 97.0 96.0)
+              blend)))))
+
+    (set!
+      (-> dst w)
+      1.0))
+
+  dst)
+
+(defun fisher-restore-sky-base-position! ()
+  (set! (-> sky-base-polygons 0 pos y) 0.0)
+  (set! (-> sky-base-polygons 1 pos y) 0.0)
+  (set! (-> sky-base-polygons 3 pos y) 0.0)
+  (set! (-> sky-base-polygons 4 pos y) 0.0)
+  (set! (-> sky-base-polygons 6 pos y) 0.0)
+  (set! (-> sky-base-polygons 7 pos y) 0.0)
+  (set! (-> sky-base-polygons 9 pos y) 0.0)
+  (set! (-> sky-base-polygons 10 pos y) 0.0)
+
+  (none))
+
+(defun fisher-launch-background-mist!
+  ((self fisher-game))
+
+  (when
+    (and (-> self casted?) (-> self camera-underwater?))
+
+    (let ((particle-pos
+          (new 'stack-no-clear 'vector))
+
+        (side-axis (new 'stack-no-clear 'vector))
+
+        (forward-distance (rand-vu-float-range (meters 5.0) (meters 55.0)))
+
+        (side-distance (rand-vu-float-range (meters -28.0) (meters 28.0)))
+
+        (depth
+          (rand-vu-float-range
+            (meters 2.5)
+            (meters 18.0))))
+
+      (set! (-> side-axis x) (-> self playfield-axis z))
+
+      (set! (-> side-axis y) 0.0)
+
+      (set! (-> side-axis z) (- (-> self playfield-axis x)))
+
+      (set! (-> side-axis w) 0.0)
+
+      (vector-normalize! side-axis 1.0)
+
+      (vector+float*! particle-pos (-> self fishing-player-pos) (-> self playfield-axis) forward-distance)
+
+      (vector+float*! particle-pos particle-pos side-axis side-distance)
+
+      (set! (-> particle-pos y) (- (-> self water-level) depth))
+
+      (set! (-> particle-pos w) 1.0)
+
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 3572)
+        particle-pos)))
+
+  (none))
+
+(defun fisher-update-background-mist!
+  ((self fisher-game))
+
+  (let ((dt
+        (-> *display* seconds-per-frame)))
+
+    (cond
+      ((and
+          (-> self casted?)
+          (-> self camera-underwater?))
+
+        (-! (-> self background-mist-time) dt)
+
+        (when
+          (<= (-> self background-mist-time) 0.0)
+
+          (fisher-launch-background-mist! self)
+
+          (set!
+            (-> self background-mist-time)
+            (rand-vu-float-range
+              0.045
+              0.11))))
+
+      (else
+        (set!
+          (-> self background-mist-time)
+          0.0))))
+
+  (none))
+
+(defun fisher-force-underwater-background! ()
+  (when *time-of-day-context*
+    (let ((hour
+          (-> *time-of-day-context* time))
+
+        (blend 0.0)
+
+        (r 0.0)
+
+        (g 0.0)
+
+        (b
+          0.0))
+
+      (cond
+        ((and
+            (>= hour 4.0)
+            (< hour 7.0))
+
+          (set! blend (/ (- hour 4.0) 3.0))
+
+          (set! r (+ 9.0 (* (- 34.0 9.0) blend)))
+
+          (set! g (+ 88.0 (* (- 110.0 88.0) blend)))
+
+          (set! b (+ 97.0 (* (- 97.0 97.0) blend)))
+        )
+
+        ((and
+            (>= hour 7.0)
+            (< hour 9.0))
+
+          (set! blend (/ (- hour 7.0) 2.0))
+
+          (set! r (+ 34.0 (* (- 62.0 34.0) blend)))
+
+          (set! g (+ 110.0 (* (- 164.0 110.0) blend)))
+
+          (set! b (+ 97.0 (* (- 175.0 97.0) blend)))
+        )
+
+        ((and
+            (>= hour 9.0)
+            (< hour 12.0))
+
+          (set! r 62.0)
+          (set! g 164.0)
+          (set! b 175.0)
+        )
+
+        ((and
+            (>= hour 12.0)
+            (< hour 18.0))
+
+          (set! blend (/ (- hour 12.0) 6.0))
+
+          (set! r (+ 62.0 (* (- 30.0 62.0) blend)))
+
+          (set! g (+ 164.0 (* (- 72.0 164.0) blend)))
+
+          (set! b (+ 175.0 (* (- 57.0 175.0) blend)))
+        )
+
+        ((and
+            (>= hour 18.0)
+            (< hour 19.0))
+
+          (set! blend (- hour 18.0))
+
+          (set! r (+ 30.0 (* (- 11.0 30.0) blend)))
+
+          (set! g (+ 72.0 (* (- 44.0 72.0) blend)))
+
+          (set! b (+ 57.0 (* (- 96.0 57.0) blend)))
+        )
+
+        (else
+          (cond
+            ((and
+                (>= hour 19.0)
+                (< hour 24.0))
+
+              (set! r 11.0)
+              (set! g 44.0)
+              (set! b 96.0)
+            )
+
+            ((< hour 3.0) (set! r 11.0) (set! g 44.0) (set! b 96.0))
+
+            (else
+              (set! blend (- hour 3.0))
+
+              (set! r (+ 11.0 (* (- 9.0 11.0) blend)))
+
+              (set! g (+ 44.0 (* (- 88.0 44.0) blend)))
+
+              (set! b (+ 96.0 (* (- 97.0 96.0) blend)))
+            )
+          )
+        )
+      )
+
+      (dotimes (i 12)
+        (set! (-> sky-base-polygons i col x) r)
+
+        (set! (-> sky-base-polygons i col y) g)
+
+        (set! (-> sky-base-polygons i col z) b)
+
+        (set!
+          (-> sky-base-polygons i col w)
+          128.0))
+      (fisher-force-underwater-horizon! r g b)
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-update-camera-water! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0))) (set! (-> self camera-underwater?) (< (-> cam-slave trans y) (-> self water-level))))
+  )
+
+  (none)
+)
+
+(defun fisher-draw-cast-bar ((charge float))
+  (let ((fill-height (the int (* 116.0 charge)))
+      (fill-y (the int (- 184.0 (* 116.0 charge)))))
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+
+      (draw-sprite2d-xy buf 455 61 34 134 (new 'static 'rgba :r #x00 :g #x00 :b #x00 :a #x60))
+
+      (draw-sprite2d-xy buf 458 64 28 128 (new 'static 'rgba :r #x70 :g #x78 :b #x70 :a #x80))
+
+      (draw-sprite2d-xy buf 462 68 20 120 (new 'static 'rgba :r #x08 :g #x10 :b #x18 :a #x70))
+
+      (when (> fill-height 0)
+        (draw-sprite2d-xy buf 464 fill-y 16 fill-height (new 'static 'rgba :r #x20 :g #x70 :b #x80 :a #x80))
+
+        (draw-sprite2d-xy buf 462 (- fill-y 2) 20 4 (new 'static 'rgba :r #x70 :g #x80 :b #x80 :a #x80))
+      )
+
+      (draw-sprite2d-xy buf 458 58 28 6 (new 'static 'rgba :r #x70 :g #x78 :b #x70 :a #x80))
+
+      (draw-sprite2d-xy buf 458 192 28 6 (new 'static 'rgba :r #x70 :g #x78 :b #x70 :a #x80))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-reset-cast! ((self fisher-game))
+  (set! (-> self cast-state) 'ready)
+  (set! (-> self camera-state) 'before-cast)
+  (set! (-> self cast-charge-direction) 1.0)
+  (set! (-> self cast-charge) 0.0)
+  (set! (-> self cast-time) 0.0)
+  (set! (-> self camera-blend) 0.0)
+  (set! (-> self casted?) #f)
+  (set! (-> self hooked-fish) #f)
+  (set! (-> self fish-state) 'free)
+  (set! (-> self fish-message) #f)
+  (set! (-> self fish-message-time) 0.0)
+
+  (set! (-> self lure-x-velocity) 0.0)
+  (set! (-> self lure-y-velocity) 0.0)
+  (vector-reset! (-> self lure-pos))
+  (vector-reset! (-> self lure-cast-start))
+  (vector-reset! (-> self lure-cast-end))
+  (vector-reset! (-> self lure-cast-axis))
+  (vector-reset! (-> self lure-camera-offset))
+  (vector-reset! (-> self lure-camera-pos))
+  (vector-reset! (-> self lure-camera-look))
+  (vector-reset! (-> self hooked-fish-facing))
+  (vector-reset! (-> self hooked-fish-last-hook-pos))
+  (stop-sound-file "water-waves.wav")
+  (fisher-remove-lure-snake! self)
+  (set! (-> self reel-hint-time) 0.0)
+  (set! (-> self bubble-time) -2.0)
+
+  (none))
+
+(defun singlefish-prefix-string ((self singlefish-base))
+  (cond
+    ((= (-> self prefix) 'stressed) "Stressed")
+    ((= (-> self prefix) 'malnourished) "Malnourished")
+    ((= (-> self prefix) 'common) "Common")
+    ((= (-> self prefix) 'healthy) "Healthy")
+    ((= (-> self prefix) 'royal) "Royal")
+    ((= (-> self prefix) 'legendary) "Mega")
+    (else "Golden")))
+
+(defun singlefish-prefix-multiplier ((self singlefish-base))
+  (cond
+    ((= (-> self prefix) 'stressed) 0.50)
+    ((= (-> self prefix) 'malnourished) 0.75)
+    ((= (-> self prefix) 'common) 1.00)
+    ((= (-> self prefix) 'healthy) 1.50)
+    ((= (-> self prefix) 'royal) 2.00)
+    ((= (-> self prefix) 'legendary) 3.00)
+    (else 5.00)))
+
+(defun singlefish-tier-string ((self singlefish-base))
+  (cond
+    ((= (-> self tier) 'topwater) "Topwater")
+    ((= (-> self tier) 'bottom-feeder) "Bottom-Feeder")
+    (else "Deepwater")))
+
+(defun singlefish-remove-visual! ((self singlefish-base)) (none))
+
+(defun singlefish-session-valid? ((self singlefish-base))
+  (and
+    *singlefish-session-active?*
+    (= (-> self session-id) *singlefish-session-id*)
+    (-> self owner)))
+
+(defun singlefish-apply-color! ((self singlefish-base))
+  (set! (-> self draw color-mult r) (-> self fish-color x))
+
+  (set! (-> self draw color-mult g) (-> self fish-color y))
+
+  (set! (-> self draw color-mult b) (-> self fish-color z))
+
+  (set! (-> self draw color-mult a) (-> self fish-color w))
+
+  (cond
+    ((= (-> self prefix) 'golden)
+      (set! (-> self draw color-emissive r) 0.22)
+      (set! (-> self draw color-emissive g) 0.14)
+      (set! (-> self draw color-emissive b) 0.01)
+      (set! (-> self draw color-emissive a) 1.0))
+
+    (else
+      (set! (-> self draw color-emissive r) 0.0)
+      (set! (-> self draw color-emissive g) 0.0)
+      (set! (-> self draw color-emissive b) 0.0)
+      (set! (-> self draw color-emissive a) 1.0)))
+
+  (none))
+
+(defbehavior singlefish-post singlefish-base () (ja-post))
+
+(defun fisher-debug-line!
+  ((start vector)
+   (end vector)
+   (color rgba))
+
+  (add-debug-line
+    #t
+    (bucket-id subtitle)
+    start
+    end
+    color
+    #f
+    color)
+
+  (none)
+)
+
+(defun fisher-draw-retail-line!
+  ((start vector)
+   (end vector)
+   (color rgba))
+
+  ;; Retail replacement for internal-draw-debug-line. Use global-buf:
+  ;; debug-buf belongs to the debug renderer and can be invalid in retail.
+  (when
+    (and
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let ((screen-points
+          (new 'stack 'vector4w-2))
+
+        (line-colors
+          (new 'stack 'vector4w-2)))
+
+      (set! (-> start w) 1.0)
+      (set! (-> end w) 1.0)
+
+      (when
+        (and
+          (transform-point-qword!
+            (-> screen-points vector 0)
+            start)
+
+          (transform-point-qword!
+            (-> screen-points vector 1)
+            end))
+
+        ;; Use the same HP-derived color at both vertices so the entire
+        ;; fishing line matches the HP bar without an endpoint gradient.
+        (set!
+          (-> line-colors vector 0 x)
+          (the-as int (-> color r)))
+
+        (set!
+          (-> line-colors vector 0 y)
+          (the-as int (-> color g)))
+
+        (set!
+          (-> line-colors vector 0 z)
+          (the-as int (-> color b)))
+
+        (set!
+          (-> line-colors vector 0 w)
+          (the-as int (-> color a)))
+
+        (set!
+          (-> line-colors vector 1 quad)
+          (-> line-colors vector 0 quad))
+
+        ;; Pull the line slightly forward, matching the original debug
+        ;; line renderer and preventing depth fighting with geometry.
+        (+! (-> screen-points vector 0 z) -8192)
+        (+! (-> screen-points vector 1 z) -8192)
+
+        (with-dma-buffer-add-bucket
+          ((buf (-> (current-frame) global-buf))
+           (bucket-id subtitle))
+
+          (with-cnt-vif-block
+            (buf)
+
+            (dma-buffer-add-gif-tag
+              buf
+              (new 'static
+                'gif-tag64
+                :nloop 1
+                :eop 1
+                :pre 1
+                :nreg 4
+                :prim (gif-prim line))
+              (gs-reg-list
+                rgbaq
+                xyzf2
+                rgbaq
+                xyzf2))
+
+            (dma-buffer-add-uint128
+              buf
+              (-> line-colors quad 0)
+              (-> screen-points quad 0)
+              (-> line-colors quad 1)
+              (-> screen-points quad 1)))))))
+
+  (none)
+)
+
+(defun fisher-debug-make-point!
+  ((dst vector) (owner fisher-game) (axis vector) (side-axis vector) (distance float) (side-offset float) (height float))
+  (singlefish-vector-add-scaled-safe! dst (-> owner fishing-player-pos) axis distance)
+  (singlefish-vector-add-scaled-safe! dst dst side-axis side-offset)
+  (set! (-> dst y) height)
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun fisher-debug-draw-rectangle!
+  ((owner fisher-game) (axis vector) (side-axis vector) (near-distance float) (far-distance float) (half-width float) (height float) (color rgba))
+  (let ((near-left (new 'stack-no-clear 'vector))
+      (near-right (new 'stack-no-clear 'vector))
+      (far-left (new 'stack-no-clear 'vector))
+      (far-right (new 'stack-no-clear 'vector)))
+    (fisher-debug-make-point! near-left owner axis side-axis near-distance (- half-width) height)
+    (fisher-debug-make-point! near-right owner axis side-axis near-distance half-width height)
+    (fisher-debug-make-point! far-left owner axis side-axis far-distance (- half-width) height)
+    (fisher-debug-make-point! far-right owner axis side-axis far-distance half-width height)
+    (fisher-debug-line! near-left near-right color)
+    (fisher-debug-line! far-left far-right color)
+    (fisher-debug-line! near-left far-left color)
+    (fisher-debug-line! near-right far-right color))
+  (none))
+
+(defun fisher-draw-playfield-debug! ((self fisher-game))
+  (when *fisher-in-debug?*
+    (let ((axis (new 'stack-no-clear 'vector))
+        (side-axis (new 'stack-no-clear 'vector))
+        (near-distance (meters 3.5))
+        (far-distance (meters 55.5))
+        (half-width (meters 1.5))
+        (top-height (- (-> self water-level) (meters 3.5)))
+        (bottom-height (- (-> self water-level) (meters 35.5)))
+        (topwater-height (- (-> self water-level) (meters 11.5)))
+        (bottom-feeder-height (- (-> self water-level) (meters 19.5)))
+        (deepwater-height (- (-> self water-level) (meters 27.5)))
+        (boundary-color (new 'static 'rgba :r #xff :g #x10 :b #x10 :a #xff))
+        (topwater-color (new 'static 'rgba :r #x20 :g #xff :b #x40 :a #xff))
+        (bottom-feeder-color (new 'static 'rgba :r #xff :g #xd0 :b #x20 :a #xff))
+        (deepwater-color (new 'static 'rgba :r #x20 :g #x80 :b #xff :a #xff))
+        (nlt (new 'stack-no-clear 'vector))
+        (nrt (new 'stack-no-clear 'vector))
+        (flt (new 'stack-no-clear 'vector))
+        (frt (new 'stack-no-clear 'vector))
+        (nlb (new 'stack-no-clear 'vector))
+        (nrb (new 'stack-no-clear 'vector))
+        (flb (new 'stack-no-clear 'vector))
+        (frb (new 'stack-no-clear 'vector)))
+      (singlefish-vector-copy-safe! axis (-> self playfield-axis))
+      (set! (-> axis y) 0.0)
+      (set! (-> axis w) 0.0)
+      (singlefish-vector-normalize-safe! axis 1.0)
+      (set! (-> side-axis x) (-> axis z))
+      (set! (-> side-axis y) 0.0)
+      (set! (-> side-axis z) (- (-> axis x)))
+      (set! (-> side-axis w) 0.0)
+      (singlefish-vector-normalize-safe! side-axis 1.0)
+      (fisher-debug-make-point! nlt self axis side-axis near-distance (- half-width) top-height)
+      (fisher-debug-make-point! nrt self axis side-axis near-distance half-width top-height)
+      (fisher-debug-make-point! flt self axis side-axis far-distance (- half-width) top-height)
+      (fisher-debug-make-point! frt self axis side-axis far-distance half-width top-height)
+      (fisher-debug-make-point! nlb self axis side-axis near-distance (- half-width) bottom-height)
+      (fisher-debug-make-point! nrb self axis side-axis near-distance half-width bottom-height)
+      (fisher-debug-make-point! flb self axis side-axis far-distance (- half-width) bottom-height)
+      (fisher-debug-make-point! frb self axis side-axis far-distance half-width bottom-height)
+      (fisher-debug-line! nlt nrt boundary-color)
+      (fisher-debug-line! flt frt boundary-color)
+      (fisher-debug-line! nlt flt boundary-color)
+      (fisher-debug-line! nrt frt boundary-color)
+      (fisher-debug-line! nlb nrb boundary-color)
+      (fisher-debug-line! flb frb boundary-color)
+      (fisher-debug-line! nlb flb boundary-color)
+      (fisher-debug-line! nrb frb boundary-color)
+      (fisher-debug-line! nlt nlb boundary-color)
+      (fisher-debug-line! nrt nrb boundary-color)
+      (fisher-debug-line! flt flb boundary-color)
+      (fisher-debug-line! frt frb boundary-color)
+      (fisher-debug-draw-rectangle! self axis side-axis near-distance far-distance half-width topwater-height topwater-color)
+      (fisher-debug-draw-rectangle! self axis side-axis near-distance far-distance half-width bottom-feeder-height bottom-feeder-color)
+      (fisher-debug-draw-rectangle! self axis side-axis near-distance far-distance half-width deepwater-height deepwater-color)))
+  (none))
+
+(defun singlefish-draw-debug-marker! ((self singlefish-base))
+  (when *fisher-in-debug?*
+    (let ((left (new 'stack-no-clear 'vector))
+        (right (new 'stack-no-clear 'vector))
+        (top (new 'stack-no-clear 'vector))
+        (bottom (new 'stack-no-clear 'vector))
+        (front (new 'stack-no-clear 'vector))
+        (back (new 'stack-no-clear 'vector))
+        (color (new 'static 'rgba :r #xff :g #xff :b #xff :a #xff)))
+      (singlefish-vector-copy-safe! left (-> self root trans))
+      (singlefish-vector-copy-safe! right (-> self root trans))
+      (singlefish-vector-copy-safe! top (-> self root trans))
+      (singlefish-vector-copy-safe! bottom (-> self root trans))
+      (singlefish-vector-copy-safe! front (-> self root trans))
+      (singlefish-vector-copy-safe! back (-> self root trans))
+      (-! (-> left x) (meters 1.0))
+      (+! (-> right x) (meters 1.0))
+      (+! (-> top y) (meters 1.0))
+      (-! (-> bottom y) (meters 1.0))
+      (+! (-> front z) (meters 1.0))
+      (-! (-> back z) (meters 1.0))
+      (fisher-debug-line! left right color)
+      (fisher-debug-line! top bottom color)
+      (fisher-debug-line! front back color)))
+  (none))
+
+(defun singlefish-set-visible! ((self singlefish-base) (visible? symbol))
+  (let ((scale
+        (if visible?
+          (-> self visual-scale)
+          0.0001)))
+
+    (set-vector!
+      (-> self root scale)
+      scale
+      scale
+      scale
+      1.0))
+
+  (none))
+
+(defun singlefish-roll-prefix! ((self singlefish-base))
+  (let ((roll (rand-vu-int-range 0 999)))
+    (cond
+      ((< roll 280) (set! (-> self prefix) 'stressed))
+      ((< roll 540) (set! (-> self prefix) 'malnourished))
+      ((< roll 690) (set! (-> self prefix) 'common))
+      ((< roll 910) (set! (-> self prefix) 'healthy))
+      ((< roll 970) (set! (-> self prefix) 'royal))
+      ((< roll 990) (set! (-> self prefix) 'legendary))
+      (else (set! (-> self prefix) 'golden))))
+
+  (singlefish-vector-copy-safe! (-> self fish-color) (-> self base-color))
+
+  (when (= (-> self prefix) 'golden) (set-vector! (-> self fish-color) 1.0 0.78 0.08 1.0))
+
+  (none))
+
+(defun singlefish-roll-weight-and-value! ((self singlefish-base))
+  (let* ((weight-range
+        (max
+          1
+          (-
+            (-> self max-weight-tenths)
+            (-> self min-weight-tenths))))
+
+      (weight-ratio 0.0)
+
+      (weight-lbs 0.0)
+
+      (raw-value
+        0.0))
+
+    (set! (-> self weight-tenths) (rand-vu-int-range (-> self min-weight-tenths) (-> self max-weight-tenths)))
+
+    (set! weight-ratio (/ (the float (- (-> self weight-tenths) (-> self min-weight-tenths))) (the float weight-range)))
+
+    (set! weight-lbs (* (the float (-> self weight-tenths)) 0.1))
+
+    (set! raw-value (* (the float (-> self base-orb-value)) weight-lbs (singlefish-prefix-multiplier self)))
+
+    (set! (-> self visual-scale) (* (-> self base-scale) (+ 0.88 (* 0.24 weight-ratio))))
+
+    (set!
+      (-> self orb-value)
+      (max
+        1
+        (the int
+          (+ raw-value 0.5)))))
+
+  (none))
+
+(defun singlefish-face-vector! ((self singlefish-base) (forward vector))
+  (when *camera*
+    (let ((rot
+          (new 'stack-no-clear 'matrix))
+
+        (safe-forward (new 'stack-no-clear 'vector))
+
+        (safe-down
+          (new 'stack-no-clear 'vector)))
+
+      (singlefish-vector-copy-safe! safe-forward forward)
+
+      (set! (-> safe-forward y) 0.0)
+      (set! (-> safe-forward w) 0.0)
+
+      (when
+        (> (singlefish-vector-length-safe safe-forward) (meters 0.001))
+
+        (singlefish-vector-normalize-safe! safe-forward (-> self model-forward-sign))
+
+        (singlefish-vector-copy-safe! (-> self forward) safe-forward)
+
+        (singlefish-vector-copy-safe! safe-down (-> *camera* local-down))
+
+        (forward-down->inv-matrix rot safe-forward safe-down)
+
+        (matrix->quaternion
+          (-> self root quat)
+          rot))))
+
+  (none))
+
+(defun singlefish-get-side-axis! ((self singlefish-base) (side-axis vector))
+  (let ((owner
+        (the-as fisher-game (-> self owner))))
+
+    (set! (-> side-axis x) (-> owner playfield-axis z))
+    (set! (-> side-axis y) 0.0)
+    (set! (-> side-axis z) (- (-> owner playfield-axis x)))
+    (set! (-> side-axis w) 0.0)
+
+    (singlefish-vector-normalize-safe! side-axis 1.0))
+
+  (none))
+
+(defun singlefish-place-in-zone! ((self singlefish-base))
+  (let* ((owner
+        (the-as fisher-game (-> self owner)))
+
+      (distance (rand-vu-float-range (meters 4.0) (meters 55.0)))
+
+      (y-offset (rand-vu-float-range (meters 1.0) (meters 2.0)))
+
+      (row-center 0.0)
+
+      (row-bottom 0.0)
+
+      (row-top 0.0)
+
+      (side-axis
+        (new 'stack-no-clear 'vector)))
+
+    (when (rand-vu-percent? 0.5) (set! y-offset (- y-offset)))
+
+    (cond
+      ((= (-> self tier) 'topwater)
+        (set! row-center (- (-> owner water-level) (meters 5.5)))
+        (set! row-bottom (- (-> owner water-level) (meters 8.0)))
+        (set! row-top (- (-> owner water-level) (meters 3.5))))
+
+      ((= (-> self tier) 'bottom-feeder)
+        (set! row-center (- (-> owner water-level) (meters 11.5)))
+        (set! row-bottom (- (-> owner water-level) (meters 14.0)))
+        (set! row-top (- (-> owner water-level) (meters 8.5))))
+
+      (else
+        (set! row-center (- (-> owner water-level) (meters 17.0)))
+        (set! row-bottom (- (-> owner water-level) (meters 19.5)))
+        (set! row-top (- (-> owner water-level) (meters 14.5)))))
+
+    (set! (-> self home-y) (fmax row-bottom (fmin row-top (+ row-center y-offset))))
+
+    (set! (-> self lane-offset) (rand-vu-float-range (meters -1.5) (meters 1.5)))
+
+    (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
+
+    (set! (-> self left-distance) (meters 3.5))
+    (set! (-> self right-distance) (meters 55.5))
+
+    (singlefish-vector-add-scaled-safe! (-> self root trans) (-> owner fishing-player-pos) (-> owner playfield-axis) distance)
+
+    (singlefish-get-side-axis! self side-axis)
+
+    (singlefish-vector-add-scaled-safe! (-> self root trans) (-> self root trans) side-axis (-> self lane-offset))
+
+    (set! (-> self root trans y) (-> self home-y))
+    (set! (-> self root trans w) 1.0)
+
+    (let ((forward
+          (new 'stack-no-clear 'vector)))
+
+      (singlefish-vector-scale-safe! forward (-> owner playfield-axis) (-> self direction))
+
+      (singlefish-face-vector! self forward)))
+
+  (singlefish-set-visible! self #f)
+  (none))
+
+(defun singlefish-start-turn! ((self singlefish-base) (new-direction float))
+  (set! (-> self turning?) #t)
+  (set! (-> self turn-time) 0.0)
+  (set! (-> self turn-duration) 0.42)
+  (set! (-> self turn-old-direction) (-> self direction))
+  (set! (-> self direction) new-direction)
+  (set! (-> self turn-side) (if (rand-vu-percent? 0.5) 1.0 -1.0))
+  (none))
+
+(defun singlefish-update-turn! ((self singlefish-base) (dt float))
+  (let* ((owner
+        (the-as fisher-game (-> self owner)))
+
+      (progress (fmin 1.0 (/ (-> self turn-time) (-> self turn-duration))))
+
+      (angle (* (degrees 180.0) progress))
+
+      (forward (new 'stack-no-clear 'vector))
+
+      (side-forward (new 'stack-no-clear 'vector))
+
+      (side-axis
+        (new 'stack-no-clear 'vector)))
+
+    (singlefish-vector-scale-safe! forward (-> owner playfield-axis) (* (-> self turn-old-direction) (cos angle)))
+
+    (singlefish-get-side-axis! self side-axis)
+
+    (singlefish-vector-scale-safe! side-forward side-axis (* (-> self turn-side) (sin angle)))
+
+    (singlefish-vector-add-safe! forward forward side-forward)
+
+    (singlefish-face-vector! self forward)
+
+    (+! (-> self turn-time) dt)
+
+    (when (>= (-> self turn-time) (-> self turn-duration))
+      (set! (-> self turning?) #f)
+
+      (singlefish-vector-scale-safe! forward (-> owner playfield-axis) (-> self direction))
+
+      (singlefish-face-vector! self forward)))
+
+  (none))
+
+(defun singlefish-should-be-visible? ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (and
+      (-> owner casted?)
+      (or
+        (= (-> owner cast-state) 'water-entry)
+        (= (-> owner cast-state) 'line-active)))))
+
+(defun singlefish-patrol-step! ((self singlefish-base) (speed-scale float))
+  (let* ((owner (the-as fisher-game (-> self owner)))
+      (dt (-> *display* seconds-per-frame))
+      (from-owner (new 'stack-no-clear 'vector))
+      (distance 0.0)
+      (current-lane 0.0)
+      (wanted-lane 0.0)
+      (side-axis (new 'stack-no-clear 'vector)))
+    (singlefish-get-side-axis! self side-axis)
+    (singlefish-set-visible! self (or *fisher-in-debug?* (singlefish-should-be-visible? self)))
+    (cond
+      ((-> self turning?) (singlefish-update-turn! self dt))
+      (else
+        (singlefish-vector-add-scaled-safe!
+          (-> self root trans)
+          (-> self root trans)
+          (-> owner playfield-axis)
+          (* (-> self direction) (-> self swim-speed) speed-scale dt))
+        (set! (-> self root trans y) (seek (-> self root trans y) (-> self home-y) (* (meters 1.4) dt)))
+        (singlefish-vector-sub-safe! from-owner (-> self root trans) (-> owner fishing-player-pos))
+        (set! current-lane (vector-dot from-owner side-axis))
+        (set! wanted-lane (seek current-lane (-> self lane-offset) (* (meters 1.0) dt)))
+        (singlefish-vector-add-scaled-safe! (-> self root trans) (-> self root trans) side-axis (- wanted-lane current-lane))
+        (singlefish-vector-sub-safe! from-owner (-> self root trans) (-> owner fishing-player-pos))
+        (set! distance (vector-dot from-owner (-> owner playfield-axis)))
+        (cond
+          ((<= distance (-> self left-distance))
+            (singlefish-vector-add-scaled-safe!
+              (-> self root trans)
+              (-> self root trans)
+              (-> owner playfield-axis)
+              (- (-> self left-distance) distance))
+            (singlefish-start-turn! self 1.0))
+          ((>= distance (-> self right-distance))
+            (singlefish-vector-add-scaled-safe!
+              (-> self root trans)
+              (-> self root trans)
+              (-> owner playfield-axis)
+              (- (-> self right-distance) distance))
+            (singlefish-start-turn! self -1.0)))))
+    (set! (-> self root trans w) 1.0)
+    (singlefish-draw-debug-marker! self))
+  (none))
+
+(defun singlefish-can-see-lure? ((self singlefish-base))
+  (let* ((owner
+        (the-as fisher-game (-> self owner)))
+
+      (nose-pos (new 'stack-no-clear 'vector))
+
+      (to-lure (new 'stack-no-clear 'vector))
+
+      (front-distance 0.0)
+
+      (vertical-distance 0.0)
+
+      (total-distance
+        0.0))
+
+    (singlefish-vector-add-scaled-safe! nose-pos (-> self root trans) (-> self forward) (-> self nose-offset))
+
+    (singlefish-vector-sub-safe! to-lure (-> owner lure-pos) nose-pos)
+
+    (set! front-distance (vector-dot to-lure (-> self forward)))
+
+    (set! vertical-distance (fmax (-> to-lure y) (- (-> to-lure y))))
+
+    (set! total-distance (singlefish-vector-length-safe to-lure))
+
+    (and
+      (= (-> owner cast-state) 'line-active)
+      (= (-> owner fish-state) 'free)
+      (not (-> owner hooked-fish))
+      (>= front-distance (meters 0.65))
+      (<= front-distance (meters 4.5))
+      (<= vertical-distance (meters 1.8))
+      (<= total-distance (meters 5.0)))))
+
+(defun fisher-play-fish-bite-sound! ()
+  (play-sound-file "fish-bite.wav" (the int (-> *setting-control* current sfx-volume)))
+
+  (none))
+
+(defun fisher-play-random-fight-sound! ()
+  (play-sound-file (if (rand-vu-percent? 0.5) "fish-fighta.wav" "figh-fightb.wav") (the int (-> *setting-control* current sfx-volume)))
+
+  (none))
+
+(defun fisher-play-fish-win-sound! ()
+  (play-sound-file "fish-win.wav" (the int (-> *setting-control* current sfx-volume)))
+
+  (none))
+
+(defun singlefish-begin-approach! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (set! (-> owner hooked-fish) self)
+    (set! (-> owner fish-state) 'approaching)
+    (go-virtual singlefish-approach))
+
+  (none))
+
+(defun singlefish-owner-still-hooked? ((self singlefish-base)) (let ((owner (the-as fisher-game (-> self owner)))) (= (-> owner hooked-fish) self)))
+
+(defun singlefish-pin-nose-to-lure! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (singlefish-vector-add-scaled-safe! (-> self root trans) (-> owner lure-pos) (-> self forward) (- (-> self nose-offset)))
+
+    (set! (-> self root trans w) 1.0))
+
+  (none))
+
+(defun singlefish-fail-hook! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (when (= (-> owner hooked-fish) self) (set! (-> owner hooked-fish) #f) (set! (-> owner fish-state) 'free))
+
+    (set! (-> owner fish-message) "SCARED OFF")
+    (set! (-> owner fish-message-time) 1.5)
+    (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
+    (set! (-> self turning?) #f)
+    (let ((escape-forward
+          (new 'stack-no-clear 'vector)))
+
+      (singlefish-vector-scale-safe! escape-forward (-> owner playfield-axis) (-> self direction))
+
+      (singlefish-face-vector!
+        self
+        escape-forward))
+    (set! (-> self scared-time) 5.0)
+    (go-virtual singlefish-scared))
+
+  (none))
+
+(defun singlefish-hook-now! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (when
+      (and (= (-> owner hooked-fish) self) (= (-> owner fish-state) 'hook-window))
+
+      (set! (-> owner fish-state) 'reeling)
+      (set! (-> self fighting?) #f)
+      (set! (-> self next-fight-time) (rand-vu-float-range 1.5 3.5))
+      (set! (-> self fight-time) 0.0)
+      (set! (-> self fight-phase) 0.0)
+      (set! (-> self fight-pull) 0.0)
+      (go-virtual singlefish-reeling :proc self)))
+
+  (none))
+
+(defun singlefish-start-fight! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (fisher-play-random-fight-sound!)
+    (set! (-> self fighting?) #t)
+    (set! (-> self fight-time) (rand-vu-float-range 2.0 4.0))
+    (set! (-> self fight-phase) 0.0)
+    (set! (-> self fight-base-y) (-> owner lure-pos y))
+    (set! (-> self fight-pull) 0.0))
+
+  (none))
+
+(defun singlefish-break-line! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (fisher-reset-cast! owner)
+    (set! (-> owner fish-message) "LINE BROKEN")
+    (set! (-> owner fish-message-time) 1.75)
+    (set! (-> self fighting?) #f)
+    (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
+    (set! (-> self turning?) #f)
+    (let ((escape-forward
+          (new 'stack-no-clear 'vector)))
+
+      (singlefish-vector-scale-safe! escape-forward (-> owner playfield-axis) (-> self direction))
+
+      (singlefish-face-vector!
+        self
+        escape-forward))
+    (set! (-> self scared-time) 5.0)
+    (go-virtual singlefish-scared))
+
+  (none))
+
+(defun singlefish-caught! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (fisher-play-fish-win-sound!)
+    (set! (-> self caught?) #t)
+    (set! (-> self fighting?) #f)
+    (set! (-> owner fish-state) 'catch-display)
+    (set! (-> owner cast-state) 'catch-display)
+    (set! (-> owner camera-state) 'before-cast)
+    (set! (-> owner casted?) #f)
+    (set! (-> owner fish-message) #f)
+    (set! (-> owner fish-message-time) 0.0)
+    (stop-sound-file "water-waves.wav")
+    (fisher-remove-lure-snake! owner)
+    (go-virtual singlefish-catch-display))
+
+  (none))
+
+(defun singlefish-update-reeling! ((self singlefish-base))
+  (let* ((owner
+        (the-as fisher-game (-> self owner)))
+
+      (dt (-> *display* seconds-per-frame))
+
+      (from-owner (new 'stack-no-clear 'vector))
+
+      (forward (new 'stack-no-clear 'vector))
+
+      (horizontal-distance 0.0)
+
+      (saved-y 0.0)
+
+      (top-y (- (-> owner water-level) (meters 3.0)))
+
+      (bottom-y
+        (- (-> owner water-level) (meters 36.0))))
+
+    (when
+      (or (not (singlefish-owner-still-hooked? self)) (!= (-> owner fish-state) 'reeling))
+      (set! (-> self scared-time) 5.0)
+      (go-virtual singlefish-scared))
+
+    (cond
+      ((-> self fighting?)
+        (singlefish-vector-copy-safe! forward (-> owner playfield-axis))
+
+        (set! (-> forward y) 0.0)
+        (set! (-> forward w) 0.0)
+
+        (singlefish-vector-normalize-safe! forward 1.0)
+
+        (singlefish-face-vector! self forward)
+
+        (-! (-> self fight-time) dt)
+        (+! (-> self fight-phase) (* (degrees 285.0) dt))
+
+        (when (< (-> self fight-pull) (meters 2.25))
+          (let ((pull-step
+                (fmin
+                  (* (meters 0.85) dt)
+                  (- (meters 2.25) (-> self fight-pull)))))
+
+            (+! (-> self fight-pull) pull-step)
+
+            (singlefish-vector-add-scaled-safe!
+              (-> owner lure-pos)
+              (-> owner lure-pos)
+              (-> owner playfield-axis)
+              pull-step)))
+
+        (set! (-> owner lure-pos y) (+ (-> self fight-base-y) (* (meters 0.55) (sin (-> self fight-phase)))))
+
+        (when (cpad-hold? 0 x) (fisher-damage-line! (* 45.0 dt)))
+
+        (when *fisher-line-broken?* (singlefish-break-line! self))
+
+        (when (<= (-> self fight-time) 0.0)
+          (set! (-> self fighting?) #f)
+          (set! (-> self next-fight-time) (rand-vu-float-range 1.5 4.5))))
+
+      (else
+        (singlefish-vector-scale-safe! forward (-> owner playfield-axis) -1.0)
+
+        (set! (-> forward y) 0.72)
+        (set! (-> forward w) 0.0)
+
+        (singlefish-vector-normalize-safe! forward 1.0)
+
+        (singlefish-face-vector! self forward)
+
+        (-! (-> self next-fight-time) dt)
+
+        (cond
+          ((cpad-hold? 0 x)
+            (singlefish-vector-add-scaled-safe!
+              (-> owner lure-pos)
+              (-> owner lure-pos)
+              (-> owner playfield-axis)
+              (-
+                (*
+                  (-> owner lure-reel-x-speed)
+                  (meters 1.0)
+                  dt)))
+
+            (+!
+              (-> owner lure-pos y)
+              (*
+                (-> owner lure-reel-y-speed)
+                (meters 0.55)
+                dt)))
+
+          (else
+            (singlefish-vector-add-scaled-safe!
+              (-> owner lure-pos)
+              (-> owner lure-pos)
+              (-> owner playfield-axis)
+              (* (meters 0.10) dt))))
+
+        (singlefish-vector-sub-safe! from-owner (-> owner lure-pos) (-> owner fishing-player-pos))
+
+        (set! horizontal-distance (vector-dot from-owner (-> owner playfield-axis)))
+
+        (when
+          (and (<= (-> self next-fight-time) 0.0) (> horizontal-distance (meters 5.0)))
+          (singlefish-start-fight! self))))
+
+    (singlefish-vector-sub-safe! from-owner (-> owner lure-pos) (-> owner pos))
+
+    (set! horizontal-distance (vector-dot from-owner (-> owner playfield-axis)))
+
+    (set! saved-y (-> owner lure-pos y))
+
+    (cond
+      ((< horizontal-distance (meters 2.0))
+        (singlefish-vector-add-scaled-safe! (-> owner lure-pos) (-> owner fishing-player-pos) (-> owner playfield-axis) (meters 2.0))
+
+        (set! (-> owner lure-pos y) saved-y)
+        (set! horizontal-distance (meters 2.0)))
+
+      ((> horizontal-distance (meters 55.5))
+        (singlefish-vector-add-scaled-safe! (-> owner lure-pos) (-> owner fishing-player-pos) (-> owner playfield-axis) (meters 55.5))
+
+        (set! (-> owner lure-pos y) saved-y)
+        (set! horizontal-distance (meters 55.5))))
+
+    (when (> (-> owner lure-pos y) top-y) (set! (-> owner lure-pos y) top-y))
+
+    (when (< (-> owner lure-pos y) bottom-y) (set! (-> owner lure-pos y) bottom-y))
+
+    (singlefish-pin-nose-to-lure! self)
+
+    (when
+      (and (not (-> self fighting?)) (<= horizontal-distance (meters 2.35)) (>= (-> owner lure-pos y) (- (-> owner water-level) (meters 3.15))))
+      (singlefish-caught! self)))
+
+  (none))
+
+(defun singlefish-position-catch-model! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (when (and *camera* (> (-> *camera* num-slaves) 0))
+      (let* ((cam-slave
+            (-> *camera* slave 0 0))
+
+          (forward (new 'stack-no-clear 'vector))
+
+          (right (new 'stack-no-clear 'vector))
+
+          (display-pos (new 'stack-no-clear 'vector))
+
+          (display-scale
+            (* (-> self visual-scale) 2.65)))
+
+        (singlefish-vector-sub-safe! forward (-> owner fisher-look) (-> cam-slave trans))
+
+        (set! (-> forward w) 0.0)
+        (singlefish-vector-normalize-safe! forward 1.0)
+
+        (singlefish-vector-cross-safe! right forward (-> *camera* local-down))
+
+        (set! (-> right w) 0.0)
+        (singlefish-vector-normalize-safe! right 1.0)
+
+        (singlefish-vector-add-scaled-safe! display-pos (-> cam-slave trans) forward (meters 5.0))
+
+        (singlefish-vector-add-scaled-safe! display-pos display-pos (-> *camera* local-down) (meters -1.15))
+
+        (set! (-> display-pos w) 1.0)
+
+        (set! (-> self root trans quad) (-> display-pos quad))
+
+        (singlefish-face-vector! self right)
+
+        (set-vector!
+          (-> self root scale)
+          display-scale
+          display-scale
+          display-scale
+          1.0))))
+
+  (none))
+
+(defun singlefish-sell! ((self singlefish-base))
+  (let ((owner (the-as fisher-game (-> self owner))))
+    (when *target* (send-event *target* 'get-pickup (pickup-type money) (the float (-> self orb-value))))
+
+    (when (> (-> owner fish-count) 0) (-! (-> owner fish-count) 1))
+
+    (fisher-reset-cast! owner)
+    (set! (-> owner fish-message) "FISH SOLD")
+    (set! (-> owner fish-message-time) 1.25)
+    (go-virtual singlefish-dead :proc self))
+
+  (none))
+
+(defun singlefish-set-species-data!
+  ((self singlefish-base)
+    (species-name string)
+    (color-name string)
+    (tier symbol)
+    (min-weight-tenths int)
+    (max-weight-tenths int)
+    (base-orb-value int))
+
+  (set! (-> self species-name) species-name)
+  (set! (-> self color-name) color-name)
+  (set! (-> self tier) tier)
+  (set! (-> self min-weight-tenths) min-weight-tenths)
+  (set! (-> self max-weight-tenths) max-weight-tenths)
+  (set! (-> self base-orb-value) base-orb-value)
+
+  (none))
+
+(defun singlefish-set-model-data!
+  ((self singlefish-base) (base-scale float) (swim-speed float) (nose-offset float) (model-forward-sign float) (color vector))
+
+  (set! (-> self base-scale) base-scale)
+  (set! (-> self visual-scale) base-scale)
+  (set! (-> self swim-speed) (* swim-speed (rand-vu-float-range 0.70 1.35)))
+
+  (set! (-> self nose-offset) nose-offset)
+  (set! (-> self model-forward-sign) model-forward-sign)
+
+  (singlefish-vector-copy-safe! (-> self base-color) color)
+  (singlefish-vector-copy-safe! (-> self fish-color) color)
+
+  (none))
+
+(defun singlefish-initialize!
+  ((self singlefish-base) (owner (pointer fisher-game)) (skel-group skeleton-group))
+
+  (set! (-> self owner) owner)
+  (set! (-> self turning?) #f)
+  (set! (-> self turn-time) 0.0)
+  (set! (-> self turn-duration) 0.42)
+  (set! (-> self turn-old-direction) 1.0)
+  (set! (-> self turn-side) 1.0)
+  (set! (-> self hook-time) 0.0)
+  (set! (-> self scared-time) 0.0)
+  (set! (-> self next-fight-time) 0.0)
+  (set! (-> self fight-time) 0.0)
+  (set! (-> self fight-phase) 0.0)
+  (set! (-> self fight-base-y) 0.0)
+  (set! (-> self fight-pull) 0.0)
+  (set! (-> self fighting?) #f)
+  (set! (-> self caught?) #f)
+  (set! (-> self session-id) *singlefish-session-id*)
+
+  (singlefish-vector-reset-safe! (-> self forward))
+
+  (initialize-skeleton self skel-group '())
+
+  (logior! (-> self skel status) (janim-status inited))
+
+  (singlefish-roll-prefix! self)
+  (singlefish-roll-weight-and-value! self)
+  (singlefish-place-in-zone! self)
+  (singlefish-apply-color! self)
+  (singlefish-draw-debug-marker! self)
+
+  (logclear! (-> self mask) (process-mask actor-pause))
+
+  (go-virtual singlefish-patrol)
+  (none))
+
+(defbehavior singlefish-base-init-by-other singlefish-base ()
+  (singlefish-set-species-data! self "FishA" "Blue-Green" 'topwater 10 20 1)
+
+  (singlefish-set-model-data! self 0.30 (meters 1.20) (meters 0.42) 1.0 (new 'static 'vector :x 0.35 :y 0.90 :z 0.80 :w 1.0))
+
+  (singlefish-initialize!
+    self
+    *fisher-game*
+    *catch-fisha-sgc*))
+
+(defbehavior eco-drum-init-by-other eco-drum
+  ((owner (pointer fisher-game)))
+
+  (singlefish-set-species-data! self "Eco Drum" "Eco Teal" 'topwater 10 20 1)
+
+  (singlefish-set-model-data! self 0.30 (meters 1.20) (meters 0.42) 1.0 (new 'static 'vector :x 0.25 :y 0.88 :z 1.00 :w 1.0))
+
+  (singlefish-initialize!
+    self
+    owner
+    *catch-fisha-sgc*))
+
+(defun fisher-smoothstep ((value float)) (* value value (- 3.0 (* 2.0 value))))
+
+(defun fisher-catch-display-fish-position!
+  ((self fisher-game) (dst vector))
+
+  (let ((camera-forward
+        (new 'stack-no-clear 'vector)))
+
+    (singlefish-vector-sub-safe! camera-forward (-> self fisher-look) (-> self fisher-cam))
+
+    (singlefish-vector-normalize-safe! camera-forward 1.0)
+
+    (singlefish-vector-add-scaled-safe! dst (-> self fisher-cam) camera-forward (meters 5.0))
+
+    (+! (-> dst y) (+ (meters 0.55) (* (meters -0.030) (-> self catch-menu-offset))))
+
+    (set! (-> dst w) 1.0))
+
+  dst)
+
+(defun fisher-spawn-catch-display-fish! ((self fisher-game))
+  (let ((slot
+        (-> self hooked-fish-slot))
+
+      (pos (new 'stack-no-clear 'vector))
+
+      (fish
+        (the-as (pointer manipy) #f)))
+
+    (when (>= slot 0)
+      (fisher-set-fish-species! self slot (-> self caught-fish-species))
+
+      (fisher-set-fish-suffix! self slot (-> self caught-fish-suffix))
+
+      (fisher-catch-display-fish-position! self pos)
+
+      (set!
+        fish
+        (the-as
+          (pointer manipy)
+          (manipy-spawn
+            pos
+            #f
+            (cond
+              ((= (-> self caught-fish-species) 1) *catch-fishb-sgc*)
+
+              ((= (-> self caught-fish-species) 2) *fisher-junglefish-sg*)
+
+              (else
+                *catch-fisha-sgc*))
+            #f
+            :from *default-dead-pool*
+            :to *default-pool*
+            :name "fisher-catch-display-fish")))
+
+      (fisher-set-fish-pointer! self slot fish)
+
+      (when fish
+        (let ((fish-proc
+              (the-as manipy
+                (-> fish 0 self))))
+
+          (send-event fish-proc 'anim-mode 'loop)
+
+          (send-event fish-proc 'max-vis-dist (meters 999999.0))
+
+          (set! (-> fish-proc root trans quad) (-> pos quad))
+
+          (fisher-apply-slot-appearance!
+            self
+            slot
+            fish-proc
+            #t)))))
+
+  (none))
+
+(defun fisher-update-catch-return! ((self fisher-game))
+  (let* ((dt
+        (-> *display* seconds-per-frame))
+
+      (slot (-> self hooked-fish-slot))
+
+      (fish (if (>= slot 0) (fisher-fish-pointer self slot) (the-as (pointer manipy) #f)))
+
+      (jak-pos (new 'stack-no-clear 'vector))
+
+      (delta (new 'stack-no-clear 'vector))
+
+      (distance
+        0.0))
+
+    (+! (-> self catch-transition-time) dt)
+
+    (when
+      (and *camera* (> (-> *camera* num-slaves) 0))
+
+      (let* ((cam-slave
+            (-> *camera* slave 0 0))
+
+          (camera-blend (fmin 1.0 (* dt 3.2)))
+
+          (camera-pos (new 'stack-no-clear 'vector))
+
+          (camera-forward
+            (new 'stack-no-clear 'vector)))
+
+        (vector-lerp! camera-pos (-> cam-slave trans) (-> self fisher-cam) camera-blend)
+
+        (set! (-> cam-slave saved-pt quad) (-> camera-pos quad))
+
+        (set! (-> cam-slave trans quad) (-> camera-pos quad))
+
+        (vector-! camera-forward (-> self fisher-look) camera-pos)
+
+        (when
+          (> (singlefish-vector-length-safe camera-forward) (meters 0.001))
+
+          (singlefish-vector-normalize-safe! camera-forward 1.0)
+
+          (forward-down->inv-matrix
+            (-> cam-slave tracking inv-mat)
+            camera-forward
+            (-> *camera* local-down)))))
+
+    (when fish
+      (let ((fish-proc
+            (the-as manipy
+              (-> fish 0 self))))
+
+        (vector-copy! jak-pos (target-pos 0))
+
+        (+! (-> jak-pos y) (meters 1.15))
+
+        (vector-! delta jak-pos (-> fish-proc root trans))
+
+        (set! distance (singlefish-vector-length-safe delta))
+
+        (when (> distance (meters 0.001))
+          (singlefish-vector-normalize-safe! delta (fmin distance (* (meters 12.0) dt)))
+
+          (vector+!
+            (-> fish-proc root trans)
+            (-> fish-proc root trans)
+            delta))
+
+        (when
+          (or (<= distance (meters 0.30)) (>= (-> self catch-transition-time) 2.0))
+
+          (deactivate (-> fish 0))
+
+          (fisher-set-fish-pointer! self slot (the-as (pointer manipy) #f))
+
+          (fisher-spawn-catch-display-fish! self)
+
+          (set! (-> self fish-state) 'catch-enter)
+          (set! (-> self cast-state) 'catch-display)
+          (set! (-> self catch-transition-time) 0.0)
+          (set! (-> self catch-menu-offset) 150.0)))))
+
+  (none))
+
+(defun fisher-sell-manipy-catch!
+  ((self fisher-game))
+
+  (when *target* (send-event *target* 'get-pickup (pickup-type money) (the float (-> self caught-orb-value))))
+
+  (let ((slot
+        (-> self hooked-fish-slot)))
+
+    (when (>= slot 0)
+      (let ((fish
+            (fisher-fish-pointer
+              self
+              slot)))
+
+        (when fish (deactivate (-> fish 0)))
+
+        (fisher-set-fish-pointer! self slot (the-as (pointer manipy) #f))
+
+        (fisher-randomize-fish-slot!
+          self
+          slot))))
+
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self fish-state) 'free)
+  (set! (-> self fish-message) "FISH SOLD")
+  (set! (-> self fish-message-time) 1.25)
+  (set! (-> self caught-weight-tenths) 0)
+  (set! (-> self caught-orb-value) 0)
+  (set! (-> self catch-transition-time) 0.0)
+  (set! (-> self catch-menu-offset) 0.0)
+
+  (fisher-reset-cast! self)
+
+  (none))
+
+(defun fisher-update-catch-menu-animation! ((self fisher-game))
+  (let ((dt
+        (-> *display* seconds-per-frame)))
+
+    (+! (-> self catch-transition-time) dt)
+
+    (cond
+      ((= (-> self fish-state) 'catch-enter)
+        (let* ((duration
+              0.65)
+
+            (progress (fmin 1.0 (/ (-> self catch-transition-time) duration)))
+
+            (ease (fisher-smoothstep progress))
+
+            (bounce
+              (*
+                10.0
+                (sin (* (degrees 540.0) progress))
+                (- 1.0 progress))))
+
+          (set! (-> self catch-menu-offset) (+ (* 150.0 (- 1.0 ease)) bounce))
+
+          (when (>= progress 1.0)
+            (set! (-> self catch-menu-offset) 0.0)
+            (set! (-> self catch-transition-time) 0.0)
+            (set! (-> self fish-state) 'catch-display))))
+
+      ((= (-> self fish-state) 'catch-exit)
+        (let* ((duration
+              0.48)
+
+            (progress (fmin 1.0 (/ (-> self catch-transition-time) duration)))
+
+            (ease
+              (fisher-smoothstep progress)))
+
+          (set! (-> self catch-menu-offset) (* 150.0 ease))
+
+          (when (>= progress 1.0)
+            (fisher-sell-manipy-catch!
+              self))))))
+
+  (none))
+
+(defun fisher-draw-manipy-fish-marker!
+  ((fish (pointer manipy)))
+
+  (when
+    (and *fisher-in-debug?* fish)
+
+    (let ((fish-proc
+          (-> fish 0 self)))
+
+      (when fish-proc
+        (let ((left (new 'stack-no-clear 'vector))
+            (right (new 'stack-no-clear 'vector))
+            (top (new 'stack-no-clear 'vector))
+            (bottom (new 'stack-no-clear 'vector))
+            (front (new 'stack-no-clear 'vector))
+            (back (new 'stack-no-clear 'vector))
+            (color
+              (new 'static
+                'rgba
+                :r #xff
+                :g #xff
+                :b #xff
+                :a #xff)))
+
+          (singlefish-vector-copy-safe! left (-> (the-as manipy fish-proc) root trans))
+
+          (singlefish-vector-copy-safe! right (-> (the-as manipy fish-proc) root trans))
+
+          (singlefish-vector-copy-safe! top (-> (the-as manipy fish-proc) root trans))
+
+          (singlefish-vector-copy-safe! bottom (-> (the-as manipy fish-proc) root trans))
+
+          (singlefish-vector-copy-safe! front (-> (the-as manipy fish-proc) root trans))
+
+          (singlefish-vector-copy-safe! back (-> (the-as manipy fish-proc) root trans))
+
+          (-! (-> left x) (meters 1.0))
+          (+! (-> right x) (meters 1.0))
+          (+! (-> top y) (meters 1.0))
+          (-! (-> bottom y) (meters 1.0))
+          (+! (-> front z) (meters 1.0))
+          (-! (-> back z) (meters 1.0))
+
+          (fisher-debug-line! left right color)
+          (fisher-debug-line! top bottom color)
+          (fisher-debug-line! front back color)))))
+
+  (none))
+
+(defun fisher-hook-target!
+  ((self fisher-game) (dst vector))
+
+  (cond
+    ((-> self lure-snake) (singlefish-vector-copy-safe! dst (-> (the-as manipy (-> (-> self lure-snake) 0 self)) root trans)))
+
+    (else
+      (singlefish-vector-copy-safe!
+        dst
+        (-> self lure-pos))))
+
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun fisher-camera-catch-display!
+  ((self fisher-game))
+
+  (when
+    (and *camera* (> (-> *camera* num-slaves) 0))
+
+    (let ((cam-slave
+          (-> *camera* slave 0 0))
+
+        (forward
+          (new 'stack-no-clear 'vector)))
+
+      (set! (-> cam-slave saved-pt quad) (-> self fisher-cam quad))
+
+      (set! (-> cam-slave trans quad) (-> self fisher-cam quad))
+
+      (vector-! forward (-> self fisher-look) (-> self fisher-cam))
+
+      (when
+        (> (singlefish-vector-length-safe forward) (meters 0.001))
+
+        (vector-normalize! forward 1.0)
+
+        (forward-down->inv-matrix
+          (-> cam-slave tracking inv-mat)
+          forward
+          (-> *camera* local-down)))))
+
+  (none))
+
+(defun fisher-hooked-fish-mouth-offset
+  ((self fisher-game))
+
+  (cond
+    ((< (-> self hooked-fish-slot) 0) (meters 0.42))
+
+    ((= (fisher-fish-species self (-> self hooked-fish-slot)) 1) (meters 0.55))
+
+    ((= (fisher-fish-species self (-> self hooked-fish-slot)) 2) (meters 0.48))
+
+    (else
+      (meters 0.42))))
+
+(defun fisher-begin-hook-transition!
+  ((self fisher-game) (fish-proc manipy) (hook-pos vector))
+
+  (let ((facing
+        (new 'stack-no-clear 'vector))
+
+      (mouth-pos (new 'stack-no-clear 'vector))
+
+      (mouth-offset
+        (fisher-hooked-fish-mouth-offset self)))
+
+    (singlefish-vector-sub-safe! facing hook-pos (-> fish-proc root trans))
+
+    (set! (-> facing w) 0.0)
+
+    (when
+      (<= (singlefish-vector-length-safe facing) 0.001)
+
+      (singlefish-vector-scale-safe!
+        facing
+        (-> self playfield-axis)
+        -1.0))
+
+    (singlefish-vector-normalize-safe! facing 1.0)
+
+    (singlefish-vector-copy-safe! (-> self hooked-fish-facing) facing)
+
+    (singlefish-vector-add-scaled-safe! mouth-pos (-> fish-proc root trans) facing mouth-offset)
+
+    (singlefish-vector-copy-safe!
+      (-> self hooked-fish-last-hook-pos)
+      mouth-pos))
+
+  (none))
+
+(defun fisher-animate-hooked-fish!
+  ((self fisher-game) (fish-proc manipy) (hook-pos vector) (fighting? symbol))
+
+  (let ((target-facing
+        (new 'stack-no-clear 'vector))
+
+      (smoothed-facing (new 'stack-no-clear 'vector))
+
+      (side-axis (new 'stack-no-clear 'vector))
+
+      (active-hook (new 'stack-no-clear 'vector))
+
+      (root-pos (new 'stack-no-clear 'vector))
+
+      (down (new 'stack-no-clear 'vector))
+
+      (rot (new 'stack-no-clear 'matrix))
+
+      (dt (-> *display* seconds-per-frame))
+
+      (face-blend 0.0)
+
+      (hook-blend 1.0)
+
+      (turn-angle 0.0)
+
+      (fight-pitch 0.0)
+
+      (mouth-offset
+        (fisher-hooked-fish-mouth-offset self)))
+
+    (set! (-> side-axis x) (-> (-> self playfield-axis) z))
+
+    (set! (-> side-axis y) 0.0)
+
+    (set! (-> side-axis z) (- (-> (-> self playfield-axis) x)))
+
+    (set! (-> side-axis w) 0.0)
+
+    (singlefish-vector-normalize-safe! side-axis 1.0)
+
+    (cond
+      (fighting?
+        (set! turn-angle (fmin (degrees 180.0) (-> self fish-fight-phase)))
+
+        (singlefish-vector-scale-safe! target-facing (-> self playfield-axis) (- (cos turn-angle)))
+
+        (singlefish-vector-add-scaled-safe! target-facing target-facing side-axis (sin turn-angle))
+
+        (when
+          (>= (-> self fish-fight-phase) (degrees 180.0))
+
+          (set!
+            fight-pitch
+            (*
+              0.28
+              (sin
+                (-
+                  (-> self fish-fight-phase)
+                  (degrees 180.0))))))
+
+        (set!
+          (-> target-facing y)
+          fight-pitch))
+
+      (else
+        (cond
+          ((> (-> self fish-fight-phase) 0.0)
+            (-! (-> self fish-fight-phase) (* (degrees 360.0) dt))
+
+            (when
+              (< (-> self fish-fight-phase) 0.0)
+
+              (set!
+                (-> self fish-fight-phase)
+                0.0))
+
+            (set! turn-angle (-> self fish-fight-phase))
+
+            (singlefish-vector-scale-safe! target-facing (-> self playfield-axis) (- (cos turn-angle)))
+
+            (singlefish-vector-add-scaled-safe! target-facing target-facing side-axis (sin turn-angle))
+
+            (set!
+              (-> target-facing y)
+              0.0))
+
+          (else
+            (singlefish-vector-scale-safe! target-facing (-> self playfield-axis) -1.0)
+
+            (set!
+              (-> target-facing y)
+              0.72)))))
+
+    (set! (-> target-facing w) 0.0)
+
+    (singlefish-vector-normalize-safe! target-facing 1.0)
+
+    (set! face-blend (fmin 1.0 (* dt 6.5)))
+
+    (set! (-> smoothed-facing x) (+ (-> (-> self hooked-fish-facing) x) (* (- (-> target-facing x) (-> (-> self hooked-fish-facing) x)) face-blend)))
+
+    (set! (-> smoothed-facing y) (+ (-> (-> self hooked-fish-facing) y) (* (- (-> target-facing y) (-> (-> self hooked-fish-facing) y)) face-blend)))
+
+    (set! (-> smoothed-facing z) (+ (-> (-> self hooked-fish-facing) z) (* (- (-> target-facing z) (-> (-> self hooked-fish-facing) z)) face-blend)))
+
+    (set! (-> smoothed-facing w) 0.0)
+
+    (singlefish-vector-normalize-safe! smoothed-facing 1.0)
+
+    (singlefish-vector-copy-safe! (-> self hooked-fish-facing) smoothed-facing)
+
+    (when
+      (= (-> self fish-state) 'hook-window)
+
+      (set!
+        hook-blend
+        (fmin
+          1.0
+          (* dt 7.5))))
+
+    (set!
+      (-> active-hook x)
+      (+
+        (-> (-> self hooked-fish-last-hook-pos) x)
+        (*
+          (- (-> hook-pos x) (-> (-> self hooked-fish-last-hook-pos) x))
+          hook-blend)))
+
+    (set!
+      (-> active-hook y)
+      (+
+        (-> (-> self hooked-fish-last-hook-pos) y)
+        (*
+          (- (-> hook-pos y) (-> (-> self hooked-fish-last-hook-pos) y))
+          hook-blend)))
+
+    (set!
+      (-> active-hook z)
+      (+
+        (-> (-> self hooked-fish-last-hook-pos) z)
+        (*
+          (- (-> hook-pos z) (-> (-> self hooked-fish-last-hook-pos) z))
+          hook-blend)))
+
+    (set! (-> active-hook w) 1.0)
+
+    (singlefish-vector-copy-safe! (-> self hooked-fish-last-hook-pos) active-hook)
+
+    (singlefish-vector-add-scaled-safe! root-pos active-hook smoothed-facing (- mouth-offset))
+
+    (set! (-> fish-proc root trans quad) (-> root-pos quad))
+
+    (set-vector! down 0.0 -1.0 0.0 0.0)
+
+    (forward-down->inv-matrix rot smoothed-facing down)
+
+    (matrix->quaternion
+      (-> fish-proc root quat)
+      rot))
+
+  (none))
+
+(defun fisher-update-lure! ((self fisher-game))
+  (let ((dt (-> *display* seconds-per-frame))
+      (from-jak (new 'stack-no-clear 'vector))
+      (horizontal-distance 0.0)
+      (saved-y 0.0)
+      (top-y (- (-> self water-level) (meters 3.0)))
+      (bottom-y (- (-> self water-level) (meters 36.0)))
+      (current-speed -0.18)
+      (bottom-current-speed -0.28))
+
+    (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
+
+    (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
+
+    (cond
+      ((cpad-hold? 0 x)
+        (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (- (* (meters 1.0) (-> self lure-reel-x-speed) dt)))
+
+        (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-reel-y-speed) dt))
+
+        (set! (-> self lure-x-velocity) (- (-> self lure-reel-x-speed)))
+
+        (set! (-> self lure-y-velocity) 0.0)
+      )
+
+      (else
+        (cond
+          ((> horizontal-distance
+              (meters 2.0))
+
+            (cond
+              ((<=
+                  (-> self lure-pos y)
+                  (+ bottom-y
+                    (meters 0.75)))
+
+                (set! (-> self lure-x-velocity) bottom-current-speed)
+              )
+
+              (else (set! (-> self lure-x-velocity) current-speed))
+            )
+
+            (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (* (meters 1.0) (-> self lure-x-velocity) dt))
+          )
+
+          (else (set! (-> self lure-x-velocity) 0.0))
+        )
+
+        (-! (-> self lure-y-velocity) (* 1.2 dt))
+
+        (when
+          (< (-> self lure-y-velocity) (- (-> self lure-fall-speed)))
+
+          (set! (-> self lure-y-velocity) (- (-> self lure-fall-speed)))
+        )
+
+        (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-y-velocity) dt))
+      )
+    )
+
+    (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
+
+    (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
+
+    (set! saved-y (-> self lure-pos y))
+
+    (cond
+      ((< horizontal-distance
+          (meters 2.0))
+
+        (vector+float*! (-> self lure-pos) (-> self fishing-player-pos) (-> self lure-cast-axis) (meters 2.0))
+
+        (set! (-> self lure-pos y) saved-y)
+
+        (set! (-> self lure-x-velocity) 0.0)
+      )
+
+      ((> horizontal-distance
+          (meters 55.5))
+
+        (vector+float*! (-> self lure-pos) (-> self fishing-player-pos) (-> self lure-cast-axis) (meters 55.5))
+
+        (set! (-> self lure-pos y) saved-y)
+
+        (set! (-> self lure-x-velocity) 0.0)
+      )
+    )
+
+    (when
+      (> (-> self lure-pos y) top-y)
+
+      (set! (-> self lure-pos y) top-y)
+
+      (when
+        (> (-> self lure-y-velocity) 0.0)
+
+        (set!
+          (-> self lure-y-velocity)
+          0.0))
+    )
+
+    (when
+      (< (-> self lure-pos y) bottom-y)
+
+      (set! (-> self lure-pos y) bottom-y)
+
+      (set! (-> self lure-y-velocity) 0.48)
+    )
+
+    (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
+
+    (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
+
+    (when
+      (and
+        (>= (-> self lure-pos y) (- (-> self water-level) (meters 3.05)))
+
+        (<=
+          horizontal-distance
+          (meters 4.0)))
+
+      (fisher-reset-cast! self))
+  )
+
+  (none)
+)
+
+(defun fisher-update-manipy-reeling!
+  ((self fisher-game))
+
+  (let* ((dt
+        (-> *display* seconds-per-frame))
+
+      (from-jak (new 'stack-no-clear 'vector))
+
+      (horizontal-distance 0.0)
+
+      (top-y
+        (- (-> self water-level)
+          (meters 3.0))))
+
+    (cond
+      ((-> self fish-fighting?)
+        (+! (-> self fish-fight-phase) (* (degrees 420.0) dt))
+
+        (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (* (meters 1.35) dt))
+
+        (set! (-> self lure-pos y) (+ (-> self fish-fight-base-y) (* (meters 0.055) (sin (-> self fish-fight-phase)))))
+
+        (when (cpad-hold? 0 x)
+          (fisher-damage-line!
+            (*
+              (if (and (>= (-> self hooked-fish-slot) 0) (= (fisher-fish-species self (-> self hooked-fish-slot)) 1)) 52.0 34.0)
+              dt)))
+
+        (when *fisher-line-broken?*
+          (let ((slot
+                (-> self hooked-fish-slot)))
+
+            (fisher-reset-cast! self)
+            (set! (-> self fish-message) "LINE BROKEN")
+            (set! (-> self fish-message-time) 1.75)
+
+            (when (>= slot 0)
+              (fisher-fish-scared-off!
+                self
+                slot)))))
+
+      (else
+        (fisher-update-lure! self)
+
+        (vector-! from-jak (-> self lure-pos) (-> self pos))
+
+        (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
+
+        (when
+          (and (<= horizontal-distance (meters 2.05)) (>= (-> self lure-pos y) (- top-y (meters 0.10))))
+
+          (fisher-finish-manipy-catch!
+            self
+            (-> self hooked-fish-slot))))))
+
+  (none))
+
+(defun fisher-update-gameplay-fish-one!
+  ((self fisher-game) (slot int) (fish (pointer manipy)))
+
+  (when fish
+    (let ((fish-proc-basic
+          (-> fish 0 self)))
+
+      (when fish-proc-basic
+        (let* ((fish-proc
+              (the-as manipy fish-proc-basic))
+
+            (dt (-> *display* seconds-per-frame))
+
+            (wanted-pos (new 'stack-no-clear 'vector))
+
+            (hook-target (new 'stack-no-clear 'vector))
+
+            (distance (fisher-fish-distance self slot))
+
+            (direction
+              (fisher-fish-direction self slot)))
+
+          (cond
+            ((= slot (-> self hooked-fish-slot))
+              (cond
+                ((= (-> self fish-state) 'approaching)
+                  (fisher-hook-target! self hook-target)
+
+                  (let ((remaining
+                        (fisher-move-manipy-toward!
+                          fish-proc
+                          hook-target
+                          (meters 6.60))))
+
+                    (when
+                      (<= remaining (meters 0.20))
+
+                      (fisher-begin-hook-transition! self fish-proc hook-target)
+
+                      (cond
+                        ((-> self fish-scare-on-arrival?)
+                          (set! (-> self fish-scare-on-arrival?) #f)
+
+                          (fisher-fish-scared-off!
+                            self
+                            slot))
+
+                        (else
+                          (set! (-> self fish-hook-time) 1.15)
+
+                          (fisher-play-fish-bite-sound!)
+
+                          (set!
+                            (-> self fish-state)
+                            'hook-window))))))
+
+                ((= (-> self fish-state) 'hook-window)
+                  (fisher-hook-target! self hook-target)
+
+                  (fisher-animate-hooked-fish! self fish-proc hook-target #f)
+
+                  (-! (-> self fish-hook-time) dt)
+
+                  (when
+                    (<= (-> self fish-hook-time) 0.0)
+
+                    (fisher-fish-scared-off!
+                      self
+                      slot)))
+
+                ((= (-> self fish-state) 'reeling)
+                  (fisher-hook-target! self hook-target)
+
+                  (fisher-animate-hooked-fish! self fish-proc hook-target (-> self fish-fighting?))
+
+                  (when (> (-> self fish-hook-time) 0.0)
+                    (-! (-> self fish-hook-time) dt)
+
+                    (when (< (-> self fish-hook-time) 0.0)
+                      (set! (-> self fish-hook-time) 0.0)))
+
+                  (when (> (-> self fish-fight-time) 0.0)
+                    (-! (-> self fish-fight-time) dt)
+
+                    (set! (-> self fish-fighting?) #t)
+
+                    (when
+                      (<= (-> self fish-fight-time) 0.0)
+
+                      (set! (-> self fish-fighting?) #f)
+
+                      (set!
+                        (-> self fish-fight-phase)
+                        (degrees 180.0))))
+
+                  (when
+                    (and (<= (-> self fish-hook-time) 0.0) (not (-> self fish-fighting?)) (rand-vu-percent? (* dt 0.18)))
+
+                    (set! (-> self fish-fight-time) (rand-vu-float-range 1.0 2.1))
+
+                    (fisher-play-random-fight-sound!)
+
+                    (set! (-> self fish-fighting?) #t)
+
+                    (set! (-> self fish-fight-phase) 0.0)
+
+                    (set!
+                      (-> self fish-fight-base-y)
+                      (-> self lure-pos y))))
+
+                ((or
+                    (= (-> self fish-state) 'catch-enter)
+                    (= (-> self fish-state) 'catch-display)
+                    (= (-> self fish-state) 'catch-exit))
+                  (fisher-catch-display-fish-position! self hook-target)
+
+                  (set! (-> fish-proc root trans quad) (-> hook-target quad))
+
+                  (fisher-set-manipy-facing! self slot fish-proc)
+
+                  (set-vector!
+                    (-> fish-proc root scale)
+                    0.55
+                    0.55
+                    0.55
+                    1.0))))
+
+            (else
+              (fisher-fish-position! self slot wanted-pos)
+
+              (cond
+                ((> (fisher-fish-cooldown self slot) 0.0)
+                  (let ((speed-scale
+                        (if
+                          (> (fisher-fish-cooldown self slot) 1.6)
+                          1.35
+                          1.0)))
+
+                    (+! distance (* direction (fisher-fish-speed self slot) speed-scale dt))
+
+                    (cond
+                      ((<= distance (meters 3.5)) (set! distance (meters 3.5)) (fisher-set-fish-direction! self slot 1.0))
+
+                      ((>= distance (meters 55.5))
+                        (set! distance (meters 55.5))
+                        (fisher-set-fish-direction!
+                          self
+                          slot
+                          -1.0)))
+
+                    (fisher-set-fish-distance! self slot distance)
+
+                    (fisher-fish-position! self slot wanted-pos)
+
+                    (set!
+                      (-> fish-proc root trans quad)
+                      (-> wanted-pos quad)))
+
+                  (fisher-set-fish-cooldown!
+                    self
+                    slot
+                    (fmax
+                      0.0
+                      (-
+                        (fisher-fish-cooldown self slot)
+                        dt))))
+
+                (else
+                  (when
+                    (<= (fisher-fish-turn-time self slot) 0.0)
+
+                    (+! distance (* direction (fisher-fish-speed self slot) dt))
+
+                    (cond
+                      ((<= distance (meters 3.5))
+                        (set! distance (meters 3.5))
+
+                        (fisher-start-manipy-turn!
+                          self
+                          slot
+                          1.0))
+
+                      ((>= distance (meters 55.5))
+                        (set! distance (meters 55.5))
+
+                        (fisher-start-manipy-turn!
+                          self
+                          slot
+                          -1.0)))
+
+                    (fisher-set-fish-distance!
+                      self
+                      slot
+                      distance))
+
+                  (fisher-fish-position! self slot wanted-pos)
+
+                  (set!
+                    (-> fish-proc root trans quad)
+                    (-> wanted-pos quad))))
+
+              (set! (-> fish-proc root trans quad) (-> wanted-pos quad))
+
+              (fisher-set-manipy-facing! self slot fish-proc)
+
+              (fisher-debug-draw-fish-cone! self slot fish-proc)
+
+              (when
+                (and
+                  (= (-> self hooked-fish-slot) -1)
+                  (= (-> self fish-state) 'free)
+                  (= (-> self cast-state) 'line-active)
+                  (<= (fisher-fish-cooldown self slot) 0.0)
+                  (fisher-manipy-can-sense-lure?
+                    self
+                    slot
+                    fish-proc))
+
+                (set! (-> self hooked-fish-slot) slot)
+
+                (set!
+                  (-> self fish-state)
+                  'approaching))))
+
+          (fisher-apply-slot-appearance! self slot fish-proc (= (-> self fish-state) 'catch-display))
+
+          (fisher-draw-manipy-fish-marker!
+            fish)))))
+
+  (none))
+
+(defun fisher-update-all-fish-debug! ((self fisher-game))
+  (dotimes (i 22) (fisher-update-gameplay-fish-one! self i (fisher-fish-pointer self i)))
+
+  (none))
+
+(defun fisher-remove-debug-fish!
+  ((fish (pointer manipy)))
+
+  (when fish (deactivate (-> fish 0)))
+
+  (none))
+
+(defun singlefish-end-session! ((self fisher-game))
+  (set! *singlefish-session-active?* #f)
+  (+! *singlefish-session-id* 1)
+  (set! (-> self hooked-fish) #f)
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self fish-state) 'free)
+
+  (dotimes (i 22)
+    (let ((fish
+          (fisher-fish-pointer self i)))
+
+      (when fish (deactivate (-> fish 0)))
+
+      (fisher-set-fish-pointer!
+        self
+        i
+        (the-as (pointer manipy) #f))))
+
+  (set! (-> self fish-count) 0)
+
+  (none))
+
+(defstate singlefish-patrol (singlefish-base)
+  :virtual #t
+  :code
+  (behavior ()
+    (ja-no-eval :num! (loop!) :frame-num 0.0)
+
+    (loop
+      (when (not (singlefish-session-valid? self)) (process-deactivate))
+
+      (singlefish-patrol-step! self 1.0)
+
+      (when (singlefish-can-see-lure? self) (singlefish-begin-approach! self))
+
+      (suspend)
+
+      (ja
+        :num! (loop! 1.0))))
+  :post singlefish-post)
+
+(defstate singlefish-approach (singlefish-base)
+  :virtual #t
+  :code
+  (behavior ()
+    (loop
+      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
+
+      (when (not (singlefish-owner-still-hooked? self)) (go-virtual singlefish-patrol))
+
+      (let* ((owner
+            (the-as fisher-game (-> self owner)))
+
+          (dt (-> *display* seconds-per-frame))
+
+          (to-lure (new 'stack-no-clear 'vector))
+
+          (target-root (new 'stack-no-clear 'vector))
+
+          (move-dir (new 'stack-no-clear 'vector))
+
+          (distance 0.0)
+
+          (step
+            0.0))
+
+        (singlefish-set-visible! self #t)
+
+        (singlefish-vector-sub-safe! to-lure (-> owner lure-pos) (-> self root trans))
+
+        (set! (-> to-lure w) 0.0)
+        (singlefish-face-vector! self to-lure)
+
+        (singlefish-vector-add-scaled-safe! target-root (-> owner lure-pos) (-> self forward) (- (-> self nose-offset)))
+
+        (singlefish-vector-sub-safe! move-dir target-root (-> self root trans))
+
+        (set! distance (singlefish-vector-length-safe move-dir))
+
+        (cond
+          ((<= distance (meters 0.12))
+            (set! (-> self root trans quad) (-> target-root quad))
+
+            (set! (-> self hook-time) 1.0)
+            (fisher-play-fish-bite-sound!)
+            (set! (-> owner fish-state) 'hook-window)
+            (go-virtual singlefish-hook-window))
+
+          (else
+            (singlefish-vector-normalize-safe! move-dir 1.0)
+
+            (set! step (fmin distance (* (meters 2.20) dt)))
+
+            (singlefish-vector-add-scaled-safe!
+              (-> self root trans)
+              (-> self root trans)
+              move-dir
+              step)))
+
+        (set! (-> self root trans w) 1.0))
+
+      (suspend)))
+  :post singlefish-post)
+
+(defstate singlefish-hook-window (singlefish-base)
+  :virtual #t
+  :code
+  (behavior ()
+    (loop
+      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
+
+      (when (not (singlefish-owner-still-hooked? self)) (go-virtual singlefish-patrol))
+
+      (singlefish-set-visible! self #t)
+      (singlefish-pin-nose-to-lure! self)
+
+      (-! (-> self hook-time) (-> *display* seconds-per-frame))
+
+      (when (<= (-> self hook-time) 0.0) (singlefish-fail-hook! self))
+
+      (suspend)))
+  :post singlefish-post)
+
+(defstate singlefish-scared (singlefish-base)
+  :virtual #t
+  :code
+  (behavior ()
+    (loop
+      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
+
+      (singlefish-patrol-step! self (if (> (-> self scared-time) 4.6) 1.35 1.0))
+
+      (-! (-> self scared-time) (-> *display* seconds-per-frame))
+
+      (when (<= (-> self scared-time) 0.0) (set! (-> self scared-time) 0.0) (go-virtual singlefish-patrol))
+
+      (suspend)))
+  :post singlefish-post)
+
+(defstate singlefish-reeling (singlefish-base)
+  :virtual #t
+  :code
+  (behavior ()
+    (loop
+      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
+
+      (singlefish-set-visible! self #t)
+      (singlefish-update-reeling! self)
+      (suspend)))
+  :post singlefish-post)
+
+(defstate singlefish-catch-display (singlefish-base)
+  :virtual #t
+  :code
+  (behavior ()
+    (loop
+      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
+
+      (singlefish-position-catch-model! self)
+      (suspend)))
+  :post singlefish-post)
+
+(defstate singlefish-dead (singlefish-base) :virtual #t :code (behavior () (process-deactivate)) :post singlefish-post)
+
+(defun fisher-launch-camera-bubble! ((self fisher-game))
+  (when
+    (and *camera* (> (-> *camera* num-slaves) 0))
+
+    (let ((cam-slave
+          (-> *camera* slave 0 0))
+
+        (bubble-pos (new 'stack-no-clear 'vector))
+
+        (forward (new 'stack-no-clear 'vector))
+
+        (right (new 'stack-no-clear 'vector))
+
+        (lane
+          (rand-vu-float-range
+            (meters -5.5)
+            (meters 5.5))))
+
+      (vector-! forward (-> self lure-camera-look) (-> cam-slave trans))
+
+      (set! (-> forward w) 0.0)
+      (vector-normalize! forward 1.0)
+
+      (vector-cross! right forward (-> *camera* local-down))
+
+      (set! (-> right w) 0.0)
+      (vector-normalize! right 1.0)
+
+      (vector+float*! bubble-pos (-> cam-slave trans) forward (meters 6.0))
+
+      (vector+float*! bubble-pos bubble-pos right lane)
+
+      (vector+float*! bubble-pos bubble-pos (-> *camera* local-down) (meters 4.5))
+
+      (when
+        (>= (-> bubble-pos y) (-> self water-level))
+
+        (set!
+          (-> bubble-pos y)
+          (- (-> self water-level)
+            (meters 4.0))))
+
+      (set! (-> bubble-pos w) 1.0)
+
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 3570)
+        bubble-pos))
+  )
+
+  (none))
+
+(defun fisher-update-camera-bubbles! ((self fisher-game))
+  (let ((dt
+        (-> *display* seconds-per-frame)))
+
+    (cond
+      ((and
+          (-> self casted?)
+          (-> self camera-underwater?)
+          (<
+            (-> self lure-pos y)
+            (-> self water-level)))
+
+        (cond
+          ((< (-> self bubble-time) 0.0)
+            (+! (-> self bubble-time) dt)
+
+            (when
+              (>= (-> self bubble-time) 0.0)
+
+              (fisher-launch-camera-bubble! self)
+
+              (set!
+                (-> self bubble-time)
+                (rand-vu-float-range
+                  0.35
+                  1.10)))
+          )
+
+          (else
+            (-! (-> self bubble-time) dt)
+
+            (when
+              (<= (-> self bubble-time) 0.0)
+
+              (fisher-launch-camera-bubble! self)
+
+              (set!
+                (-> self bubble-time)
+                (rand-vu-float-range
+                  0.35
+                  1.10)))
+          )
+        )
+      )
+
+      (else (set! (-> self bubble-time) -2.0))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-start-cast! ((self fisher-game))
+  (fisher-refill-missing-fish! self)
+
+  (set! *fisher-line-hp-max* (+ 15.0 (* 85.0 (-> self cast-charge))))
+
+  (fisher-reset-line-hp!)
+
+  (let ((cast-distance
+        (+
+          (meters 3.5)
+          (* (meters 52.0)
+            (-> self cast-charge)))))
+
+    (vector-copy! (-> self lure-cast-start) (target-pos 0))
+
+    (play-sound-file "cast.wav" (the int (-> *setting-control* current sfx-volume)))
+
+    (+! (-> self lure-cast-start y) (meters 1.4))
+
+    (vector-copy! (-> self lure-cast-axis) (-> self playfield-axis))
+
+    (vector+float*! (-> self lure-cast-end) (-> self lure-cast-start) (-> self lure-cast-axis) cast-distance)
+
+    (set! (-> self lure-cast-end y) (-> self water-level))
+
+    (set! (-> self lure-cast-end w) 1.0)
+
+    (vector-copy! (-> self lure-pos) (-> self lure-cast-start))
+
+    (fisher-remove-lure-snake! self)
+
+    (let ((snake-anchor
+          (new 'stack-no-clear 'vector))
+
+        (snake-root
+          (new 'stack-no-clear 'vector)))
+
+      (vector-copy! snake-anchor (-> self lure-pos))
+
+      (set! (-> snake-anchor w) 1.0)
+
+      (vector-copy! snake-root snake-anchor)
+
+      (-! (-> snake-root y) (meters 1.0666667))
+
+      (set! (-> snake-root w) 1.0)
+
+      (vector-copy! (-> self lure-snake-last-anchor) snake-anchor)
+
+      (vector-reset! (-> self lure-snake-angle))
+
+      (vector-reset! (-> self lure-snake-angular-speed))
+
+      (set! (-> self lure-snake-flow-time) 0.0)
+
+      (set! (-> self lure-snake) (spawn-fisher-lure-snake snake-root))
+    )
+
+    (let ((cam-slave
+          (-> *camera* slave 0 0)))
+
+      (vector-float*! (-> self lure-camera-offset) (-> self camera-axis) (- (-> self camera-radius)))
+
+      (set! (-> self lure-camera-offset y) 0.0)
+
+      (set! (-> self lure-camera-offset w) 0.0)
+
+      (vector-copy! (-> self fisher-cam) (-> cam-slave trans))
+    )
+
+    (set! (-> self cast-time) 0.0)
+    (set! (-> self camera-blend) 0.0)
+    (set! (-> self cast-duration) 1.0)
+    (set! (-> self casted?) #t)
+    (set! (-> self reel-hint-time) 3.0)
+
+    (set! (-> self lure-x-velocity) 0.0)
+    (set! (-> self lure-y-velocity) 0.0)
+
+    (set! (-> self cast-state) 'casting)
+    (set! (-> self camera-state) 'follow-lure)
+  )
+
+  (none)
+)
+
+(defun fisher-update-cast-arc! ((self fisher-game))
+  (let* ((dt (-> *display* seconds-per-frame))
+      (t (fmin 1.0 (/ (-> self cast-time) (-> self cast-duration))))
+      (arc-height
+        (* (meters 5.0)
+          (* 4.0
+            t
+            (- 1.0 t)))))
+
+    (vector-lerp! (-> self lure-pos) (-> self lure-cast-start) (-> self lure-cast-end) t)
+
+    (+! (-> self lure-pos y) arc-height)
+
+    (+! (-> self cast-time) dt)
+
+    (when (>= t 1.0)
+      (vector-copy! (-> self lure-pos) (-> self lure-cast-end))
+
+      (set! (-> self lure-x-velocity) 0.87)
+
+      (set! (-> self lure-y-velocity) -2.0)
+
+      (fisher-launch-water-entry-bubbles! self)
+      (play-sound-file "splash.wav" (the int (-> *setting-control* current sfx-volume)))
+
+      (set!
+        (-> self cast-state)
+        'water-entry))
+  )
+
+  (none)
+)
+
+(defun fisher-update-underwater-background! ((self fisher-game))
+  (fisher-update-camera-water! self)
+  (fisher-update-underwater-waves! self)
+  (fisher-restore-sky-base-position!)
+
+  (when
+    (-> self casted?)
+
+    (set!
+      *particles-flag*
+      #t))
+
+  (cond
+    ((-> self camera-underwater?) (fisher-force-underwater-background!))
+
+    (else
+      (set!
+        *fisher-underwater-haze-override?*
+        #f)))
+
+  (none)
+)
+
+(defun fisher-update-water-entry! ((self fisher-game))
+  (let* ((dt
+        (-> *display* seconds-per-frame))
+
+      (entry-depth (meters 3.0))
+
+      (entry-bottom (- (-> self water-level) entry-depth))
+
+      (current-depth (fmax 0.0 (- (-> self water-level) (-> self lure-pos y))))
+
+      (depth-progress (fmin 1.0 (/ current-depth entry-depth)))
+
+      (smooth-progress (* depth-progress depth-progress (- 3.0 (* 2.0 depth-progress))))
+
+      (starting-y-speed -2.0)
+
+      (ending-y-speed
+        (- (-> self lure-fall-speed))))
+
+    (set!
+      (-> self lure-y-velocity)
+      (+
+        (* starting-y-speed (- 1.0 smooth-progress))
+
+        (* ending-y-speed
+          smooth-progress)))
+
+    (set! (-> self lure-x-velocity) (* 0.87 (- 1.0 smooth-progress)))
+
+    (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (* (meters 1.0) (-> self lure-x-velocity) dt))
+
+    (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-y-velocity) dt))
+
+    (when
+      (<= (-> self lure-pos y) entry-bottom)
+
+      (set! (-> self lure-pos y) entry-bottom)
+
+      (set! (-> self lure-x-velocity) 0.0)
+
+      (set! (-> self lure-y-velocity) (- (-> self lure-fall-speed)))
+
+      (set!
+        (-> self cast-state)
+        'line-active))
+  )
+
+  (none)
+)
+
+(defun fisher-camera-follow-lure! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0))
+        (desired-camera (new 'stack-no-clear 'vector))
+        (desired-look (new 'stack-no-clear 'vector))
+        (forward (new 'stack-no-clear 'vector))
+        (blend-value 0.0)
+        (blend-speed 2.5))
+
+      (vector+! desired-camera (-> self lure-pos) (-> self lure-camera-offset))
+
+      (vector-copy! desired-look (-> self lure-pos))
+
+      (+! (-> desired-look y) (meters 0.5))
+
+      (when
+        (< (-> self camera-blend) 1.0)
+
+        (+! (-> self camera-blend) (* blend-speed (-> *display* seconds-per-frame)))
+
+        (when
+          (> (-> self camera-blend) 1.0)
+
+          (set!
+            (-> self camera-blend)
+            1.0))
+      )
+
+      (set! blend-value (parameter-ease-sin-clamp (-> self camera-blend)))
+
+      (vector-lerp! (-> self lure-camera-pos) (-> self fisher-cam) desired-camera blend-value)
+
+      (vector-lerp! (-> self lure-camera-look) (-> self fisher-look) desired-look blend-value)
+
+      (set! (-> cam-slave saved-pt quad) (-> self lure-camera-pos quad))
+
+      (set! (-> cam-slave trans quad) (-> self lure-camera-pos quad))
+
+      (vector-! forward (-> self lure-camera-look) (-> self lure-camera-pos))
+
+      (let ((horizontal-length
+            (sqrtf
+              (+
+                (* (-> forward x) (-> forward x))
+
+                (* (-> forward z)
+                  (-> forward z))))))
+
+        (when (> horizontal-length 0.0)
+          (set!
+            (-> forward x)
+            (*
+              (/ (-> forward x) horizontal-length)
+
+              (cos (degrees -5))))
+
+          (set!
+            (-> forward z)
+            (*
+              (/ (-> forward z) horizontal-length)
+
+              (cos (degrees -5))))
+
+          (set! (-> forward y) (sin (degrees -5)))
+
+          (set!
+            (-> forward w)
+            0.0))
+      )
+
+      (vector-normalize! forward 1.0)
+
+      (forward-down->inv-matrix (-> cam-slave tracking inv-mat) forward (-> *camera* local-down))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-camera-before-cast! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0))
+        (forward (new 'stack-no-clear 'vector))
+        (look-pos (new 'stack-no-clear 'vector))
+        (camera-pos (new 'stack-no-clear 'vector)))
+
+      (cond
+        ((= (-> self location-id) 1) (vector-copy! camera-pos (-> self fisher-cam)))
+
+        (else
+          (vector+float*! camera-pos (-> self pos) (-> self camera-axis) (- (-> self camera-radius)))
+
+          (set! (-> camera-pos y) (-> self fisher-cam y))
+
+          (set!
+            (-> camera-pos w)
+            1.0)))
+
+      (vector-copy! look-pos (-> self pos))
+
+      (+! (-> look-pos y) (meters 1.0))
+
+      (vector-copy! (-> self fisher-look) look-pos)
+
+      (set! (-> cam-slave saved-pt quad) (-> camera-pos quad))
+
+      (set! (-> cam-slave trans quad) (-> camera-pos quad))
+
+      (vector-! forward look-pos camera-pos)
+
+      (vector-normalize! forward 1.0)
+
+      (forward-down->inv-matrix (-> cam-slave tracking inv-mat) forward (-> *camera* local-down))
+    )
+  )
+
+  (none)
+)
+
+(defun fisher-draw-line! ((self fisher-game))
+  (when
+    (and
+      *target*
+      (-> self casted?))
+
+    (let ((line-start
+          (new 'stack-no-clear 'vector))
+
+        (line-end
+          (new 'stack-no-clear 'vector))
+
+        (line-color
+          (new 'static 'rgba
+            :r #x20
+            :g #xe0
+            :b #x40
+            :a #xc0)))
+
+      (fisher-set-line-color!
+        line-color)
+
+      (vector-copy!
+        line-start
+        (target-pos 0))
+
+      (+!
+        (-> line-start y)
+        (meters 3.25))
+
+      (vector-copy!
+        line-end
+        (-> self lure-pos))
+
+      (fisher-draw-retail-line!
+        line-start
+        line-end
+        line-color)))
+
+  (none))
+
+(defun fisher-handle-fish-input! ((self fisher-game))
+  (cond
+    ((and
+        (= (-> self fish-state) 'approaching)
+        (cpad-pressed? 0 x))
+
+      (cpad-clear! 0 x)
+      (set!
+        (-> self fish-scare-on-arrival?)
+        #t))
+
+    ((and
+        (= (-> self fish-state) 'hook-window)
+        (cpad-pressed? 0 x))
+
+      (cpad-clear! 0 x)
+      (set! (-> self fish-state) 'reeling)
+      (set! (-> self fish-scare-on-arrival?) #f)
+      (set! (-> self fish-reel-progress) 0.0)
+      (set! (-> self fish-fight-phase) 0.0)
+      (set! (-> self fish-fight-base-y) (-> self lure-pos y))
+      (set! (-> self reel-camera-blend) 0.0)
+
+      (set! (-> self fish-hook-time) 2.0)
+      (set! (-> self fish-fight-time) 0.0)
+      (set! (-> self fish-fighting?) #f))
+
+    ((and
+        (= (-> self fish-state) 'catch-display)
+        (cpad-pressed? 0 x))
+
+      (cpad-clear! 0 x)
+      (set! (-> self fish-state) 'catch-exit)
+      (set! (-> self catch-transition-time) 0.0)))
+
+  (none))
+
+(defun fisher-draw-fish-status! ((self fisher-game))
+  (when (> (-> self fish-message-time) 0.0)
+    (when (-> self fish-message) (draw-mod-menu-text-custom (the-as string (-> self fish-message)) 256 116 #f #t #f))
+
+    (-! (-> self fish-message-time) (-> *display* seconds-per-frame))
+
+    (when (<= (-> self fish-message-time) 0.0)
+      (set! (-> self fish-message-time) 0.0)
+      (set! (-> self fish-message) #f)))
+
+  (cond
+    ((= (-> self fish-state) 'approaching) (draw-mod-menu-text-custom "?" 256 116 #f #t #f))
+
+    ((= (-> self fish-state) 'hook-window) (draw-mod-menu-text-custom "PRESS <PAD_X> TO HOOK" 256 116 #f #t #f))
+
+    ((= (-> self fish-state) 'reeling)
+      (cond
+        ((-> self fish-fighting?) (draw-mod-menu-text-custom "DON'T REEL!" 256 116 #f #t #f))
+
+        (else
+          (draw-mod-menu-text-custom
+            "PRESS <PAD_X> TO REEL"
+            256
+            116
+            #f
+            #t
+            #f)))))
+
+  (none))
+
+(defun fisher-format-catch-name! ((self fisher-game))
+  (clear *fish-ui-str*)
+
+  (format
+    *fish-ui-str*
+    (fisher-suffix-name
+      (-> self caught-fish-suffix)))
+
+  (format
+    *fish-ui-str*
+    " ")
+
+  (format
+    *fish-ui-str*
+    (fisher-species-name
+      self
+      (-> self caught-fish-species)))
+
+  *fish-ui-str*)
+
+(defun fisher-draw-catch-ui! ((self fisher-game))
+  (when
+    (or (= (-> self fish-state) 'catch-enter) (= (-> self fish-state) 'catch-display) (= (-> self fish-state) 'catch-exit))
+
+    (let* ((menu-offset
+          (the int
+            (-> self catch-menu-offset)))
+
+        (whole-lbs (the int (/ (-> self caught-weight-tenths) 10)))
+
+        (decimal-lbs
+          (mod
+            (-> self caught-weight-tenths)
+            10)))
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+
+        (draw-sprite2d-xy buf 82 (+ 98 menu-offset) 348 104 (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xc8))
+
+        (draw-sprite2d-xy
+          buf
+          86
+          (+ 102 menu-offset)
+          340
+          96
+          (new 'static 'rgba
+            :r #x10
+            :g #x38
+            :b #x48
+            :a #xa8)))
+
+      (draw-fisher-small-text
+        (fisher-format-catch-name! self)
+        256
+        (+ 116 menu-offset))
+
+      (clear *fish-ui-str*)
+      (format *fish-ui-str* "~D.~D LBS" whole-lbs decimal-lbs)
+
+      (draw-fisher-small-text *fish-ui-str* 256 (+ 142 menu-offset))
+
+      (clear *fish-ui-str*)
+      (format *fish-ui-str* "WORTH: ~D PRECURSOR ORBS" (-> self caught-orb-value))
+
+      (draw-fisher-small-text *fish-ui-str* 256 (+ 164 menu-offset))
+
+      (draw-mod-menu-text-custom
+        "PRESS <PAD_X> TO CONTINUE"
+        256
+        (+ 181 menu-offset)
+        #f
+        #t
+        #f)))
+
+  (none))
+
+(defun fisher-update-casting! ((self fisher-game))
+  (fisher-handle-fish-input! self)
+  (fisher-draw-playfield-debug! self)
+
+  (dotimes (slot 22) (fisher-debug-draw-logical-fish-marker! self slot))
+
+  (fisher-update-all-fish-debug! self)
+
+  (cond
+    ((= (-> self cast-state) 'ready)
+      (fisher-restore-normal-background!)
+
+      (draw-mod-menu-text-custom "PRESS <PAD_X> TO CAST" 256 160 #f #t #f)
+
+      (when (cpad-pressed? 0 x)
+        (cpad-clear! 0 x)
+        (set! (-> self cast-state) 'charging)
+        (set! (-> self cast-charge) 0.0)
+        (set! (-> self cast-charge-direction) 1.0)))
+
+    ((= (-> self cast-state) 'charging)
+      (fisher-restore-normal-background!)
+      (fisher-draw-cast-bar (-> self cast-charge))
+
+      (when (cpad-pressed? 0 x) (cpad-clear! 0 x) (fisher-start-cast! self))
+
+      (when (= (-> self cast-state) 'charging)
+        (+! (-> self cast-charge) (* (-> self cast-charge-direction) (-> *display* seconds-per-frame)))
+
+        (cond
+          ((>= (-> self cast-charge) 1.0) (set! (-> self cast-charge) 1.0) (set! (-> self cast-charge-direction) -1.0))
+
+          ((<= (-> self cast-charge) 0.0)
+            (set! (-> self cast-charge) 0.0)
+            (fisher-reset-cast! self)))))
+
+    ((= (-> self cast-state) 'casting)
+      (fisher-update-cast-arc! self)
+      (fisher-update-reel-hint! self)
+      (fisher-camera-follow-lure! self)
+      (fisher-update-underwater-background! self)
+      (fisher-update-camera-bubbles! self)
+      (fisher-update-lure-snake! self)
+      (fisher-draw-line-hp-bar)
+      (fisher-draw-line! self))
+
+    ((= (-> self cast-state) 'water-entry)
+      (fisher-update-water-entry! self)
+      (fisher-camera-follow-lure! self)
+      (fisher-update-reel-hint! self)
+      (fisher-update-underwater-background! self)
+      (fisher-update-background-mist! self)
+      (fisher-update-camera-bubbles! self)
+      (fisher-update-lure-snake! self)
+      (fisher-draw-line-hp-bar)
+      (fisher-draw-line! self))
+
+    ((= (-> self cast-state) 'line-active)
+      (cond
+        ((or (= (-> self fish-state) 'free) (= (-> self fish-state) 'approaching)) (fisher-update-lure! self))
+
+        ((= (-> self fish-state) 'reeling)
+          (fisher-update-manipy-reeling! self)))
+
+      (cond
+        ((= (-> self fish-state) 'reeling) (fisher-camera-follow-lure! self))
+
+        (else
+          (fisher-camera-follow-lure! self)))
+
+      (fisher-update-reel-hint! self)
+      (fisher-update-underwater-background! self)
+      (fisher-update-background-mist! self)
+      (fisher-update-camera-bubbles! self)
+      (fisher-update-lure-snake! self)
+      (fisher-draw-line-hp-bar)
+      (fisher-draw-line! self))
+
+    ((= (-> self cast-state) 'catch-transition) (fisher-restore-normal-background!) (fisher-update-catch-return! self))
+
+    ((= (-> self cast-state) 'catch-display)
+      (fisher-restore-normal-background!)
+      (fisher-camera-catch-display! self)
+      (fisher-update-catch-menu-animation! self)
+      (fisher-draw-catch-ui! self)))
+  
+  (when 
+    (and 
+      (not (= (-> self cast-state) 'catch-transition))
+      (not (= (-> self cast-state) 'catch-display))
+    )
+    (fisher-draw-xp-meter!)
+    )
+
+  (fisher-draw-fish-status! self)
+  (none))
+
+(defun fisher-face-jak-right-side! ((self fisher-game))
+  (when *target*
+    (let ((jak-forward (new 'stack-no-clear 'vector))
+        (jak-rot (new 'stack-no-clear 'matrix)))
+
+      (vector-copy! jak-forward (-> self playfield-axis))
+
+      (set! (-> jak-forward y) 0.0)
+      (set! (-> jak-forward w) 0.0)
+
+      (vector-normalize! jak-forward 1.0)
+
+      (forward-down->inv-matrix jak-rot jak-forward (-> *camera* local-down))
+
+      (matrix->quaternion (-> *target* control quat-for-control) jak-rot)
+
+      (quaternion-copy! (-> *target* control quat) (-> *target* control quat-for-control))
+
+      (rot->dir-targ! (-> *target* control))
+    )
+  )
+
+  (none)
+)
+
+(defstate idle (fisher-game)
+  :virtual #t
+  :code (behavior ()
+    (loop
+      (when (<= (vector-vector-distance (target-pos 0) (-> self pos)) (meters 5))
+        (draw-mod-menu-text-custom "PRESS <PAD_CIRCLE> TO START FISHING" 256 160 #f #t #f)
+        (when (cpad-pressed? 0 circle)
+          (cpad-clear! 0 circle)
+          (set! (-> self camera-state) 'before-cast)
+          (send-event *camera* 'change-state cam-fixed 0)
+          (go-virtual fishing)
+        )
+      )
+      (suspend)
+    )
+  )
+)
+
+(defstate fishing (fisher-game)
+  :virtual #t
+
+  :enter
+  (behavior ()
+    (process-grab? *target*)
+
+    (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
+
+    (set! (-> *target* control trans quad) (-> self fishing-player-pos quad))
+
+    (play-main-music "fishing-theme-a.wav" (the int (-> *setting-control* current sfx-volume)))
+    (set! (-> self stored-music-vol) (-> *setting-control* current music-volume))
+    (set-setting! 'music-volume 'abs 0.0 0)
+    (set! (-> self saved-camera-read-analog) *camera-read-analog*)
+
+    (set! (-> self saved-external-cam-mode) *external-cam-mode*)
+
+    (set! *camera-read-analog* #f)
+    (set! *external-cam-mode* #f)
+
+    (fisher-reset-cast! self)
+    (singlefish-start-session! self)
+  )
+
+  :code
+  (behavior ()
+    (loop
+      (when (= (-> self camera-state) 'before-cast) (fisher-face-jak-right-side! self) (fisher-camera-before-cast! self))
+
+      (fisher-update-casting! self)
+
+      (when
+        (and (= (-> self cast-state) 'ready) (cpad-pressed? 0 triangle))
+
+        (cpad-clear! 0 triangle)
+        (go-virtual exit)
+      )
+
+      (cpad-clear! 0 x)
+      (cpad-clear! 0 circle)
+      (cpad-clear! 0 square)
+      (cpad-clear! 0 triangle)
+
+      (suspend)
+    )
+  )
+)
+
+(defstate exit (fisher-game)
+  :virtual #t
+  :code
+  (behavior ()
+    (set! *camera-read-analog* (-> self saved-camera-read-analog))
+
+    (set! *external-cam-mode* (-> self saved-external-cam-mode))
+    (remove-setting! 'music-volume)
+    (stop-main-music)
+    (send-event *camera* 'change-state *camera-base-mode* (seconds 0.5))
+
+    (singlefish-end-session! self)
+    (fisher-remove-lure-snake! self)
+    (fisher-restore-normal-background!)
+    (process-release? *target*)
+    (go-virtual idle)
+  )
+)

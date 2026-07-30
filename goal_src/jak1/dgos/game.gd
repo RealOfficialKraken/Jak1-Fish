@@ -350,7 +350,6 @@
   "mod-settings.o" ;; added mod-base-change
   "mod-common-functions.o" ;; added
   "orb-placer.o" ;; added
-  "mod-custom-code.o" ;; added
   "mod-debug.o" ;; added
   ;; keep zoomer stuff loaded
   "target-racer-h.o"
@@ -371,4 +370,11 @@
   ;; keep blocking-plane stuff loaded
   "blocking-plane.o"
   "ef-plane-ag.go"
+  "fisher-game-h.o"
+  "fisher-assets.o"
+  "fish-spawnings.o"
+  "fisher-game.o"
+  "fish-main-menu.o"
+  "fisher-hooks.o"
+  "fisher-xp-meter.o"
  ))

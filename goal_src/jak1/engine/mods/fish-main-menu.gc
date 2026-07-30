@@ -1,0 +1,1518 @@
+;;-*-Lisp-*-
+(in-package goal)
+(bundles "JUN.DGO")
+
+(define *main-menu-camera-prepare-time* 0.0)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Fishing Legacy main menu, menu fish, camera transition and new-game handoff
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun turn-to-scene-camera ((tpos vector) (cam-vec vector))
+  (process-grab? *target*)
+
+  (set-vector!
+    (-> *target* control trans)
+    (-> tpos x)
+    (-> tpos y)
+    (-> tpos z)
+    1.0)
+
+  (send-event
+    *camera*
+    'teleport-to-vector-start-string
+    cam-vec)
+
+  (send-event *target* 'draw #f)
+
+  (none))
+
+(defun revert-scene-camera ()
+  (process-release? *target*)
+  (send-event *target* 'draw #t)
+  (none)
+)
+
+(defun main-menu-maintain-camera! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-camera-ready?*
+      (not *main-menu-new-game-transition?*)
+      *target*
+      *camera*)
+
+    (set-vector! (-> *target* control trans) (-> *main-menu-target-pos* x) (-> *main-menu-target-pos* y) (-> *main-menu-target-pos* z) 1.0)
+
+    (send-event *camera* 'teleport-to-vector-start-string *main-menu-camera-pos*))
+
+  (none))
+
+(defun launch-main-mmenu ()
+  (set!
+    *main-menu-saved-default-allow-pause*
+    (-> *setting-control* default allow-pause))
+
+  (set! (-> *setting-control* default allow-pause) #f)
+  (set! (-> *setting-control* target allow-pause) #f)
+  (set! (-> *setting-control* current allow-pause) #f)
+
+  (set! *main-menu-extra-blackout-set?* #f)
+  (set! *main-menu-camera-ready?* #f)
+  (set! *main-menu-initialized?* #f)
+  (set! *main-menu-start-accepted?* #f)
+  (set! *main-menu-progress-was-paused?* #f)
+  (set! *main-menu-music-resumed?* #f)
+  (set! *main-menu-music-paused-by-game?* #f)
+  (set! *main-menu-pause-enabled?* #f)
+  (set! *main-menu-new-game-transition?* #f)
+  (set! *main-menu-new-game-transition-requested?* #f)
+  (set! *main-menu-new-game-transition-time* 0.0)
+  (set! *main-menu-transition-fish-cleared?* #f)
+  (set! *main-menu-transition-warp-requested?* #f)
+  (set! *main-menu-transition-warp-wait-time* 0.0)
+  (set! *main-menu-bubble-time* 0.0)
+  (set! *main-menu-camera-prepare-time* 0.0)
+
+  ;; Cover game-start, the initial warp and camera setup with one blackout.
+  ;; Do not refresh this every frame: repeatedly changing blackout-time
+  ;; interferes with the Continue Without Saving startup path.
+  (set-blackout-frames (seconds 2.0))
+  (set! *main-menu-extra-blackout-set?* #t)
+
+  (kill-by-name "main-menu-fish-agent" *active-pool*)
+  (kill-by-name "main-menu-fish" *active-pool*)
+  (set! *main-menu-fish-active-count* 0)
+  (set! *main-menu-fish-target-count* (rand-vu-int-range 3 8))
+  (set! *main-menu-next-fish-spawn-time* 2.0)
+  (set! *main-menu-next-fish-lower?* (rand-vu-percent? 0.5))
+  (set! *main-menu-made-by-time* 0.0)
+  (set! *main-menu-made-by-y* 112.0)
+  (set! in-main-menu? #t)
+  (none))
+
+(defun main-menu-prepare-camera! ()
+  (when
+    (and
+      in-main-menu?
+      (not *main-menu-camera-ready?*)
+      *target*
+      *camera*
+      *level*
+      *spawn-actors*
+      *display*
+      (-> *level* play?))
+
+    (cond
+      ((or
+          (= (-> *target* next-state name) 'target-warp-in)
+          (= (-> *target* next-state name) 'target-warp-out))
+
+        (set! *main-menu-camera-prepare-time* 0.0))
+
+      (else
+        (+!
+          *main-menu-camera-prepare-time*
+          (-> *display* seconds-per-frame))
+
+        ;; Retail reaches this hook sooner than debug. Give the initial
+        ;; target warp/startup enough time to finish before saving the
+        ;; gameplay position that the transition and final warp will use.
+        (when
+          (>= *main-menu-camera-prepare-time* 1.0)
+
+          (vector-copy!
+            *main-menu-saved-jak-pos*
+            (target-pos 0))
+
+          (turn-to-scene-camera
+            *main-menu-target-pos*
+            *main-menu-camera-pos*)
+
+          (set! *main-menu-camera-ready?* #t)))))
+
+  (none))
+
+(defun main-menu-initialize! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-extra-blackout-set?*
+      *main-menu-camera-ready?*
+      (not *main-menu-initialized?*)
+      *display*
+      *game-info*
+      (>=
+        (current-time)
+        (-> *game-info* blackout-time)))
+
+    (set!
+      *main-menu-saved-music-volume*
+      (-> *setting-control* current music-volume))
+
+    (set-setting! 'music-volume 'abs 0.0 0)
+    (set-setting! 'allow-pause #f 0.0 0)
+    (set-setting! 'allow-progress #t 0.0 0)
+    (apply-settings *setting-control*)
+
+    (play-main-music "menu-theme.mp3" 100)
+
+    (set! *main-menu-made-by-time* 0.0)
+    (set! *main-menu-made-by-y* 112.0)
+    (set! *main-menu-initialized?* #t))
+
+  (none))
+
+(defun main-menu-restore-time-of-day! ()
+  (when
+    (and
+      *time-of-day-proc*
+      *main-menu-time-frozen?*)
+
+    (set!
+      (-> *time-of-day-proc* 0 time-ratio)
+      *main-menu-saved-time-ratio*)
+
+    (set! *main-menu-time-frozen?* #f))
+
+  (none))
+
+(defun main-menu-update-time-of-day! ()
+  (when *time-of-day-proc*
+    (cond
+      (in-main-menu?
+        (when
+          (not *main-menu-time-frozen?*)
+
+          (set!
+            *main-menu-saved-time-ratio*
+            (-> *time-of-day-proc* 0 time-ratio))
+
+          (set-time-of-day 8.1)
+
+          (set! *main-menu-time-frozen?* #t))
+
+        (set!
+          (-> *time-of-day-proc* 0 time-ratio)
+          0.0))
+
+      (else
+        (main-menu-restore-time-of-day!))))
+
+  (none))
+
+(defun main-menu-fish-skelgroup ((index int))
+  (cond
+    ((= index 0) *catch-fisha-sgc*)
+    ((= index 1) *catch-fishb-sgc*)
+    (else *catch-fishc-sgc*)))
+
+(defun main-menu-build-camera-basis! ()
+  (when
+    (and
+      *camera*
+      (> (-> *camera* num-slaves) 0))
+
+    (let ((cam-mat
+          (-> *camera* slave 0 0 tracking inv-mat)))
+
+      (vector-copy!
+        *main-menu-camera-right*
+        (-> cam-mat vector 0))
+
+      (set! (-> *main-menu-camera-right* w) 0.0)
+
+      (singlefish-vector-normalize-safe!
+        *main-menu-camera-right*
+        1.0)
+
+      (vector-copy!
+        *main-menu-camera-up*
+        (-> cam-mat vector 1))
+
+      (set! (-> *main-menu-camera-up* w) 0.0)
+
+      (singlefish-vector-normalize-safe!
+        *main-menu-camera-up*
+        1.0)
+
+      (vector-copy!
+        *main-menu-camera-forward*
+        (-> cam-mat vector 2))
+
+      (set! (-> *main-menu-camera-forward* w) 0.0)
+
+      (singlefish-vector-normalize-safe!
+        *main-menu-camera-forward*
+        1.0)))
+
+  (none))
+
+(defun main-menu-fish-agent-remove! ((self main-menu-fish-agent))
+  (when (-> self visual)
+    (deactivate (-> (-> self visual) 0))
+    (set! (-> self visual) (the-as (pointer manipy) #f)))
+
+  (when (> *main-menu-fish-active-count* 0)
+    (-! *main-menu-fish-active-count* 1))
+
+  (none))
+
+(defun singlefish-vector-normalize-safe! ((vec vector) (wanted-length float))
+  (let ((current-length
+        (singlefish-vector-length-safe vec)))
+
+    (when (> current-length 0.000001)
+      (let ((scale
+            (/ wanted-length current-length)))
+
+        (set! (-> vec x) (* (-> vec x) scale))
+        (set! (-> vec y) (* (-> vec y) scale))
+        (set! (-> vec z) (* (-> vec z) scale)))))
+
+  vec)
+
+(defun main-menu-fish-agent-position! ((self main-menu-fish-agent))
+  (when
+    (and
+      (-> self visual)
+      *camera*
+      (> (-> *camera* num-slaves) 0))
+
+    (main-menu-build-camera-basis!)
+
+    (let* ((cam-slave
+            (-> *camera* slave 0 0))
+
+        (fish-proc
+          (the-as manipy
+            (-> (-> self visual) 0 self)))
+
+        (position
+          (new 'stack-no-clear 'vector))
+
+        (offset
+          (new 'stack-no-clear 'vector))
+
+        (fish-forward
+          (new 'stack-no-clear 'vector))
+
+        (fish-down
+          (new 'stack-no-clear 'vector))
+
+        (rot
+          (new 'stack-no-clear 'matrix))
+
+        (screen-x
+          (-
+            (-> self travel)
+            (meters 40.0))))
+
+      (singlefish-vector-copy-safe!
+        position
+        (-> cam-slave trans))
+
+      (singlefish-vector-scale-safe!
+        offset
+        *main-menu-camera-forward*
+        (-
+          (-> self depth)
+          (meters 8.0)))
+
+      (singlefish-vector-add-safe!
+        position
+        position
+        offset)
+
+      (singlefish-vector-scale-safe!
+        offset
+        *main-menu-camera-right*
+        (* screen-x (-> self direction)))
+
+      (singlefish-vector-add-safe!
+        position
+        position
+        offset)
+
+      (singlefish-vector-scale-safe!
+        offset
+        *main-menu-camera-up*
+        (+
+          (-> self height)
+          (*
+            (meters 0.06)
+            (sin
+              (+
+                (*
+                  (degrees 75.0)
+                  *main-menu-made-by-time*)
+                (*
+                  (-> self height)
+                  0.5))))))
+
+      (singlefish-vector-add-safe!
+        position
+        position
+        offset)
+
+      (set!
+        (-> fish-proc root trans quad)
+        (-> position quad))
+
+      (singlefish-vector-scale-safe!
+        fish-forward
+        *main-menu-camera-right*
+        (-> self direction))
+
+      (set! (-> fish-forward w) 0.0)
+
+      (singlefish-vector-scale-safe!
+        fish-down
+        *main-menu-camera-up*
+        -1.0)
+
+      (set! (-> fish-down w) 0.0)
+
+      (singlefish-vector-normalize-safe!
+        fish-down
+        1.0)
+
+      (forward-down->inv-matrix
+        rot
+        fish-forward
+        fish-down)
+
+      (matrix->quaternion
+        (-> fish-proc root quat)
+        rot)))
+
+  (none))
+
+(defbehavior main-menu-fish-agent-init-by-other main-menu-fish-agent
+  ((fish-index int)
+    (start-travel float)
+    (height float)
+    (depth float)
+    (direction float))
+
+  (set! (-> self visual) (the-as (pointer manipy) #f))
+  (set! (-> self direction) direction)
+  (set! (-> self speed) (rand-vu-float-range (meters 1.25) (meters 2.35)))
+  (set! (-> self travel) start-travel)
+  (set! (-> self height) height)
+  (set! (-> self transition-start-height) height)
+  (set! (-> self depth) depth)
+
+  (when
+    (and
+      *camera*
+      (> (-> *camera* num-slaves) 0))
+
+    (let ((spawn-pos
+          (new 'stack-no-clear 'vector)))
+
+      (vector-copy!
+        spawn-pos
+        (-> *camera* slave 0 0 trans))
+
+      (set!
+        (-> self visual)
+        (manipy-spawn
+          spawn-pos
+          #f
+          (main-menu-fish-skelgroup fish-index)
+          #f
+          :from *default-dead-pool*
+          :to *default-pool*
+          :name "main-menu-fish"))
+
+      (when (-> self visual)
+        (let ((fish-proc
+              (the-as manipy
+                (-> (-> self visual) 0 self))))
+
+          (send-event fish-proc 'anim-mode 'loop)
+
+          (set-vector!
+            (-> fish-proc root scale)
+            0.45
+            0.45
+            0.45
+            1.0)
+
+          (send-event
+            fish-proc
+            'max-vis-dist
+            (meters 999999.0))
+
+          (+! *main-menu-fish-active-count* 1)
+
+          (main-menu-fish-agent-position! self)))))
+
+  (go-virtual main-menu-fish-swim))
+
+(defstate main-menu-fish-swim (main-menu-fish-agent)
+  :virtual #t
+  :code
+  (behavior ()
+    (loop
+      (when
+        (or
+          (not in-main-menu?)
+          (not *main-menu-initialized?*)
+          (not (-> self visual)))
+
+        (main-menu-fish-agent-remove! self)
+        (process-deactivate))
+
+      (when
+        (paused?)
+
+        (suspend))
+
+      (cond
+        ((and
+            *main-menu-new-game-transition?*
+            (< *main-menu-new-game-transition-time* 4.0)
+            (-> self visual))
+
+          (let* ((linear-t
+                  (/ *main-menu-new-game-transition-time* 4.0))
+
+              (smooth-t
+                (*
+                  linear-t
+                  linear-t
+                  (-
+                    3.0
+                    (* 2.0 linear-t)))))
+
+            (set!
+              (-> self height)
+              (+
+                (-> self transition-start-height)
+                (*
+                  (meters 36.0)
+                  smooth-t)))
+
+            (main-menu-fish-agent-position! self)))
+
+        ((not *main-menu-new-game-transition?*)
+          (+!
+            (-> self travel)
+            (*
+              (-> self speed)
+              (-> *display* seconds-per-frame)))
+
+          (main-menu-fish-agent-position! self)
+
+          (when
+            (> (-> self travel) (meters 80.0))
+
+            (main-menu-fish-agent-remove! self)
+            (process-deactivate))))
+
+      (suspend))))
+
+(defun main-menu-spawn-fish-agent! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      (not *main-menu-new-game-transition?*)
+      (< *main-menu-fish-active-count* *main-menu-fish-target-count*))
+
+    (let ((spawn-height
+          (if
+            *main-menu-next-fish-lower?*
+            (rand-vu-float-range
+              (meters 3.0)
+              (meters 11.0))
+            (rand-vu-float-range
+              (meters -11.0)
+              (meters -3.0)))))
+
+      (process-spawn
+        main-menu-fish-agent
+        (rand-vu-int-range
+          0
+          (- *main-menu-fish-type-count* 1))
+        0.0
+        spawn-height
+        (rand-vu-float-range
+          (meters 5.0)
+          (meters 10.0))
+        (if (rand-vu-percent? 0.5) 1.0 -1.0)
+        :name "main-menu-fish-agent"
+        *active-pool*)
+
+      (set!
+        *main-menu-next-fish-lower?*
+        (not *main-menu-next-fish-lower?*))))
+
+  (none))
+
+(defun main-menu-update-fish! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      (>=
+        *main-menu-made-by-time*
+        *main-menu-next-fish-spawn-time*)
+      (<
+        *main-menu-fish-active-count*
+        *main-menu-fish-target-count*))
+
+    (main-menu-spawn-fish-agent!)
+
+    (set!
+      *main-menu-next-fish-spawn-time*
+      (+
+        *main-menu-made-by-time*
+        (rand-vu-float-range 0.85 1.75))))
+
+  (none))
+
+(defun main-menu-update-bubbles! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      (not *main-menu-new-game-transition?*)
+      *display*)
+
+    (-!
+      *main-menu-bubble-time*
+      (-> *display* seconds-per-frame))
+
+    (when
+      (<= *main-menu-bubble-time* 0.0)
+
+      (let ((bubble-pos
+          (new 'stack-no-clear 'vector))
+
+        (bubble-offset
+          (new 'stack-no-clear 'vector)))
+
+      (main-menu-build-camera-basis!)
+
+      (vector-copy!
+        bubble-pos
+        *main-menu-camera-pos*)
+
+      ;; Put bubbles in the same closer screen field as the fish.
+      (singlefish-vector-scale-safe!
+        bubble-offset
+        *main-menu-camera-forward*
+        (rand-vu-float-range
+          (meters 1.0)
+          (meters 6.0)))
+
+      (singlefish-vector-add-safe!
+        bubble-pos
+        bubble-pos
+        bubble-offset)
+
+      (singlefish-vector-scale-safe!
+        bubble-offset
+        *main-menu-camera-right*
+        (rand-vu-float-range
+          (meters -8.0)
+          (meters 8.0)))
+
+      (singlefish-vector-add-safe!
+        bubble-pos
+        bubble-pos
+        bubble-offset)
+
+      (singlefish-vector-scale-safe!
+        bubble-offset
+        *main-menu-camera-up*
+        (rand-vu-float-range
+          (meters -8.0)
+          (meters -3.0)))
+
+      (singlefish-vector-add-safe!
+        bubble-pos
+        bubble-pos
+        bubble-offset)
+
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 3574)
+        bubble-pos))
+
+      (set!
+        *main-menu-bubble-time*
+        (rand-vu-float-range 0.08 0.24))))
+
+  (none))
+
+(defun main-menu-update-progress-music! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      (not *main-menu-new-game-transition?*))
+
+    (cond
+      ((and
+          (paused?)
+          (not *main-menu-music-paused-by-game?*))
+
+        (pause-main-music)
+        (set! *main-menu-music-paused-by-game?* #t)
+        (set! *main-menu-progress-was-paused?* #t))
+
+      ((and
+          (not (paused?))
+          *main-menu-progress-was-paused?*)
+
+        (resume-main-music)
+
+        (set! *main-menu-music-paused-by-game?* #f)
+        (set! *main-menu-progress-was-paused?* #f)
+        (set! *main-menu-music-resumed?* #t)
+
+        ;; Progress/title menu was closed. Return to the visible
+        ;; Fishing Legacy / PRESS START state.
+        (set! *main-menu-start-accepted?* #f)
+
+        ;; Consume the closing input so it cannot instantly reopen.
+        (cpad-clear! 0 start)
+        (cpad-clear! 0 x))))
+
+  (none))
+
+(defun main-menu-update-pause-lock! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      *setting-control*)
+
+    (cond
+      ((< *main-menu-made-by-time* 12.0)
+        (set! (-> *setting-control* default allow-pause) #f)
+        (set! (-> *setting-control* target allow-pause) #f)
+        (set! (-> *setting-control* current allow-pause) #f)
+
+        (set-setting! 'allow-pause #f 0.0 0)
+        (apply-settings *setting-control*)
+
+        (set! (-> *setting-control* target allow-pause) #f)
+        (set! (-> *setting-control* current allow-pause) #f)
+        (set! *main-menu-pause-enabled?* #f)
+
+        (cpad-clear! 0 start))
+
+      ((and
+          (not *main-menu-new-game-transition?*)
+          (not *main-menu-new-game-transition-requested?*)
+          (not *main-menu-pause-enabled?*))
+
+        (set!
+          (-> *setting-control* default allow-pause)
+          *main-menu-saved-default-allow-pause*)
+
+        (remove-setting! 'allow-pause)
+        (apply-settings *setting-control*)
+
+        (set! *main-menu-pause-enabled?* #t))))
+
+  (none))
+
+(defun main-menu-update-title-screen! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      *display*
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (when
+      (and
+        (and
+        (not *main-menu-start-accepted?*)
+        (not *main-menu-new-game-transition?*))
+        (>= *main-menu-made-by-time* 8.322))
+
+      (draw-mod-menu-text-custom
+        "THE"
+        474
+        36
+        #f
+        #f
+        #t))
+
+    (when
+      (and
+        (and
+        (not *main-menu-start-accepted?*)
+        (not *main-menu-new-game-transition?*))
+        (>= *main-menu-made-by-time* 8.868))
+
+      (draw-mod-menu-text-custom
+        "FISHING"
+        458
+        60
+        #f
+        #f
+        #t))
+
+    (when
+      (and
+        (and
+        (not *main-menu-start-accepted?*)
+        (not *main-menu-new-game-transition?*))
+        (>= *main-menu-made-by-time* 9.389))
+
+      (draw-mod-menu-text-custom
+        "LEGACY"
+        442
+        84
+        #f
+        #f
+        #t))
+
+    (when
+      (and
+        (and
+        (not *main-menu-start-accepted?*)
+        (not *main-menu-new-game-transition?*))
+        (>= *main-menu-made-by-time* 12.0))
+
+      (when
+        (= 
+          (logand
+            (the int (- *main-menu-made-by-time* 12.0))
+            1)
+          0)
+
+        (draw-mod-menu-text-custom
+          "PRESS START"
+          256
+          196
+          #f
+          #t
+          #f))
+
+      ;; On the custom main menu, Start/X open the title progress menu.
+      ;; Clear Start immediately so normal gameplay pause cannot open too.
+      (when
+        (and
+          (not *main-menu-start-accepted?*)
+          (not *main-menu-new-game-transition?*)
+          (or
+            (cpad-pressed? 0 start)
+            (cpad-pressed? 0 x)))
+
+        (cpad-clear! 0 start)
+        (cpad-clear! 0 x)
+
+        (set! *main-menu-start-accepted?* #t)
+        (set! *main-menu-progress-was-paused?* #f)
+        (set! *main-menu-music-resumed?* #f)
+
+        (pause-main-music)
+
+        (activate-progress
+          *dproc*
+          (progress-screen title)))))
+
+  (none))
+
+(defun main-menu-update-made-by! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      *display*)
+
+    (+!
+      *main-menu-made-by-time*
+      (-> *display* seconds-per-frame))
+
+    (when
+      (and
+        (current-frame)
+        (-> (current-frame) global-buf))
+
+      (cond
+        ((< *main-menu-made-by-time* 4.0)
+          (set! *main-menu-made-by-y* 112.0)
+
+          (draw-mod-menu-text-custom
+            "MADE BY KRAKEN"
+            256
+            (the int *main-menu-made-by-y*)
+            #f
+            #t
+            #f))
+
+        ((< *main-menu-made-by-time* 6.0)
+          (let* ((transition
+                  (/ (- *main-menu-made-by-time* 4.0) 2.0))
+
+              (back-strength
+                1.70158)
+
+              (bounce-out
+                (*
+                  transition
+                  transition
+                  (-
+                    (* (+ back-strength 1.0) transition)
+                    back-strength))))
+
+            (set!
+              *main-menu-made-by-y*
+              (-
+                112.0
+                (* 320.0 bounce-out)))
+
+            (draw-mod-menu-text-custom
+              "MADE BY KRAKEN"
+              256
+              (the int *main-menu-made-by-y*)
+              #f
+              #t
+              #f))))))
+
+  (none))
+
+(defun main-menu-request-new-game-transition! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      (not *main-menu-new-game-transition?*)
+      (not *main-menu-new-game-transition-requested?*))
+
+    (set! *main-menu-new-game-transition-requested?* #t)
+    (set! *main-menu-start-accepted?* #t)
+    (set! *main-menu-progress-was-paused?* #f)
+
+    (hide-progress-screen)
+    (set-master-mode 'game)
+    (set-blackout-frames 0)
+
+    (set! *main-menu-music-paused-by-game?* #f)
+    (set! *main-menu-music-resumed?* #f)
+
+    (sound-group-continue
+      (sound-group
+        sfx
+        music
+        dialog
+        sog3
+        ambient
+        sog5
+        sog6
+        sog7)))
+
+  (none))
+
+(defun main-menu-start-new-game-transition! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      (not *main-menu-new-game-transition?*)
+      *target*
+      *camera*
+      (> (-> *camera* num-slaves) 0))
+
+    ;; This function is entered on the first unpaused frame that begins
+    ;; the custom camera transition, so stop the custom title music here.
+    (stop-main-music)
+
+    (set-master-mode 'game)
+    (set-blackout-frames 0)
+
+    (set-setting!
+      'music-volume
+      'abs
+      (-> *pc-settings* memcard-volume-music)
+      0)
+
+    (set-setting!
+      'sfx-volume
+      'abs
+      (-> *pc-settings* memcard-volume-sfx)
+      0)
+
+    (set-setting!
+      'dialog-volume
+      'abs
+      (-> *pc-settings* memcard-volume-dialog)
+      0)
+
+    (apply-settings *setting-control*)
+
+    (sound-group-continue
+      (sound-group
+        sfx
+        music
+        dialog
+        sog3
+        ambient
+        sog5
+        sog6
+        sog7))
+
+    (turn-to-scene-camera
+      *main-menu-target-pos*
+      *main-menu-camera-pos*)
+
+    (vector-copy!
+      *main-menu-new-game-camera-start*
+      *main-menu-camera-pos*)
+
+    (vector-copy!
+      *main-menu-new-game-jak-start*
+      *main-menu-target-pos*)
+
+    (set! *main-menu-new-game-transition-requested?* #f)
+    (set! *main-menu-new-game-transition-time* 0.0)
+    (set! *main-menu-transition-fish-cleared?* #f)
+    (set! *main-menu-transition-warp-requested?* #f)
+    (set! *main-menu-transition-warp-wait-time* 0.0)
+    (set! *main-menu-new-game-transition?* #t)
+    (set! *main-menu-start-accepted?* #t)
+    (set! *main-menu-progress-was-paused?* #f)
+    (set! *main-menu-music-resumed?* #f))
+
+  (none))
+
+(defun main-menu-restore-gameplay-settings! ()
+  ;; Remove temporary settings owned by the main-menu update process.
+  (remove-setting
+    *setting-control*
+    (with-pp pp)
+    #t)
+
+  ;; Progress changes master mode when opened. This is the important part
+  ;; required for the normal Start-button pause path to work again.
+  (set-master-mode 'game)
+
+  (set! *main-menu-saved-default-allow-pause* #t)
+  (set! (-> *setting-control* default allow-pause) #t)
+  (set! (-> *setting-control* default allow-progress) #t)
+
+  (set!
+    (-> *setting-control* default music-volume)
+    (-> *pc-settings* memcard-volume-music))
+
+  (set!
+    (-> *setting-control* default sfx-volume)
+    (-> *pc-settings* memcard-volume-sfx))
+
+  (set!
+    (-> *setting-control* default dialog-volume)
+    (-> *pc-settings* memcard-volume-dialog))
+
+  (apply-settings *setting-control*)
+
+  (set! (-> *setting-control* target allow-pause) #t)
+  (set! (-> *setting-control* current allow-pause) #t)
+  (set! (-> *setting-control* target allow-progress) #t)
+  (set! (-> *setting-control* current allow-progress) #t)
+
+  (sound-group-continue
+    (sound-group
+      sfx
+      music
+      dialog
+      sog3
+      ambient
+      sog5
+      sog6
+      sog7))
+
+  (sound-set-volume
+    (sound-group music)
+    (-> *pc-settings* memcard-volume-music))
+
+  (sound-set-volume
+    (sound-group sfx)
+    (-> *pc-settings* memcard-volume-sfx))
+
+  (sound-set-volume
+    (sound-group sog3)
+    (-> *pc-settings* memcard-volume-sfx))
+
+  (sound-set-volume
+    (sound-group ambient)
+    (-> *pc-settings* memcard-volume-sfx))
+
+  (sound-set-volume
+    (sound-group dialog)
+    (-> *pc-settings* memcard-volume-dialog))
+
+  ;; Always return target execution after the custom menu has finished.
+  (when *target*
+    (process-release? *target*)
+    (send-event *target* 'draw #t))
+
+  (none))
+
+(defun main-menu-finish-new-game-transition! ()
+  (cond
+    ((not *main-menu-transition-warp-requested?*)
+      (kill-by-name "main-menu-fish-agent" *active-pool*)
+      (kill-by-name "main-menu-fish" *active-pool*)
+      (set! *main-menu-fish-active-count* 0)
+
+      (main-menu-restore-time-of-day!)
+
+      (remove-setting
+        *setting-control*
+        (with-pp pp)
+        #t)
+
+      (set!
+        (-> *setting-control* default allow-pause)
+        *main-menu-saved-default-allow-pause*)
+
+      (set! (-> *setting-control* default allow-progress) #t)
+      (apply-settings *setting-control*)
+
+      (sound-group-continue
+        (sound-group
+          sfx
+          music
+          dialog
+          sog3
+          ambient
+          sog5
+          sog6
+          sog7))
+
+      (set-blackout-frames 0)
+
+      (vector-copy!
+        *main-menu-warp-in-end*
+        *main-menu-saved-jak-pos*)
+
+      (vector-copy!
+        *main-menu-warp-in-start*
+        *main-menu-saved-jak-pos*)
+
+      (+!
+        (-> *main-menu-warp-in-start* y)
+        (meters 2.2))
+
+      (when *target*
+        (set!
+          (-> *target* control trans quad)
+          (-> *main-menu-warp-in-start* quad))
+
+        (process-release? *target*)
+
+        (logclear!
+          (-> *target* draw status)
+          (draw-status hidden))
+
+        (send-event *target* 'draw #t)
+
+        (let ((warp-event
+              (new 'stack-no-clear 'event-message-block)))
+
+          (set! (-> warp-event from) *target*)
+          (set! (-> warp-event num-params) 3)
+          (set! (-> warp-event message) 'change-state)
+          (set! (-> warp-event param 0) (the-as uint target-warp-in))
+          (set! (-> warp-event param 1) (the-as uint *main-menu-warp-in-start*))
+          (set! (-> warp-event param 2) (the-as uint *main-menu-warp-in-end*))
+
+          (send-event-function
+            *target*
+            warp-event)))
+
+      (set! *main-menu-transition-warp-requested?* #t)
+      (set! *main-menu-transition-warp-wait-time* 0.0))
+
+    (else
+      (+!
+        *main-menu-transition-warp-wait-time*
+        (-> *display* seconds-per-frame))
+
+      (set-blackout-frames 0)
+
+      ;; Give target-warp-in time to run before returning camera control.
+      (when
+        (>= *main-menu-transition-warp-wait-time* 2.0)
+
+        (main-menu-restore-gameplay-settings!)
+
+        (when *camera*
+          (send-event
+            *camera*
+            'change-state
+            *camera-base-mode*
+            0.0))
+
+        (set! jak-warp-out #f)
+        (set! *main-menu-new-game-transition?* #f)
+        (set! *main-menu-new-game-transition-requested?* #f)
+        (set! *main-menu-new-game-transition-time* 0.0)
+        (set! *main-menu-transition-fish-cleared?* #f)
+        (set! *main-menu-transition-warp-requested?* #f)
+        (set! *main-menu-transition-warp-wait-time* 0.0)
+        (set! *main-menu-pause-enabled?* #t)
+        (set! *main-menu-extra-blackout-set?* #f)
+        (set! *main-menu-camera-ready?* #f)
+        (set! *main-menu-initialized?* #f)
+        (set! *main-menu-start-accepted?* #f)
+        (set! *main-menu-progress-was-paused?* #f)
+        (set! *main-menu-music-resumed?* #f)
+        (set! *main-menu-music-paused-by-game?* #f)
+        (set! *main-menu-bubble-time* 0.0)
+        (set! *main-menu-camera-prepare-time* 0.0)
+        (set! in-main-menu? #f))))
+
+  (none))
+
+(defun main-menu-update-new-game-transition! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-new-game-transition?*
+      *display*
+      *target*
+      *camera*)
+
+    ;; Saved-new-game initialization can release or reinitialize Jak.
+    ;; Reassert the grab every retail frame.
+    (process-grab? *target*)
+
+    (+!
+      *main-menu-new-game-transition-time*
+      (-> *display* seconds-per-frame))
+
+    (cond
+      ((< *main-menu-new-game-transition-time* 4.0)
+        (process-grab? *target*)
+
+        (set!
+          (-> *target* control trans quad)
+          (-> *main-menu-target-pos* quad))
+
+        (send-event
+          *camera*
+          'teleport-to-vector-start-string
+          *main-menu-camera-pos*)
+
+        ;; Reassert after the camera event.
+        (set!
+          (-> *target* control trans quad)
+          (-> *main-menu-target-pos* quad)))
+
+      ((< *main-menu-new-game-transition-time* 12.0)
+        (when
+          (not *main-menu-transition-fish-cleared?*)
+
+          (kill-by-name "main-menu-fish-agent" *active-pool*)
+          (kill-by-name "main-menu-fish" *active-pool*)
+          (set! *main-menu-fish-active-count* 0)
+          (set! *main-menu-transition-fish-cleared?* #t))
+
+        (let* ((pan-time
+                (- *main-menu-new-game-transition-time* 4.0))
+
+            (camera-linear-t
+              (min
+                1.0
+                (/ pan-time 6.0)))
+
+            (camera-smooth-t
+              (*
+                camera-linear-t
+                camera-linear-t
+                (-
+                  3.0
+                  (* 2.0 camera-linear-t))))
+
+            (jak-linear-t
+              (min
+                1.0
+                (/ pan-time 8.0)))
+
+            (jak-smooth-t
+              (*
+                jak-linear-t
+                jak-linear-t
+                (-
+                  3.0
+                  (* 2.0 jak-linear-t)))))
+
+          (vector-lerp!
+            *main-menu-new-game-camera-current*
+            *main-menu-new-game-camera-start*
+            *main-menu-new-game-camera-pos*
+            camera-smooth-t)
+
+          (vector-lerp!
+            *main-menu-new-game-jak-current*
+            *main-menu-new-game-jak-start*
+            *main-menu-saved-jak-pos*
+            jak-smooth-t)
+
+          ;; The saved-game path may have replaced/released the target
+          ;; since the transition began.
+          (process-grab? *target*)
+
+          (set!
+            (-> *target* control trans quad)
+            (-> *main-menu-new-game-jak-current* quad))
+
+          (send-event
+            *camera*
+            'teleport-to-vector-start-string
+            *main-menu-new-game-camera-current*)
+
+          ;; Reassert after camera/event processing.
+          (set!
+            (-> *target* control trans quad)
+            (-> *main-menu-new-game-jak-current* quad))))
+
+      (else
+        (main-menu-finish-new-game-transition!))))
+
+  (none))
+
+(defun main-menu-exit-for-load! ()
+  (when in-main-menu?
+    (stop-main-music)
+
+    (kill-by-name "main-menu-fish-agent" *active-pool*)
+    (kill-by-name "main-menu-fish" *active-pool*)
+    (set! *main-menu-fish-active-count* 0)
+
+    (when *target*
+      (process-release? *target*)
+      (logclear!
+        (-> *target* draw status)
+        (draw-status hidden))
+      (send-event *target* 'draw #t))
+
+    (when *camera*
+      (send-event
+        *camera*
+        'change-state
+        *camera-base-mode*
+        0.0))
+
+    (main-menu-restore-time-of-day!)
+
+    (remove-setting
+      *setting-control*
+      (with-pp pp)
+      #t)
+
+    (set! (-> *setting-control* default allow-pause) #t)
+    (set! (-> *setting-control* default allow-progress) #t)
+
+    (set-setting!
+      'music-volume
+      'abs
+      (-> *pc-settings* memcard-volume-music)
+      0)
+
+    (set-setting!
+      'sfx-volume
+      'abs
+      (-> *pc-settings* memcard-volume-sfx)
+      0)
+
+    (set-setting!
+      'dialog-volume
+      'abs
+      (-> *pc-settings* memcard-volume-dialog)
+      0)
+
+    (apply-settings *setting-control*)
+
+    (set! (-> *setting-control* target allow-pause) #t)
+    (set! (-> *setting-control* current allow-pause) #t)
+    (set! (-> *setting-control* target allow-progress) #t)
+    (set! (-> *setting-control* current allow-progress) #t)
+
+    (sound-group-continue
+      (sound-group
+        sfx
+        music
+        dialog
+        sog3
+        ambient
+        sog5
+        sog6
+        sog7))
+
+    (set! jak-warp-out #f)
+    (set! *main-menu-extra-blackout-set?* #f)
+    (set! *main-menu-camera-ready?* #f)
+    (set! *main-menu-initialized?* #f)
+    (set! *main-menu-start-accepted?* #f)
+    (set! *main-menu-progress-was-paused?* #f)
+    (set! *main-menu-music-resumed?* #f)
+    (set! *main-menu-music-paused-by-game?* #f)
+    (set! *main-menu-pause-enabled?* #t)
+    (set! *main-menu-new-game-transition?* #f)
+    (set! *main-menu-new-game-transition-requested?* #f)
+    (set! *main-menu-new-game-transition-time* 0.0)
+    (set! *main-menu-transition-fish-cleared?* #f)
+    (set! *main-menu-transition-warp-requested?* #f)
+    (set! *main-menu-transition-warp-wait-time* 0.0)
+    (set! *main-menu-bubble-time* 0.0)
+    (set! *main-menu-camera-prepare-time* 0.0)
+    (set! in-main-menu? #f))
+
+  (none))
+
+(defun main-menu-abort-for-blackout! ()
+  (set! jak-warp-out #f)
+  (stop-main-music)
+
+  (kill-by-name "main-menu-fish-agent" *active-pool*)
+  (kill-by-name "main-menu-fish" *active-pool*)
+
+  (set! *main-menu-fish-active-count* 0)
+
+  (set-setting!
+    'music-volume
+    'abs
+    (-> *pc-settings* memcard-volume-music)
+    0)
+
+  (set-setting!
+    'sfx-volume
+    'abs
+    (-> *pc-settings* memcard-volume-sfx)
+    0)
+
+  (set-setting!
+    'dialog-volume
+    'abs
+    (-> *pc-settings* memcard-volume-dialog)
+    0)
+
+  (sound-group-continue
+    (sound-group
+      sfx
+      music
+      dialog
+      sog3
+      ambient
+      sog5
+      sog6
+      sog7))
+
+  (remove-setting! 'process-mask)
+
+  (logior!
+    (-> *setting-control* default process-mask)
+    (process-mask pause menu))
+
+  (set-setting! 'allow-pause #t 0.0 0)
+  (set-setting! 'allow-progress #t 0.0 0)
+  (apply-settings *setting-control*)
+
+  (when *target*
+    (process-release? *target*)
+    (send-event *target* 'draw #t))
+
+  (when *camera*
+    (send-event
+      *camera*
+      'change-state
+      *camera-base-mode*
+      0.0))
+
+  (main-menu-restore-time-of-day!)
+
+  (main-menu-restore-gameplay-settings!)
+
+  (set! *main-menu-time-frozen?* #f)
+  (set! *main-menu-extra-blackout-set?* #f)
+  (set! *main-menu-camera-ready?* #f)
+  (set! *main-menu-initialized?* #f)
+  (set! *main-menu-start-accepted?* #f)
+  (set! *main-menu-progress-was-paused?* #f)
+  (set! *main-menu-music-resumed?* #f)
+  (set! *main-menu-music-paused-by-game?* #f)
+  (set! *main-menu-pause-enabled?* #t)
+  (set! *main-menu-new-game-transition?* #f)
+  (set! *main-menu-new-game-transition-requested?* #f)
+  (set! *main-menu-new-game-transition-time* 0.0)
+  (set! *main-menu-transition-fish-cleared?* #f)
+  (set! *main-menu-transition-warp-requested?* #f)
+  (set! *main-menu-transition-warp-wait-time* 0.0)
+  (set! *main-menu-bubble-time* 0.0)
+  (set! *main-menu-camera-prepare-time* 0.0)
+  (set! in-main-menu? #f)
+
+  (none))
+
+(defun main-menu-update! ()
+  (when
+    (and
+      in-main-menu?
+      *main-menu-initialized?*
+      *game-info*
+      (<
+        (current-time)
+        (-> *game-info* blackout-time)))
+
+    (cond
+      ((or
+          *main-menu-new-game-transition-requested?*
+          *main-menu-new-game-transition?*)
+
+        (set-blackout-frames 0))
+
+      (else
+        (main-menu-abort-for-blackout!))))
+
+  (main-menu-update-time-of-day!)
+
+  (when in-main-menu?
+    (main-menu-prepare-camera!)
+
+    (when *main-menu-camera-ready?*
+      (main-menu-maintain-camera!))
+
+    (main-menu-initialize!)
+
+    (when *main-menu-initialized?*
+      (main-menu-update-pause-lock!)
+
+      (cond
+        (*main-menu-new-game-transition?*
+          (main-menu-update-new-game-transition!))
+
+        ((not (paused?))
+          (main-menu-update-made-by!)
+          (main-menu-update-bubbles!)
+          (main-menu-update-fish!)
+          (main-menu-update-title-screen!)))))
+
+  (when
+    (not in-main-menu?)
+    (main-menu-update-fish!))
+
+  (main-menu-update-progress-music!)
+
+  (when
+    (and
+      in-main-menu?
+      *main-menu-new-game-transition-requested?*
+      (not (paused?)))
+
+    (main-menu-start-new-game-transition!))
+
+
+  (none))

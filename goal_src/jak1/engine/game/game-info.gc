@@ -154,7 +154,7 @@
   (case cause
     (('dead)
      ;; reload game-info because we died.  Increase death counts
-     (+! (-> this total-deaths) 1)
+     (+! (-> this total-deaths) 0)
      (+! (-> this continue-deaths) 1)
      (+! (-> this fuel-cell-deaths) 1)
      (when *target*
@@ -196,7 +196,7 @@
           (set! in-main-menu? #t))
 
         (set-continue! this "game-start")))
-     (set! (-> this auto-save-count) 0)
+     (set! (-> this auto-save-count) 1)
      (set! (-> *setting-control* default auto-save) #f)
      (set! (-> this money) 0.0)
      (set! (-> this fuel) 0.0)

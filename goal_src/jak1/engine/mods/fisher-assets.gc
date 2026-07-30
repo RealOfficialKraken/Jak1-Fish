@@ -1,0 +1,282 @@
+;;-*-Lisp-*-
+(in-package goal)
+(bundles "JUN.DGO")
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Shared assets, particles, skeleton groups, strings, drawing and vector helpers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defpart 3570
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:num 1.0)
+    (:scale-x (meters 0.08) (meters 0.10))
+    (:scale-y :copy scale-x)
+    (:r 220.0)
+    (:g 240.0)
+    (:b 255.0)
+    (:a 88.0)
+    (:vel-x (meters -0.00002) (meters 0.00004))
+    (:vel-y (meters 0.000025) (meters 0.000025))
+    (:vel-z (meters -0.00002) (meters 0.00004))
+    (:scalevel-x (meters 0.00001))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.025)
+    (:timer (seconds 30.0))
+    (:flags (bit2 bit3))))
+
+(defpart 3571
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:num 12.0)
+    (:scale-x (meters 0.05) (meters 0.08))
+    (:scale-y :copy scale-x)
+    (:r 220.0)
+    (:g 240.0)
+    (:b 255.0)
+    (:a 112.0)
+    (:vel-x (meters -0.006) (meters 0.012))
+    (:vel-y (meters 0.002) (meters 0.006))
+    (:vel-z (meters -0.006) (meters 0.012))
+    (:scalevel-x (meters 0.00008))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.30)
+    (:timer (seconds 2.0))
+    (:flags (bit2 bit3))))
+
+(defpart 3572
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:num 1.0)
+    (:scale-x (meters 0.035) (meters 0.075))
+    (:scale-y :copy scale-x)
+    (:r 190.0 40.0)
+    (:g 225.0 30.0)
+    (:b 255.0 20.0)
+    (:a 48.0 40.0)
+    (:vel-x (meters -0.0015) (meters 0.003))
+    (:vel-y (meters 0.0008) (meters 0.0035))
+    (:vel-z (meters -0.0015) (meters 0.003))
+    (:scalevel-x (meters 0.000006))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.045)
+    (:timer (seconds 8.0) (seconds 6.0))
+    (:flags (bit2 bit3))))
+
+(defpart 3574
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:num 1.0 2.0)
+    (:scale-x (meters 0.025) (meters 0.085))
+    (:scale-y :copy scale-x)
+    (:r 205.0 35.0)
+    (:g 235.0 20.0)
+    (:b 255.0 10.0)
+    (:a 92.0 40.0)
+    (:vel-x (meters -0.0008) (meters 0.0016))
+    (:vel-y (meters 0.006) (meters 0.014))
+    (:vel-z (meters -0.0008) (meters 0.0016))
+    (:scalevel-x (meters 0.000018))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.16)
+    (:timer (seconds 5.5) (seconds 3.5))
+    (:flags (bit2 bit3))))
+
+(defskelgroup *fish-net-sgc* fish-net fish-net-lod0-jg fish-net-fishing-ja ((fish-net-lod0-mg (meters 999999))) :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *junglesnake-sgc*
+  junglesnake
+  junglesnake-lod0-jg
+  junglesnake-idle-ja
+  ((junglesnake-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 14 0 18)
+  :longest-edge (meters 2.5))
+
+(defskelgroup *catch-fisha-sgc*
+  catch-fisha
+  catch-fisha-lod0-jg
+  catch-fisha-idle-ja
+  ((catch-fisha-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *catch-fishb-sgc*
+  catch-fishb
+  catch-fishb-lod0-jg
+  catch-fishb-idle-ja
+  ((catch-fishb-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *catch-fishc-sgc*
+  catch-fishc
+  catch-fishc-lod0-jg
+  catch-fishc-idle-ja
+  ((catch-fishc-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *fisher-junglefish-sg*
+  junglefish
+  junglefish-lod0-jg
+  junglefish-swim-ja
+  ((junglefish-lod0-mg (meters 20)) (junglefish-lod1-mg (meters 40)) (junglefish-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 1 0 1.5))
+
+(defskelgroup *geologist-sgc*
+  geologist
+  geologist-lod0-jg
+  geologist-idle-ja
+  ((geologist-lod0-mg (meters 20)) (geologist-lod1-mg (meters 40)) (geologist-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4)
+  :shadow geologist-shadow-mg)
+
+(defskelgroup *fisher-sgc*
+  fisher
+  fisher-lod0-jg
+  fisher-idle-more-often-ja
+  ((fisher-lod0-mg (meters 20)) (fisher-lod1-mg (meters 40)) (fisher-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 -6 0 14)
+  :shadow fisher-shadow-mg)
+
+(defun draw-mod-menu-text-custom ((text string)
+    (text-x-pos int)
+    (text-y-pos int)
+    (left? symbol)
+    (middle? symbol)
+    (right? symbol))
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+
+    (let ((font-ctx
+          (new 'stack
+            'font-context
+            *font-default-matrix*
+            text-x-pos
+            text-y-pos
+            0.0
+            (font-color white)
+            (cond
+              (middle? (font-flags large middle shadow kerning))
+              (right? (font-flags large right shadow kerning))
+              (else
+                (font-flags large shadow kerning))))))
+
+      (draw-string *pc-encoded-matt-str* buf font-ctx)
+    )
+  )
+
+  (none)
+)
+
+(defun draw-fisher-small-text
+  ((text string) (text-x-pos int) (text-y-pos int))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+
+    (let ((font-ctx
+          (new 'stack
+            'font-context
+            *font-default-matrix*
+            text-x-pos
+            text-y-pos
+            0.0
+            (font-color white)
+            (font-flags middle shadow kerning))))
+
+      (set! (-> font-ctx scale) 0.55)
+
+      (draw-string
+        *pc-encoded-matt-str*
+        buf
+        font-ctx)))
+
+  (none))
+
+(defun singlefish-vector-reset-safe! ((dst vector)) (set! (-> dst x) 0.0) (set! (-> dst y) 0.0) (set! (-> dst z) 0.0) (set! (-> dst w) 1.0) dst)
+
+(defun singlefish-vector-copy-safe! ((dst vector) (src vector))
+  (set! (-> dst x) (-> src x))
+  (set! (-> dst y) (-> src y))
+  (set! (-> dst z) (-> src z))
+  (set! (-> dst w) (-> src w))
+  dst)
+
+(defun singlefish-vector-add-safe! ((dst vector) (a vector) (b vector))
+  (set! (-> dst x) (+ (-> a x) (-> b x)))
+  (set! (-> dst y) (+ (-> a y) (-> b y)))
+  (set! (-> dst z) (+ (-> a z) (-> b z)))
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun singlefish-vector-sub-safe! ((dst vector) (a vector) (b vector))
+  (set! (-> dst x) (- (-> a x) (-> b x)))
+  (set! (-> dst y) (- (-> a y) (-> b y)))
+  (set! (-> dst z) (- (-> a z) (-> b z)))
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun singlefish-vector-scale-safe! ((dst vector) (src vector) (scale float))
+  (set! (-> dst x) (* (-> src x) scale))
+  (set! (-> dst y) (* (-> src y) scale))
+  (set! (-> dst z) (* (-> src z) scale))
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun singlefish-vector-add-scaled-safe!
+  ((dst vector) (origin vector) (axis vector) (scale float))
+
+  (set! (-> dst x) (+ (-> origin x) (* (-> axis x) scale)))
+  (set! (-> dst y) (+ (-> origin y) (* (-> axis y) scale)))
+  (set! (-> dst z) (+ (-> origin z) (* (-> axis z) scale)))
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun singlefish-vector-length-safe ((vec vector)) (sqrtf (+ (* (-> vec x) (-> vec x)) (* (-> vec y) (-> vec y)) (* (-> vec z) (-> vec z)))))
+
+(defun singlefish-vector-cross-safe! ((dst vector) (a vector) (b vector))
+  (let ((x
+        (-
+          (* (-> a y) (-> b z))
+          (* (-> a z) (-> b y))))
+
+      (y (- (* (-> a z) (-> b x)) (* (-> a x) (-> b z))))
+
+      (z
+        (-
+          (* (-> a x) (-> b y))
+          (* (-> a y) (-> b x)))))
+
+    (set! (-> dst x) x)
+    (set! (-> dst y) y)
+    (set! (-> dst z) z)
+    (set! (-> dst w) 0.0))
+
+  dst)
+
+(defun fisher-draw-retail-line!
+  ((line-start vector)
+   (line-end vector)
+   (line-color rgba))
+
+  ;; Restore the original continuous 3D debug-line renderer.
+  (add-debug-line
+    #t
+    (bucket-id debug-no-zbuf)
+    line-start
+    line-end
+    line-color
+    #f
+    line-color)
+
+  (none))

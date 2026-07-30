@@ -4,6 +4,9 @@
 (require "engine/ui/progress/progress-draw.gc")
 (require "engine/ui/progress/progress-part.gc")
 
+(define-extern main-menu-exit-for-load!
+  (function none))
+
 ;; DECOMP BEGINS
 
 (deftype progress-global-state (basic)
@@ -287,25 +290,44 @@
     (case (-> this display-state)
       (((progress-screen memcard-creating)) (auto-save-command 'create-file 0 0 this))
       (((progress-screen memcard-loading))
-       (set! (-> *progress-state* last-slot-saved) (-> *progress-state* which))
-       (main-menu-exit-for-load!)
-       (sound-volume-off)
-       (auto-save-command 'restore 0 (-> *progress-state* which) this))
+        (set!
+          (-> *progress-state* last-slot-saved)
+          (-> *progress-state* which))
+
+        (main-menu-exit-for-load!)
+
+        (auto-save-command
+          'restore
+          0
+          (-> *progress-state* which)
+          this))
       (((progress-screen memcard-saving))
        (set! (-> *progress-state* last-slot-saved) (-> *progress-state* which))
        (auto-save-command 'save 0 (-> *progress-state* which) this))
       (((progress-screen memcard-saving-and-loading))
-       ;; save
-       (set! (-> *progress-state* last-slot-saved) (-> *progress-state* which))
-       (auto-save-command 'save 0 (-> *progress-state* which) this)
-       ;; suspend until the auto save proc is complete
-       (while (handle->process (-> *game-info* auto-save-proc))
-        (suspend))
-       ;; load
-       (main-menu-exit-for-load!)
-       (sound-volume-off)
-       (auto-save-command 'restore 0 (-> *progress-state* which) this)       
-       )
+        (set!
+          (-> *progress-state* last-slot-saved)
+          (-> *progress-state* which))
+        (auto-save-command
+          'save
+          0
+          (-> *progress-state* which)
+          this)
+        (while
+          (handle->process
+            (-> *game-info* auto-save-proc))
+          (suspend))
+        (main-menu-exit-for-load!)
+        (auto-save-command
+          'restore
+          0
+          (-> *progress-state* which)
+          this)
+        (while
+          (handle->process
+            (-> *game-info* auto-save-proc))
+          (suspend))
+        (main-menu-restore-gameplay-settings!))
       (((progress-screen memcard-formatting)) (auto-save-command 'format-card 0 0 this))
       (((progress-screen save-game) (progress-screen load-game) (progress-screen save-and-load-game))
        (set! (-> this option-index) (max 0 (-> *progress-state* last-slot-saved))))
