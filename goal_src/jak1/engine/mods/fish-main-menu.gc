@@ -4,6 +4,26 @@
 
 (define *main-menu-camera-prepare-time* 0.0)
 
+;; The temporary main-menu settings must be removed from the exact process
+;; that created their setting-control connections.  The load-game exit can
+;; execute under a different process than main-menu-update!, so using the
+;; current (with-pp pp) there can leave the menu's music-volume 0.0 request
+;; alive forever.
+(define *main-menu-setting-owner* (the-as (pointer process) #f))
+
+(defun main-menu-remove-owned-settings! ()
+  (when *main-menu-setting-owner*
+    (remove-setting
+      *setting-control*
+      (the-as process *main-menu-setting-owner*)
+      #t)
+
+    (set!
+      *main-menu-setting-owner*
+      (the-as (pointer process) #f)))
+
+  (none))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Fishing Legacy main menu, menu fish, camera transition and new-game handoff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -49,6 +69,8 @@
   (none))
 
 (defun launch-main-mmenu ()
+  (main-menu-remove-owned-settings!)
+
   (set!
     *main-menu-saved-default-allow-pause*
     (-> *setting-control* default allow-pause))
@@ -149,6 +171,13 @@
     (set!
       *main-menu-saved-music-volume*
       (-> *setting-control* current music-volume))
+
+    ;; Remember the process that owns the temporary menu settings.  This is
+    ;; the process whose connection list receives the music-volume 0.0 entry.
+    (set!
+      *main-menu-setting-owner*
+      (the-as (pointer process)
+        (with-pp pp)))
 
     (set-setting! 'music-volume 'abs 0.0 0)
     (set-setting! 'allow-pause #f 0.0 0)
@@ -989,10 +1018,7 @@
 
 (defun main-menu-restore-gameplay-settings! ()
   ;; Remove temporary settings owned by the main-menu update process.
-  (remove-setting
-    *setting-control*
-    (with-pp pp)
-    #t)
+  (main-menu-remove-owned-settings!)
 
   ;; Progress changes master mode when opened. This is the important part
   ;; required for the normal Start-button pause path to work again.
@@ -1068,10 +1094,7 @@
 
       (main-menu-restore-time-of-day!)
 
-      (remove-setting
-        *setting-control*
-        (with-pp pp)
-        #t)
+      (main-menu-remove-owned-settings!)
 
       (set!
         (-> *setting-control* default allow-pause)
@@ -1308,10 +1331,9 @@
 
     (main-menu-restore-time-of-day!)
 
-    (remove-setting
-      *setting-control*
-      (with-pp pp)
-      #t)
+    ;; Remove the zero-volume request from the process that created it,
+    ;; not from whichever process happens to be executing the load exit.
+    (main-menu-remove-owned-settings!)
 
     (set! (-> *setting-control* default allow-pause) #t)
     (set! (-> *setting-control* default allow-progress) #t)
@@ -1513,6 +1535,4 @@
       (not (paused?)))
 
     (main-menu-start-new-game-transition!))
-
-
   (none))

@@ -17,7 +17,7 @@
 
 (define *singlefish-session-active?* #f)
 
-(define *fisher-in-debug?* #f)
+(define *fisher-in-debug?* #t)
 
 (define *fisher-underwater-haze-override?* #f)
 

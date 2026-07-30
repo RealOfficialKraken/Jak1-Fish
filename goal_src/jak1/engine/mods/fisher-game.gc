@@ -905,59 +905,32 @@
               *fisher-line-hp*
               *fisher-line-hp-max*))))
 
-      (blend
+      (red-blend
         0.0))
 
+    ;; Keep the line and its HP bar yellow while the line is healthy.
+    ;; Below 50% HP, smoothly blend both from yellow into red.
     (cond
-      ;; 100% HP = green.
-      ;; 50% HP  = yellow.
       ((>= health-ratio 0.5)
-        (set!
-          blend
-          (* (- 1.0 health-ratio) 2.0))
+        (set! (-> color r) #xff)
+        (set! (-> color g) #xe0)
+        (set! (-> color b) #x20))
 
-        (set!
-          (-> color r)
-          (the uint8
-            (+
-              32.0
-              (* (- 255.0 32.0) blend))))
-
-        (set!
-          (-> color g)
-          224)
-
-        (set!
-          (-> color b)
-          (the uint8
-            (+
-              64.0
-              (* (- 32.0 64.0) blend)))))
-
-      ;; 50% HP = yellow.
-      ;; 0% HP  = red.
       (else
         (set!
-          blend
+          red-blend
           (* (- 0.5 health-ratio) 2.0))
 
-        (set!
-          (-> color r)
-          (the uint8
-            (+
-              255.0
-              (* (- 240.0 255.0) blend))))
+        (set! (-> color r) #xff)
 
         (set!
           (-> color g)
           (the uint8
             (+
               224.0
-              (* (- 32.0 224.0) blend))))
+              (* (- 32.0 224.0) red-blend))))
 
-        (set!
-          (-> color b)
-          32)))
+        (set! (-> color b) #x20)))
 
     (set! (-> color a) #xc0))
 
@@ -1021,7 +994,49 @@
           :b #x40
           :a #xc0)))
 
-    (fisher-set-line-color! hp-color)
+    ;; Color is relative to this cast's actual line HP maximum:
+    ;; full HP = green, half HP = yellow, zero HP = pure red.
+    (let ((line-health-ratio
+          (fmax
+            0.0
+            (fmin
+              1.0
+              (/ *fisher-line-hp* *fisher-line-hp-max*))))
+
+        (line-color-blend
+          0.0))
+
+      (cond
+        ;; 100% -> 50%: green to yellow.
+        ((>= line-health-ratio 0.5)
+          (set!
+            line-color-blend
+            (* (- 1.0 line-health-ratio) 2.0))
+
+          (set!
+            (-> hp-color r)
+            (the uint8
+              (* 255.0 line-color-blend)))
+
+          (set! (-> hp-color g) #xff)
+          (set! (-> hp-color b) #x00))
+
+        ;; 50% -> 0%: yellow to pure red.
+        (else
+          (set!
+            line-color-blend
+            (* line-health-ratio 2.0))
+
+          (set! (-> hp-color r) #xff)
+
+          (set!
+            (-> hp-color g)
+            (the uint8
+              (* 255.0 line-color-blend)))
+
+          (set! (-> hp-color b) #x00)))
+
+      (set! (-> hp-color a) #xc0))
 
     (fisher-draw-line-hp-number)
 
@@ -1566,9 +1581,6 @@
   ((start vector)
    (end vector)
    (color rgba))
-
-  ;; Retail replacement for internal-draw-debug-line. Use global-buf:
-  ;; debug-buf belongs to the debug renderer and can be invalid in retail.
   (when
     (and
       (current-frame)
@@ -1576,78 +1588,103 @@
 
     (let ((screen-points
           (new 'stack 'vector4w-2))
-
         (line-colors
-          (new 'stack 'vector4w-2)))
-
+          (new 'stack 'vector4w-2))
+        (start-x 0)
+        (start-y 0)
+        (end-x 32768)
+        (end-y 32428)
+        (line-z 0)
+        (segment-start-x 0)
+        (segment-start-y 0)
+        (segment-end-x 0)
+        (segment-end-y 0))
       (set! (-> start w) 1.0)
       (set! (-> end w) 1.0)
-
       (when
-        (and
-          (transform-point-qword!
-            (-> screen-points vector 0)
-            start)
+        (transform-point-qword!
+          (-> screen-points vector 0)
+          start)
 
-          (transform-point-qword!
-            (-> screen-points vector 1)
-            end))
+        (set! start-x (-> screen-points vector 0 x))
+        (set! start-y (-> screen-points vector 0 y))
 
-        ;; Use the same HP-derived color at both vertices so the entire
-        ;; fishing line matches the HP bar without an endpoint gradient.
-        (set!
-          (-> line-colors vector 0 x)
-          (the-as int (-> color r)))
+        ;; Keep the line in front of level geometry, as before.
+        (set! line-z (+ (-> screen-points vector 0 z) -8192))
 
-        (set!
-          (-> line-colors vector 0 y)
-          (the-as int (-> color g)))
-
-        (set!
-          (-> line-colors vector 0 z)
-          (the-as int (-> color b)))
-
-        (set!
-          (-> line-colors vector 0 w)
-          (the-as int (-> color a)))
-
-        (set!
-          (-> line-colors vector 1 quad)
-          (-> line-colors vector 0 quad))
-
-        ;; Pull the line slightly forward, matching the original debug
-        ;; line renderer and preventing depth fighting with geometry.
-        (+! (-> screen-points vector 0 z) -8192)
-        (+! (-> screen-points vector 1 z) -8192)
+        (set! (-> line-colors vector 0 x) (the-as int (-> color r)))
+        (set! (-> line-colors vector 0 y) (the-as int (-> color g)))
+        (set! (-> line-colors vector 0 z) (the-as int (-> color b)))
+        (set! (-> line-colors vector 0 w) (the-as int (-> color a)))
+        (set! (-> line-colors vector 1 quad) (-> line-colors vector 0 quad))
 
         (with-dma-buffer-add-bucket
           ((buf (-> (current-frame) global-buf))
            (bucket-id subtitle))
 
-          (with-cnt-vif-block
-            (buf)
+          (dotimes (i 4)
+            (set!
+              segment-start-x
+              (+
+                start-x
+                (the int
+                  (/ (* (- end-x start-x) i) 4))))
 
-            (dma-buffer-add-gif-tag
-              buf
-              (new 'static
-                'gif-tag64
-                :nloop 1
-                :eop 1
-                :pre 1
-                :nreg 4
-                :prim (gif-prim line))
-              (gs-reg-list
-                rgbaq
-                xyzf2
-                rgbaq
-                xyzf2))
+            (set!
+              segment-start-y
+              (+
+                start-y
+                (the int
+                  (/ (* (- end-y start-y) i) 4))))
 
-            (dma-buffer-add-uint128
-              buf
-              (-> line-colors quad 0)
-              (-> screen-points quad 0)
-              (-> line-colors quad 1)
-              (-> screen-points quad 1)))))))
+            (set!
+              segment-end-x
+              (+
+                start-x
+                (the int
+                  (/ (* (- end-x start-x) (+ i 1)) 4))))
+
+            (set!
+              segment-end-y
+              (+
+                start-y
+                (the int
+                  (/ (* (- end-y start-y) (+ i 1)) 4))))
+
+            (set! (-> screen-points vector 0 x) segment-start-x)
+            (set! (-> screen-points vector 0 y) segment-start-y)
+            (set! (-> screen-points vector 0 z) line-z)
+            (set! (-> screen-points vector 0 w) 1)
+
+            (set! (-> screen-points vector 1 x) segment-end-x)
+            (set! (-> screen-points vector 1 y) segment-end-y)
+            (set! (-> screen-points vector 1 z) line-z)
+            (set! (-> screen-points vector 1 w) 1)
+
+            (with-cnt-vif-block
+              (buf)
+
+              (dma-buffer-add-gif-tag
+                buf
+                (new 'static
+                  'gif-tag64
+                  :nloop 1
+                  :eop 1
+                  :pre 1
+                  :nreg 4
+                  :prim (gif-prim line))
+                (gs-reg-list
+                  rgbaq
+                  xyzf2
+                  rgbaq
+                  xyzf2))
+
+              (dma-buffer-add-uint128
+                buf
+                (-> line-colors quad 0)
+                (-> screen-points quad 0)
+                (-> line-colors quad 1)
+                (-> screen-points quad 1))))))))
 
   (none)
 )
@@ -4041,8 +4078,49 @@
             :b #x40
             :a #xc0)))
 
-      (fisher-set-line-color!
-        line-color)
+      ;; Use the same cast-relative green -> yellow -> red gradient
+      ;; as the HP bar, calculated directly into the rendered line color.
+      (let ((line-health-ratio
+            (fmax
+              0.0
+              (fmin
+                1.0
+                (/ *fisher-line-hp* *fisher-line-hp-max*))))
+
+          (line-color-blend
+            0.0))
+
+        (cond
+          ;; 100% -> 50%: green to yellow.
+          ((>= line-health-ratio 0.5)
+            (set!
+              line-color-blend
+              (* (- 1.0 line-health-ratio) 2.0))
+
+            (set!
+              (-> line-color r)
+              (the uint8
+                (* 255.0 line-color-blend)))
+
+            (set! (-> line-color g) #xff)
+            (set! (-> line-color b) #x00))
+
+          ;; 50% -> 0%: yellow to pure red.
+          (else
+            (set!
+              line-color-blend
+              (* line-health-ratio 2.0))
+
+            (set! (-> line-color r) #xff)
+
+            (set!
+              (-> line-color g)
+              (the uint8
+                (* 255.0 line-color-blend)))
+
+            (set! (-> line-color b) #x00)))
+
+        (set! (-> line-color a) #xc0))
 
       (vector-copy!
         line-start
@@ -4296,7 +4374,7 @@
   (when 
     (and 
       (not (= (-> self cast-state) 'catch-transition))
-      (not (= (-> self cast-state) 'catch-display))
+      
     )
     (fisher-draw-xp-meter!)
     )
