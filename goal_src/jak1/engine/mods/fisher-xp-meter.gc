@@ -3,18 +3,13 @@
 (bundles "JUN.DGO")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Fishing XP meter
+;; Fishing levels and XP
 ;;
-;; Fishing level:
-;;   (-> *game-info* auto-save-count)
+;; Persistent storage currently used by this mod:
+;;   Fishing level: (-> *game-info* auto-save-count)
+;;   Current XP:    (-> *game-info* total-deaths)
 ;;
-;; Current fishing XP:
-;;   (-> *game-info* total-deaths)
-;;
-;; Call:
-;;   (fisher-draw-xp-meter!)
-;;
-;; from the active fisher-game update loop.
+;; Fishing levels are clamped to 1-20. At level 20, catches award 0 XP.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define *fisher-xp-text*
@@ -29,20 +24,555 @@
 (define *fisher-level-encoded-text*
   (new 'global 'string 32 (the string #f)))
 
+(define *fisher-xp-gain-text*
+  (new 'global 'string 64 (the string #f)))
+
+(define *fisher-xp-gain-encoded-text*
+  (new 'global 'string 64 (the string #f)))
+
+(define *fisher-xp-fly-active?* #f)
+(define *fisher-xp-fly-time* 0.0)
+(define *fisher-xp-fly-amount* 0)
+(define *fisher-xp-fly-start-x* 256)
+(define *fisher-xp-fly-start-y* 130)
+
+(define *fisher-xp-bar-anim-active?* #f)
+(define *fisher-xp-bar-display-level* 1)
+(define *fisher-xp-bar-display-xp* 0.0)
+(define *fisher-xp-bar-remaining* 0.0)
+(define *fisher-xp-bar-total* 0.0)
+(define *fisher-xp-bar-flash-time* 0.0)
+(define *fisher-xp-level-bounce-time* 0.0)
+
+(defun fisher-current-level ()
+  (if
+    *game-info*
+    (max
+      1
+      (min
+        *fisher-level-cap*
+        (-> *game-info* auto-save-count)))
+    1))
+
 (defun fisher-xp-needed-for-level
   ((level int))
 
-  ;; Linear requirement:
-  ;; level 0 -> 100 XP
-  ;; level 1 -> 200 XP
-  ;; level 2 -> 300 XP
-  ;; and so on.
-  (*
-    (+
-      level
-      1)
-    100)
-)
+  ;; Level 1 -> 100 XP, level 2 -> 200 XP, and so on.
+  ;; Level 20 is capped and has no next-level requirement.
+  (if
+    (>= level *fisher-level-cap*)
+    0
+    (* (max 1 level) 100)))
+
+(defun fisher-roll-level-in-range
+  ((min-level int) (max-level int))
+
+  (let ((safe-min
+        (max 1 (min *fisher-level-cap* min-level)))
+
+      (safe-max
+        (max 1 (min *fisher-level-cap* max-level))))
+
+    (when (> safe-min safe-max)
+      (let ((swap safe-min))
+        (set! safe-min safe-max)
+        (set! safe-max swap)))
+
+    (if
+      (= safe-min safe-max)
+      safe-min
+      ;; rand-vu-int-range uses an exclusive upper bound, so add one to make
+      ;; the configured table maximum reachable.
+      (rand-vu-int-range safe-min (+ safe-max 1)))))
+
+(defun fisher-level-fight-multiplier
+  ((fish-level int) (jak-level int))
+
+  (let ((difference
+        (- fish-level jak-level)))
+
+    ;; Same level is exactly the old difficulty. Fish one or two levels below
+    ;; Jak also retain normal fight strength. Three or more levels below become
+    ;; progressively easier. Fish five or more levels above become near-impossible.
+    (cond
+      ((<= difference -7) 0.35)
+      ((= difference -6) 0.42)
+      ((= difference -5) 0.50)
+      ((= difference -4) 0.62)
+      ((= difference -3) 0.80)
+      ((<= difference 0) 1.00)
+      ((= difference 1) 1.25)
+      ((= difference 2) 1.65)
+      ((= difference 3) 2.25)
+      ((= difference 4) 3.25)
+      (else
+        (+
+          7.0
+          (* 3.0 (the float (- difference 5))))))))
+
+(defun fisher-level-worth-multiplier
+  ((fish-level int) (jak-level int))
+
+  (let* ((safe-fish-level
+          (max 1 (min *fisher-level-cap* fish-level)))
+
+      ;; Higher-level fish have a modest intrinsic increase in value.
+      (level-value
+        (+
+          1.0
+          (* 0.10 (the float (- safe-fish-level 1)))))
+
+      (levels-below
+        (- jak-level safe-fish-level)))
+
+    ;; Value remains normal until the fish is at least five levels below Jak.
+    ;; At that point its worth is drastically reduced to discourage farming.
+    (cond
+      ((< levels-below 5) level-value)
+      ((= levels-below 5) (* level-value 0.25))
+      ((= levels-below 6) (* level-value 0.15))
+      ((= levels-below 7) (* level-value 0.10))
+      (else (* level-value 0.05)))))
+
+(defun fisher-xp-level-difference-multiplier
+  ((fish-level int) (jak-level int))
+
+  (let ((difference
+        (- fish-level jak-level)))
+
+    (cond
+      ((<= difference -8) 0.05)
+      ((= difference -7) 0.08)
+      ((= difference -6) 0.12)
+      ((= difference -5) 0.18)
+      ((= difference -4) 0.28)
+      ((= difference -3) 0.40)
+      ((= difference -2) 0.60)
+      ((= difference -1) 0.80)
+      ((= difference 0) 1.00)
+      ((= difference 1) 1.25)
+      ((= difference 2) 1.55)
+      ((= difference 3) 1.90)
+      ((= difference 4) 2.30)
+      (else
+        (+
+          2.75
+          (* 0.35 (the float (- difference 5))))))))
+
+(defun fisher-xp-suffix-multiplier
+  ((suffix int))
+
+  ;; Suffix 5 is MEGA/Legendary. Suffix 6 is Golden.
+  (cond
+    ((= suffix 5) 2.0)
+    ((= suffix 6) 4.0)
+    (else 1.0)))
+
+(defun fisher-calculate-catch-xp
+  ((fish-level int) (suffix int))
+
+  (let ((jak-level
+        (fisher-current-level)))
+
+    (if
+      (>= jak-level *fisher-level-cap*)
+      0
+      (max
+        1
+        (the int
+          (+
+            (*
+              (the float (+ 15 (* (max 1 fish-level) 5)))
+              (fisher-xp-level-difference-multiplier fish-level jak-level)
+              (fisher-xp-suffix-multiplier suffix)
+              0.5)
+            0.5))))))
+
+(defun fisher-accepted-xp-amount
+  ((amount int))
+
+  (when
+    (or
+      (not *game-info*)
+      (<= amount 0))
+    (return 0))
+
+  (let ((level
+        (fisher-current-level))
+
+      (current-xp
+        (max 0 (-> *game-info* total-deaths)))
+
+      (accepted
+        amount)
+
+      (needed
+        0))
+
+    (when (>= level *fisher-level-cap*)
+      (return 0))
+
+    (+! current-xp amount)
+
+    (while
+      (and
+        (< level *fisher-level-cap*)
+        (>= current-xp (fisher-xp-needed-for-level level)))
+
+      (set! needed (fisher-xp-needed-for-level level))
+      (-! current-xp needed)
+      (+! level 1))
+
+    (when (>= level *fisher-level-cap*)
+      (-! accepted current-xp))
+
+    (max 0 accepted)))
+
+(defun fisher-add-fishing-xp!
+  ((amount int))
+
+  (when
+    (or
+      (not *game-info*)
+      (<= amount 0))
+    (return 0))
+
+  (let ((level
+        (fisher-current-level))
+
+      (current-xp
+        (max 0 (-> *game-info* total-deaths)))
+
+      (awarded-xp amount)
+
+      (needed
+        0))
+
+    (when (>= level *fisher-level-cap*)
+      (set! (-> *game-info* auto-save-count) *fisher-level-cap*)
+      (set! (-> *game-info* total-deaths) 0)
+      (return 0))
+
+    (+! current-xp amount)
+
+    (while
+      (and
+        (< level *fisher-level-cap*)
+        (>= current-xp (fisher-xp-needed-for-level level)))
+
+      (set! needed (fisher-xp-needed-for-level level))
+      (-! current-xp needed)
+      (+! level 1))
+
+    ;; XP beyond the level-20 threshold is discarded, and later catches give 0.
+    (when (>= level *fisher-level-cap*)
+      (-! awarded-xp current-xp)
+      (set! current-xp 0)
+      (set! level *fisher-level-cap*))
+
+    (set! (-> *game-info* auto-save-count) level)
+    (set! (-> *game-info* total-deaths) current-xp)
+
+    (max 0 awarded-xp)))
+
+(defun fisher-start-xp-gain-animation!
+  ((world-pos vector)
+   (amount int))
+
+  (when
+    (> amount 0)
+
+    (let ((screen-points
+          (new 'stack 'vector4w-2)))
+
+      (set! (-> world-pos w) 1.0)
+
+      (cond
+        ((transform-point-qword!
+            (-> screen-points vector 0)
+            world-pos)
+
+          ;; transform-point-qword! returns GS 12.4-style screen coordinates
+          ;; centered around 32768. Convert them into the 512x448 UI space.
+          (set!
+            *fisher-xp-fly-start-x*
+            (+
+              256
+              (the int
+                (/
+                  (-
+                    (-> screen-points vector 0 x)
+                    32768)
+                  64))))
+
+          (set!
+            *fisher-xp-fly-start-y*
+            (+
+              224
+              (the int
+                (/
+                  (-
+                    (-> screen-points vector 0 y)
+                    32768)
+                  64))))
+
+          ;; Keep the number on-screen even when the displayed fish is close
+          ;; to the edge of the camera.
+          (set!
+            *fisher-xp-fly-start-x*
+            (max 28
+              (min
+                484
+                *fisher-xp-fly-start-x*)))
+
+          (set!
+            *fisher-xp-fly-start-y*
+            (max 28
+              (min
+                410
+                *fisher-xp-fly-start-y*))))
+
+        (else
+          (set! *fisher-xp-fly-start-x* 256)
+          (set! *fisher-xp-fly-start-y* 130))))
+
+    (set! *fisher-xp-fly-amount* amount)
+    (set! *fisher-xp-fly-time* 0.0)
+    (set! *fisher-xp-fly-active?* #t))
+
+  (none))
+
+(defun fisher-begin-xp-bar-animation!
+  ((amount int))
+
+  (when
+    (> amount 0)
+
+    (let ((awarded
+          (fisher-add-fishing-xp! amount)))
+
+      (when
+        (> awarded 0)
+
+        ;; The old display level/XP were captured immediately before this call.
+        (set! *fisher-xp-bar-remaining* (the float awarded))
+        (set! *fisher-xp-bar-total* (the float awarded))
+        (set! *fisher-xp-bar-flash-time* 0.0)
+        (set! *fisher-xp-bar-anim-active?* #t))))
+
+  (none))
+
+(defun fisher-draw-flying-xp! ()
+  (when
+    (and
+      *fisher-xp-fly-active?*
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let* ((duration
+            0.72)
+
+        (progress
+          (fmax
+            0.0
+            (fmin
+              1.0
+              (/ *fisher-xp-fly-time* duration))))
+
+        (snap
+          0.0)
+
+        (sharp
+          0.0)
+
+        (arc
+          0.0)
+
+        (x
+          (the float *fisher-xp-fly-start-x*))
+
+        (y
+          (the float *fisher-xp-fly-start-y*))
+
+        (scale
+          0.68))
+
+      ;; Hold briefly over the caught fish so the amount is readable, then
+      ;; accelerate sharply into the center of the XP meter.
+      (when
+        (> progress 0.16)
+
+        (set!
+          snap
+          (fmin
+            1.0
+            (/ (- progress 0.16) 0.84)))
+
+        (set! sharp (* snap snap snap))
+
+        (set!
+          arc
+          (*
+            30.0
+            (sin
+              (* (degrees 180.0) snap))))
+
+        (set!
+          x
+          (+
+            (the float *fisher-xp-fly-start-x*)
+            (*
+              (-
+                256.0
+                (the float *fisher-xp-fly-start-x*))
+              sharp)))
+
+        (set!
+          y
+          (-
+            (+
+              (the float *fisher-xp-fly-start-y*)
+              (*
+                (-
+                  214.0
+                  (the float *fisher-xp-fly-start-y*))
+                sharp))
+            arc))
+
+        (set!
+          scale
+          (+
+            0.68
+            (* -0.24 sharp))))
+
+      (clear *fisher-xp-gain-text*)
+      (clear *fisher-xp-gain-encoded-text*)
+
+      (format
+        *fisher-xp-gain-text*
+        "+~D XP"
+        *fisher-xp-fly-amount*)
+
+      (pc-encode-utf8-string
+        *fisher-xp-gain-text*
+        *fisher-xp-gain-encoded-text*)
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        (draw-string-xy-scaled
+          *fisher-xp-gain-encoded-text*
+          buf
+          (the int x)
+          (the int y)
+          (font-color orange)
+          (font-flags large middle shadow kerning)
+          scale))))
+
+  (none))
+
+(defun fisher-update-xp-gain-animation! ()
+  (let ((dt
+        (-> *display* seconds-per-frame)))
+
+    (when (> *fisher-xp-bar-flash-time* 0.0)
+      (-! *fisher-xp-bar-flash-time* dt)
+
+      (when (< *fisher-xp-bar-flash-time* 0.0)
+        (set! *fisher-xp-bar-flash-time* 0.0)))
+
+    (when (> *fisher-xp-level-bounce-time* 0.0)
+      (-! *fisher-xp-level-bounce-time* dt)
+
+      (when (< *fisher-xp-level-bounce-time* 0.0)
+        (set! *fisher-xp-level-bounce-time* 0.0)))
+
+    (when *fisher-xp-fly-active?*
+      (+! *fisher-xp-fly-time* dt)
+
+      (cond
+        ((>= *fisher-xp-fly-time* 0.72)
+          (let ((old-level
+                (fisher-current-level))
+
+              (old-xp
+                (if
+                  *game-info*
+                  (max 0 (-> *game-info* total-deaths))
+                  0))
+
+              (amount
+                *fisher-xp-fly-amount*))
+
+            (set! *fisher-xp-fly-active?* #f)
+            (set! *fisher-xp-fly-time* 0.72)
+
+            ;; Capture the old meter before committing the pending reward.
+            (set! *fisher-xp-bar-display-level* old-level)
+            (set! *fisher-xp-bar-display-xp* (the float old-xp))
+
+            (fisher-begin-xp-bar-animation! amount)))
+
+        (else
+          (fisher-draw-flying-xp!))))
+
+    (when *fisher-xp-bar-anim-active?*
+      (let* ((rate
+              (fmax
+                80.0
+                (/ *fisher-xp-bar-total* 0.90)))
+
+          (step
+            (fmin
+              *fisher-xp-bar-remaining*
+              (* rate dt))))
+
+        (+! *fisher-xp-bar-display-xp* step)
+        (-! *fisher-xp-bar-remaining* step)
+
+        (while
+          (and
+            (< *fisher-xp-bar-display-level* *fisher-level-cap*)
+            (>=
+              *fisher-xp-bar-display-xp*
+              (the float
+                (fisher-xp-needed-for-level
+                  *fisher-xp-bar-display-level*))))
+
+          (-!
+            *fisher-xp-bar-display-xp*
+            (the float
+              (fisher-xp-needed-for-level
+                *fisher-xp-bar-display-level*)))
+
+          (+! *fisher-xp-bar-display-level* 1)
+
+          ;; Each crossed level restarts the level-number bounce.
+          (set! *fisher-xp-level-bounce-time* 0.38))
+
+        (when
+          (<= *fisher-xp-bar-remaining* 0.0)
+
+          (set! *fisher-xp-bar-remaining* 0.0)
+          (set! *fisher-xp-bar-anim-active?* #f)
+
+          ;; After the fill reaches its destination, fade the inner bar
+          ;; smoothly back from its bright impact color.
+          (set! *fisher-xp-bar-flash-time* 0.30)
+
+          (when *game-info*
+            (set!
+              *fisher-xp-bar-display-level*
+              (fisher-current-level))
+
+            (set!
+              *fisher-xp-bar-display-xp*
+              (the float
+                (max 0
+                  (-> *game-info* total-deaths)))))))))
+
+  (none))
 
 (defun fisher-draw-xp-meter! ()
   (when
@@ -52,24 +582,35 @@
       (-> (current-frame) global-buf))
 
     (let* ((level
-            (max
-              0
-              (-> *game-info* auto-save-count)))
+            (if
+              *fisher-xp-bar-anim-active?*
+              *fisher-xp-bar-display-level*
+              (fisher-current-level)))
+
+        (at-cap?
+          (>= level *fisher-level-cap*))
 
         (current-xp
-          (max
+          (if
+            at-cap?
             0
-            (-> *game-info* total-deaths)))
+            (if
+              *fisher-xp-bar-anim-active?*
+              (the int *fisher-xp-bar-display-xp*)
+              (max 0 (-> *game-info* total-deaths)))))
 
         (xp-needed
-          (max
+          (if
+            at-cap?
             1
-            (fisher-xp-needed-for-level level)))
+            (max 1
+              (fisher-xp-needed-for-level level))))
 
         (clamped-xp
-          (min
-            current-xp
-            xp-needed))
+          (if
+            at-cap?
+            xp-needed
+            (min current-xp xp-needed)))
 
         (xp-ratio
           (fmax
@@ -80,28 +621,118 @@
                 (the float clamped-xp)
                 (the float xp-needed)))))
 
-        ;; 280-pixel total bar width.
         (fill-width
           (the int
-            (* 276.0 xp-ratio))))
+            (* 276.0 xp-ratio)))
+
+        (fill-light-blend
+          0.0)
+
+        (fill-color
+          (new 'static 'rgba
+            :r #xd8
+            :g #x78
+            :b #x28
+            :a #xe0))
+
+        (fill-shine-color
+          (new 'static 'rgba
+            :r #xf0
+            :g #xa0
+            :b #x48
+            :a #xc0))
+
+        (level-scale
+          1.0))
+
+      (when (> *fisher-xp-level-bounce-time* 0.0)
+        (let ((bounce-progress
+              (-
+                1.0
+                (/ *fisher-xp-level-bounce-time* 0.38))))
+
+          (set!
+            level-scale
+            (+
+              1.0
+              (*
+                0.42
+                (sin (* (degrees 180.0) bounce-progress)))))))
+
+      ;; Brighten only the filled inner portion while XP is moving.
+      ;; Once the fill reaches its target, flash-time fades that color back
+      ;; to the normal orange without drawing any box around the meter.
+      (cond
+        (*fisher-xp-bar-anim-active?*
+          (when
+            (> *fisher-xp-bar-total* 0.0)
+
+            (set!
+              fill-light-blend
+              (fmax
+                0.0
+                (fmin
+                  1.0
+                  (-
+                    1.0
+                    (/
+                      *fisher-xp-bar-remaining*
+                      *fisher-xp-bar-total*)))))))
+
+        ((> *fisher-xp-bar-flash-time* 0.0)
+          (set!
+            fill-light-blend
+            (fmax
+              0.0
+              (fmin
+                1.0
+                (/ *fisher-xp-bar-flash-time* 0.30))))))
+
+      (set!
+        (-> fill-color r)
+        (the uint8
+          (+ 216.0 (* 39.0 fill-light-blend))))
+
+      (set!
+        (-> fill-color g)
+        (the uint8
+          (+ 120.0 (* 80.0 fill-light-blend))))
+
+      (set!
+        (-> fill-color b)
+        (the uint8
+          (+ 40.0 (* 72.0 fill-light-blend))))
+
+      (set! (-> fill-color a) #xe0)
+
+      (set!
+        (-> fill-shine-color r)
+        (the uint8
+          (+ 240.0 (* 15.0 fill-light-blend))))
+
+      (set!
+        (-> fill-shine-color g)
+        (the uint8
+          (+ 160.0 (* 64.0 fill-light-blend))))
+
+      (set!
+        (-> fill-shine-color b)
+        (the uint8
+          (+ 72.0 (* 72.0 fill-light-blend))))
+
+      (set! (-> fill-shine-color a) #xc0)
 
       (clear *fisher-level-text*)
       (clear *fisher-xp-text*)
       (clear *fisher-level-encoded-text*)
       (clear *fisher-xp-encoded-text*)
 
-      ;; Only the level number is shown above the bar.
-      (format
-        *fisher-level-text*
-        "~D"
-        level)
+      (format *fisher-level-text* "~D" level)
 
-      ;; Only current XP / required XP is shown inside the bar.
-      (format
-        *fisher-xp-text*
-        "~D/~D"
-        current-xp
-        xp-needed)
+      (if
+        at-cap?
+        (format *fisher-xp-text* "MAX")
+        (format *fisher-xp-text* "~D/~D" current-xp xp-needed))
 
       (pc-encode-utf8-string
         *fisher-level-text*
@@ -115,98 +746,41 @@
         ((buf (-> (current-frame) global-buf))
          (bucket-id subtitle))
 
-        ;; Outer shadow.
+        ;; Normal frame.
         (draw-sprite2d-xy
-          buf
-          114
-          204
-          284
-          20
+          buf 114 204 284 20
           (new 'static 'rgba
-            :r #x08
-            :g #x08
-            :b #x08
-            :a #xb8))
+            :r #x08 :g #x08 :b #x08 :a #xb8))
 
-        ;; Dark border.
         (draw-sprite2d-xy
-          buf
-          116
-          206
-          280
-          16
+          buf 116 206 280 16
           (new 'static 'rgba
-            :r #x48
-            :g #x28
-            :b #x10
-            :a #xe0))
+            :r #x48 :g #x28 :b #x10 :a #xe0))
 
-        ;; Empty portion.
         (draw-sprite2d-xy
-          buf
-          118
-          208
-          276
-          12
+          buf 118 208 276 12
           (new 'static 'rgba
-            :r #x24
-            :g #x18
-            :b #x10
-            :a #xd0))
+            :r #x24 :g #x18 :b #x10 :a #xd0))
 
-        ;; Filled XP portion: medium light orange.
-        (when
-          (> fill-width 0)
+        (when (> fill-width 0)
+          (draw-sprite2d-xy
+            buf 118 208 fill-width 12
+            fill-color)
 
           (draw-sprite2d-xy
-            buf
-            118
-            208
-            fill-width
-            12
-            (new 'static 'rgba
-              :r #xd8
-              :g #x78
-              :b #x28
-              :a #xe0)))
+            buf 118 208 fill-width 2
+            fill-shine-color))
 
-        ;; Small highlight along the filled portion.
-        (when
-          (> fill-width 0)
+        ;; The level number uses a scaled draw so it can bounce on level-up.
+        (draw-string-xy-scaled
+          *fisher-level-encoded-text*
+          buf
+          256
+          190
+          (font-color orange)
+          (font-flags large middle shadow kerning)
+          level-scale)
 
-          (draw-sprite2d-xy
-            buf
-            118
-            208
-            fill-width
-            2
-            (new 'static 'rgba
-              :r #xf0
-              :g #xa0
-              :b #x48
-              :a #xc0)))
-
-        ;; Fishing level, centered above the bar.
-        (let ((level-font
-              (new 'stack
-                'font-context
-                *font-default-matrix*
-                256
-                190
-                0.0
-                (font-color orange)
-                (font-flags
-                  large
-                  middle
-                  shadow
-                  kerning))))
-
-          (draw-string
-            *fisher-level-encoded-text*
-            buf
-            level-font))
-
-        ;; Current XP / XP needed, centered inside the bar.
         (let ((xp-font
               (new 'stack
                 'font-context
@@ -215,15 +789,11 @@
                 207
                 0.0
                 (font-color white)
-                (font-flags
-                  middle
-                  shadow
-                  kerning))))
+                (font-flags middle shadow kerning))))
 
           (draw-string
             *fisher-xp-encoded-text*
             buf
             xp-font)))))
 
-  (none)
-)
+  (none))

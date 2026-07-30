@@ -224,10 +224,14 @@
   (set! (-> self caught-orb-value) 0)
   (set! (-> self caught-fish-species) 0)
   (set! (-> self caught-fish-suffix) 2)
+  (set! (-> self caught-fish-level) 1)
+  (set! (-> self caught-fish-xp) 0)
   (set! (-> self catch-transition-time) 0.0)
   (set! (-> self catch-menu-offset) 0.0)
   (set! (-> self sandover-eco-count) 0)
   (set! (-> self sandover-largemouth-count) 0)
+  (set! (-> self fish-level-min) 1)
+  (set! (-> self fish-level-max) 1)
   (set! (-> self fish-species-0) 0)
   (set! (-> self fish-species-1) 0)
   (set! (-> self fish-species-2) 0)
@@ -250,6 +254,28 @@
   (set! (-> self fish-species-19) 0)
   (set! (-> self fish-species-20) 0)
   (set! (-> self fish-species-21) 0)
+  (set! (-> self fish-level-0) 1)
+  (set! (-> self fish-level-1) 1)
+  (set! (-> self fish-level-2) 1)
+  (set! (-> self fish-level-3) 1)
+  (set! (-> self fish-level-4) 1)
+  (set! (-> self fish-level-5) 1)
+  (set! (-> self fish-level-6) 1)
+  (set! (-> self fish-level-7) 1)
+  (set! (-> self fish-level-8) 1)
+  (set! (-> self fish-level-9) 1)
+  (set! (-> self fish-level-10) 1)
+  (set! (-> self fish-level-11) 1)
+  (set! (-> self fish-level-12) 1)
+  (set! (-> self fish-level-13) 1)
+  (set! (-> self fish-level-14) 1)
+  (set! (-> self fish-level-15) 1)
+  (set! (-> self fish-level-16) 1)
+  (set! (-> self fish-level-17) 1)
+  (set! (-> self fish-level-18) 1)
+  (set! (-> self fish-level-19) 1)
+  (set! (-> self fish-level-20) 1)
+  (set! (-> self fish-level-21) 1)
   (set! (-> self fish-suffix-0) 2)
   (set! (-> self fish-suffix-1) 2)
   (set! (-> self fish-suffix-2) 2)
@@ -272,6 +298,28 @@
   (set! (-> self fish-suffix-19) 2)
   (set! (-> self fish-suffix-20) 2)
   (set! (-> self fish-suffix-21) 2)
+  (set! (-> self fish-weight-tenths-0) 10)
+  (set! (-> self fish-weight-tenths-1) 10)
+  (set! (-> self fish-weight-tenths-2) 10)
+  (set! (-> self fish-weight-tenths-3) 10)
+  (set! (-> self fish-weight-tenths-4) 10)
+  (set! (-> self fish-weight-tenths-5) 10)
+  (set! (-> self fish-weight-tenths-6) 10)
+  (set! (-> self fish-weight-tenths-7) 10)
+  (set! (-> self fish-weight-tenths-8) 10)
+  (set! (-> self fish-weight-tenths-9) 10)
+  (set! (-> self fish-weight-tenths-10) 10)
+  (set! (-> self fish-weight-tenths-11) 10)
+  (set! (-> self fish-weight-tenths-12) 10)
+  (set! (-> self fish-weight-tenths-13) 10)
+  (set! (-> self fish-weight-tenths-14) 10)
+  (set! (-> self fish-weight-tenths-15) 10)
+  (set! (-> self fish-weight-tenths-16) 10)
+  (set! (-> self fish-weight-tenths-17) 10)
+  (set! (-> self fish-weight-tenths-18) 10)
+  (set! (-> self fish-weight-tenths-19) 10)
+  (set! (-> self fish-weight-tenths-20) 10)
+  (set! (-> self fish-weight-tenths-21) 10)
   (set! (-> self fish-distance-0) 0.0)
   (set! (-> self fish-lane-0) 0.0)
   (set! (-> self fish-depth-0) 0.0)
@@ -1075,17 +1123,46 @@
   (none)
 )
 
+(defun fisher-draw-reel-hint-text
+  ((text string)
+   (text-x-pos int)
+   (text-y-pos int)
+   (text-scale float))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+
+  (pc-encode-utf8-string
+    matt-str
+    *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color white)
+      (font-flags large shadow kerning)
+      text-scale))
+
+  (none))
+
 (defun fisher-update-reel-hint! ((self fisher-game))
   (when
     (> (-> self reel-hint-time) 0.0)
 
-    (draw-mod-menu-text-custom ;;change this for progression skills
+    ;; Keep this temporary lower-left hint smaller and slightly higher.
+    (fisher-draw-reel-hint-text
       "<PAD_X> TO REEL"
       10
-      200
-      #t
-      #f
-      #f)
+      186
+      0.55)
 
     (-! (-> self reel-hint-time) (-> *display* seconds-per-frame))
 
@@ -1094,11 +1171,9 @@
 
       (set!
         (-> self reel-hint-time)
-        0.0))
-  )
+        0.0)))
 
-  (none)
-)
+  (none))
 
 (defun fisher-launch-water-entry-bubbles! ((self fisher-game))
   (let ((spray-pos
@@ -1577,10 +1652,11 @@
   (none)
 )
 
-(defun fisher-draw-retail-line!
-  ((start vector)
-   (end vector)
+(defun fisher-draw-retail-line-segment!
+  ((world-start vector)
+   (world-end vector)
    (color rgba))
+
   (when
     (and
       (current-frame)
@@ -1588,106 +1664,153 @@
 
     (let ((screen-points
           (new 'stack 'vector4w-2))
+
         (line-colors
-          (new 'stack 'vector4w-2))
-        (start-x 0)
-        (start-y 0)
-        (end-x 32768)
-        (end-y 32428)
-        (line-z 0)
-        (segment-start-x 0)
-        (segment-start-y 0)
-        (segment-end-x 0)
-        (segment-end-y 0))
-      (set! (-> start w) 1.0)
-      (set! (-> end w) 1.0)
+          (new 'stack 'vector4w-2)))
+
+      (set! (-> world-start w) 1.0)
+      (set! (-> world-end w) 1.0)
+
+      ;; Each piece is projected separately. A failed piece no longer
+      ;; prevents the remaining visible pieces from being rendered.
       (when
-        (transform-point-qword!
-          (-> screen-points vector 0)
-          start)
+        (and
+          (transform-point-qword!
+            (-> screen-points vector 0)
+            world-start)
 
-        (set! start-x (-> screen-points vector 0 x))
-        (set! start-y (-> screen-points vector 0 y))
+          (transform-point-qword!
+            (-> screen-points vector 1)
+            world-end))
 
-        ;; Keep the line in front of level geometry, as before.
-        (set! line-z (+ (-> screen-points vector 0 z) -8192))
+        ;; Pull both ends forward so the line remains visible over geometry.
+        (+! (-> screen-points vector 0 z) -8192)
+        (+! (-> screen-points vector 1 z) -8192)
 
-        (set! (-> line-colors vector 0 x) (the-as int (-> color r)))
-        (set! (-> line-colors vector 0 y) (the-as int (-> color g)))
-        (set! (-> line-colors vector 0 z) (the-as int (-> color b)))
-        (set! (-> line-colors vector 0 w) (the-as int (-> color a)))
-        (set! (-> line-colors vector 1 quad) (-> line-colors vector 0 quad))
+        (set! (-> screen-points vector 0 w) 1)
+        (set! (-> screen-points vector 1 w) 1)
+
+        (set!
+          (-> line-colors vector 0 x)
+          (the-as int (-> color r)))
+
+        (set!
+          (-> line-colors vector 0 y)
+          (the-as int (-> color g)))
+
+        (set!
+          (-> line-colors vector 0 z)
+          (the-as int (-> color b)))
+
+        (set!
+          (-> line-colors vector 0 w)
+          (the-as int (-> color a)))
+
+        (set!
+          (-> line-colors vector 1 quad)
+          (-> line-colors vector 0 quad))
 
         (with-dma-buffer-add-bucket
           ((buf (-> (current-frame) global-buf))
            (bucket-id subtitle))
 
-          (dotimes (i 4)
-            (set!
-              segment-start-x
-              (+
-                start-x
-                (the int
-                  (/ (* (- end-x start-x) i) 4))))
+          (with-cnt-vif-block
+            (buf)
 
-            (set!
-              segment-start-y
-              (+
-                start-y
-                (the int
-                  (/ (* (- end-y start-y) i) 4))))
+            (dma-buffer-add-gif-tag
+              buf
+              (new 'static
+                'gif-tag64
+                :nloop 1
+                :eop 1
+                :pre 1
+                :nreg 4
+                :prim (gif-prim line))
+              (gs-reg-list
+                rgbaq
+                xyzf2
+                rgbaq
+                xyzf2))
 
-            (set!
-              segment-end-x
-              (+
-                start-x
-                (the int
-                  (/ (* (- end-x start-x) (+ i 1)) 4))))
+            (dma-buffer-add-uint128
+              buf
+              (-> line-colors quad 0)
+              (-> screen-points quad 0)
+              (-> line-colors quad 1)
+              (-> screen-points quad 1)))))))
 
-            (set!
-              segment-end-y
-              (+
-                start-y
-                (the int
-                  (/ (* (- end-y start-y) (+ i 1)) 4))))
+  (none))
 
-            (set! (-> screen-points vector 0 x) segment-start-x)
-            (set! (-> screen-points vector 0 y) segment-start-y)
-            (set! (-> screen-points vector 0 z) line-z)
-            (set! (-> screen-points vector 0 w) 1)
+(defun fisher-draw-retail-line!
+  ((start vector)
+   (end vector)
+   (color rgba))
 
-            (set! (-> screen-points vector 1 x) segment-end-x)
-            (set! (-> screen-points vector 1 y) segment-end-y)
-            (set! (-> screen-points vector 1 z) line-z)
-            (set! (-> screen-points vector 1 w) 1)
+  (let ((delta
+        (new 'stack-no-clear 'vector))
 
-            (with-cnt-vif-block
-              (buf)
+      (point-1
+        (new 'stack-no-clear 'vector))
 
-              (dma-buffer-add-gif-tag
-                buf
-                (new 'static
-                  'gif-tag64
-                  :nloop 1
-                  :eop 1
-                  :pre 1
-                  :nreg 4
-                  :prim (gif-prim line))
-                (gs-reg-list
-                  rgbaq
-                  xyzf2
-                  rgbaq
-                  xyzf2))
+      (point-2
+        (new 'stack-no-clear 'vector))
 
-              (dma-buffer-add-uint128
-                buf
-                (-> line-colors quad 0)
-                (-> screen-points quad 0)
-                (-> line-colors quad 1)
-                (-> screen-points quad 1))))))))
+      (point-3
+        (new 'stack-no-clear 'vector)))
 
-  (none)
-)
+    ;; Construct four genuine world-space pieces:
+    ;;
+    ;; start -> 25% -> 50% -> 75% -> end
+    ;;
+    ;; This is important because transform-point-qword! may reject the
+    ;; Jak-side endpoint when the underwater camera is far from Jak.
+    (vector-! delta end start)
+
+    (vector+float*!
+      point-1
+      start
+      delta
+      0.25)
+
+    (vector+float*!
+      point-2
+      start
+      delta
+      0.50)
+
+    (vector+float*!
+      point-3
+      start
+      delta
+      0.75)
+
+    (set! (-> start w) 1.0)
+    (set! (-> point-1 w) 1.0)
+    (set! (-> point-2 w) 1.0)
+    (set! (-> point-3 w) 1.0)
+    (set! (-> end w) 1.0)
+
+    (fisher-draw-retail-line-segment!
+      start
+      point-1
+      color)
+
+    (fisher-draw-retail-line-segment!
+      point-1
+      point-2
+      color)
+
+    (fisher-draw-retail-line-segment!
+      point-2
+      point-3
+      color)
+
+    (fisher-draw-retail-line-segment!
+      point-3
+      end
+      color))
+
+  (none))
 
 (defun fisher-debug-make-point!
   ((dst vector) (owner fisher-game) (axis vector) (side-axis vector) (distance float) (side-offset float) (height float))
@@ -1830,7 +1953,10 @@
   (none))
 
 (defun singlefish-roll-weight-and-value! ((self singlefish-base))
-  (let* ((weight-range
+  (let* ((owner
+          (the-as fisher-game (-> self owner)))
+
+      (weight-range
         (max
           1
           (-
@@ -1842,7 +1968,12 @@
       (weight-lbs 0.0)
 
       (raw-value
-        0.0))
+        0.0)
+
+      (levels-below
+        (-
+          (fisher-current-level)
+          (-> self level))))
 
     (set! (-> self weight-tenths) (rand-vu-int-range (-> self min-weight-tenths) (-> self max-weight-tenths)))
 
@@ -1850,18 +1981,32 @@
 
     (set! weight-lbs (* (the float (-> self weight-tenths)) 0.1))
 
-    (set! raw-value (* (the float (-> self base-orb-value)) weight-lbs (singlefish-prefix-multiplier self)))
+    (set!
+      raw-value
+      (*
+        (the float (-> self base-orb-value))
+        weight-lbs
+        (singlefish-prefix-multiplier self)
+        (fisher-level-worth-multiplier
+          (-> self level)
+          (fisher-current-level))))
 
     (set! (-> self visual-scale) (* (-> self base-scale) (+ 0.88 (* 0.24 weight-ratio))))
 
     (set!
       (-> self orb-value)
-      (max
-        1
-        (the int
-          (+ raw-value 0.5)))))
+      (if
+        (>= levels-below 5)
+        (max
+          0
+          (the int
+            (+ raw-value 0.5)))
+        (max
+          1
+          (the int
+            (+ raw-value 0.5)))))
 
-  (none))
+  (none)))
 
 (defun singlefish-face-vector! ((self singlefish-base) (forward vector))
   (when *camera*
@@ -2203,11 +2348,43 @@
 
   (none))
 
+(defun singlefish-prefix->suffix
+  ((self singlefish-base))
+
+  (cond
+    ((= (-> self prefix) 'malnourished) 0)
+    ((= (-> self prefix) 'stressed) 1)
+    ((or
+        (= (-> self prefix) 'common)
+        (= (-> self prefix) 'healthy))
+      2)
+    ((= (-> self prefix) 'royal) 4)
+    ((= (-> self prefix) 'legendary) 5)
+    (else 6)))
+
 (defun singlefish-caught! ((self singlefish-base))
-  (let ((owner (the-as fisher-game (-> self owner))))
+  (let* ((owner
+          (the-as fisher-game (-> self owner)))
+
+      (suffix
+        (singlefish-prefix->suffix self))
+
+      (catch-xp
+        (fisher-calculate-catch-xp
+          (-> self level)
+          suffix)))
+
     (fisher-play-fish-win-sound!)
     (set! (-> self caught?) #t)
     (set! (-> self fighting?) #f)
+
+    (set! (-> owner caught-fish-species) 0)
+    (set! (-> owner caught-fish-suffix) suffix)
+    (set! (-> owner caught-fish-level) (-> self level))
+    (set! (-> owner caught-weight-tenths) (-> self weight-tenths))
+    (set! (-> owner caught-orb-value) (-> self orb-value))
+    (set! (-> owner caught-fish-xp) (fisher-accepted-xp-amount catch-xp))
+
     (set! (-> owner fish-state) 'catch-display)
     (set! (-> owner cast-state) 'catch-display)
     (set! (-> owner camera-state) 'before-cast)
@@ -2274,7 +2451,30 @@
 
         (set! (-> owner lure-pos y) (+ (-> self fight-base-y) (* (meters 0.55) (sin (-> self fight-phase)))))
 
-        (when (cpad-hold? 0 x) (fisher-damage-line! (* 45.0 dt)))
+        (when
+          (cpad-hold? 0 x)
+
+          (let* ((fish-level
+                  (-> self level))
+
+              (jak-level
+                (fisher-current-level))
+
+              (weight-mult
+                (fmax
+                  0.45
+                  (fmin
+                    4.0
+                    (/
+                      (the float (max 1 (-> self weight-tenths)))
+                      15.0)))))
+
+            (fisher-damage-line!
+              (*
+                45.0
+                weight-mult
+                (fisher-level-fight-multiplier fish-level jak-level)
+                dt))))
 
         (when *fisher-line-broken?* (singlefish-break-line! self))
 
@@ -2404,10 +2604,34 @@
   (none))
 
 (defun singlefish-sell! ((self singlefish-base))
-  (let ((owner (the-as fisher-game (-> self owner))))
-    (when *target* (send-event *target* 'get-pickup (pickup-type money) (the float (-> self orb-value))))
+  (let ((owner
+        (the-as fisher-game
+          (-> self owner)))
 
-    (when (> (-> owner fish-count) 0) (-! (-> owner fish-count) 1))
+      (xp-start
+        (new 'stack-no-clear 'vector)))
+
+    (when *target*
+      (send-event
+        *target*
+        'get-pickup
+        (pickup-type money)
+        (the float (-> self orb-value))))
+
+    (vector-copy! xp-start (-> self root trans))
+    (set! (-> xp-start w) 1.0)
+
+    (fisher-start-xp-gain-animation!
+      xp-start
+      (-> owner caught-fish-xp))
+
+    (when (> (-> owner fish-count) 0)
+      (-! (-> owner fish-count) 1))
+
+    (set! (-> owner caught-weight-tenths) 0)
+    (set! (-> owner caught-orb-value) 0)
+    (set! (-> owner caught-fish-level) 1)
+    (set! (-> owner caught-fish-xp) 0)
 
     (fisher-reset-cast! owner)
     (set! (-> owner fish-message) "FISH SOLD")
@@ -2453,6 +2677,11 @@
   ((self singlefish-base) (owner (pointer fisher-game)) (skel-group skeleton-group))
 
   (set! (-> self owner) owner)
+  (set!
+    (-> self level)
+    (fisher-roll-level-in-range
+      (-> (the-as fisher-game owner) fish-level-min)
+      (-> (the-as fisher-game owner) fish-level-max)))
   (set! (-> self turning?) #f)
   (set! (-> self turn-time) 0.0)
   (set! (-> self turn-duration) 0.42)
@@ -2672,10 +2901,20 @@
 (defun fisher-sell-manipy-catch!
   ((self fisher-game))
 
-  (when *target* (send-event *target* 'get-pickup (pickup-type money) (the float (-> self caught-orb-value))))
+  (when *target*
+    (send-event
+      *target*
+      'get-pickup
+      (pickup-type money)
+      (the float (-> self caught-orb-value))))
 
   (let ((slot
-        (-> self hooked-fish-slot)))
+        (-> self hooked-fish-slot))
+
+      (xp-start
+        (new 'stack-no-clear 'vector)))
+
+    (fisher-catch-display-fish-position! self xp-start)
 
     (when (>= slot 0)
       (let ((fish
@@ -2683,13 +2922,31 @@
               self
               slot)))
 
-        (when fish (deactivate (-> fish 0)))
+        (when fish
+          (let ((fish-proc
+                (the-as manipy
+                  (-> fish 0 self))))
 
-        (fisher-set-fish-pointer! self slot (the-as (pointer manipy) #f))
+            (vector-copy!
+              xp-start
+              (-> fish-proc root trans))
+
+            (set! (-> xp-start w) 1.0))
+
+          (deactivate (-> fish 0)))
+
+        (fisher-set-fish-pointer!
+          self
+          slot
+          (the-as (pointer manipy) #f))
 
         (fisher-randomize-fish-slot!
           self
-          slot))))
+          slot)))
+
+    (fisher-start-xp-gain-animation!
+      xp-start
+      (-> self caught-fish-xp)))
 
   (set! (-> self hooked-fish-slot) -1)
   (set! (-> self fish-state) 'free)
@@ -2697,6 +2954,8 @@
   (set! (-> self fish-message-time) 1.25)
   (set! (-> self caught-weight-tenths) 0)
   (set! (-> self caught-orb-value) 0)
+  (set! (-> self caught-fish-level) 1)
+  (set! (-> self caught-fish-xp) 0)
   (set! (-> self catch-transition-time) 0.0)
   (set! (-> self catch-menu-offset) 0.0)
 
@@ -3180,6 +3439,51 @@
   (none)
 )
 
+(defun fisher-fish-weight-damage-multiplier
+  ((self fisher-game) (slot int))
+
+  (let* ((species
+          (fisher-fish-species self slot))
+
+      (weight
+        (the float
+          (max
+            1
+            (fisher-fish-weight-tenths self slot))))
+
+      ;; Reference weights preserve the old damage at an average poundage.
+      (reference-weight
+        (cond
+          ((= species 1) 35.0)
+          ((= species 2) 30.0)
+          (else 15.0))))
+
+    (fmax
+      0.45
+      (fmin
+        4.0
+        (/ weight reference-weight)))))
+
+(defun fisher-fight-damage-per-second
+  ((self fisher-game) (slot int))
+
+  (let* ((species
+          (fisher-fish-species self slot))
+
+      (base-damage
+        (if (= species 1) 52.0 34.0))
+
+      (fish-level
+        (fisher-fish-level self slot))
+
+      (jak-level
+        (fisher-current-level)))
+
+    (*
+      base-damage
+      (fisher-fish-weight-damage-multiplier self slot)
+      (fisher-level-fight-multiplier fish-level jak-level))))
+
 (defun fisher-update-manipy-reeling!
   ((self fisher-game))
 
@@ -3202,10 +3506,16 @@
 
         (set! (-> self lure-pos y) (+ (-> self fish-fight-base-y) (* (meters 0.055) (sin (-> self fish-fight-phase)))))
 
-        (when (cpad-hold? 0 x)
+        (when
+          (and
+            (cpad-hold? 0 x)
+            (>= (-> self hooked-fish-slot) 0))
+
           (fisher-damage-line!
             (*
-              (if (and (>= (-> self hooked-fish-slot) 0) (= (fisher-fish-species self (-> self hooked-fish-slot)) 1)) 52.0 34.0)
+              (fisher-fight-damage-per-second
+                self
+                (-> self hooked-fish-slot))
               dt)))
 
         (when *fisher-line-broken?*
@@ -3326,26 +3636,41 @@
                     (when
                       (<= (-> self fish-fight-time) 0.0)
 
+                      (set! (-> self fish-fight-time) 0.0)
                       (set! (-> self fish-fighting?) #f)
+                      (set! (-> self fish-hook-time) (rand-vu-float-range 0.75 1.50))
 
                       (set!
                         (-> self fish-fight-phase)
                         (degrees 180.0))))
 
+                  ;; Each expired fight cooldown is only a 25% chance to
+                  ;; begin another fight. A failed roll starts a fresh cooldown,
+                  ;; reducing average fight frequency to one quarter.
                   (when
-                    (and (<= (-> self fish-hook-time) 0.0) (not (-> self fish-fighting?)) (rand-vu-percent? (* dt 0.18)))
+                    (and
+                      (<= (-> self fish-hook-time) 0.0)
+                      (<= (-> self fish-fight-time) 0.0)
+                      (not (-> self fish-fighting?)))
 
-                    (set! (-> self fish-fight-time) (rand-vu-float-range 1.0 2.1))
+                    (cond
+                      ((rand-vu-percent? 0.25)
+                        (set! (-> self fish-fight-time) (rand-vu-float-range 1.0 2.1))
 
-                    (fisher-play-random-fight-sound!)
+                        (fisher-play-random-fight-sound!)
 
-                    (set! (-> self fish-fighting?) #t)
+                        (set! (-> self fish-fighting?) #t)
 
-                    (set! (-> self fish-fight-phase) 0.0)
+                        (set! (-> self fish-fight-phase) 0.0)
 
-                    (set!
-                      (-> self fish-fight-base-y)
-                      (-> self lure-pos y))))
+                        (set!
+                          (-> self fish-fight-base-y)
+                          (-> self lure-pos y)))
+
+                      (else
+                        (set!
+                          (-> self fish-hook-time)
+                          (rand-vu-float-range 0.75 1.50))))))
 
                 ((or
                     (= (-> self fish-state) 'catch-enter)
@@ -4164,7 +4489,7 @@
       (set! (-> self fish-fight-base-y) (-> self lure-pos y))
       (set! (-> self reel-camera-blend) 0.0)
 
-      (set! (-> self fish-hook-time) 2.0)
+      (set! (-> self fish-hook-time) 0.65)
       (set! (-> self fish-fight-time) 0.0)
       (set! (-> self fish-fighting?) #f))
 
@@ -4189,13 +4514,23 @@
       (set! (-> self fish-message) #f)))
 
   (cond
-    ((= (-> self fish-state) 'approaching) (draw-mod-menu-text-custom "?" 256 116 #f #t #f))
+    ((= (-> self fish-state) 'approaching)
+      (draw-mod-menu-text-custom "?" 256 116 #f #t #f))
 
-    ((= (-> self fish-state) 'hook-window) (draw-mod-menu-text-custom "PRESS <PAD_X> TO HOOK" 256 116 #f #t #f))
+    ((= (-> self fish-state) 'hook-window)
+      (draw-mod-menu-text-custom "PRESS <PAD_X> TO HOOK" 256 116 #f #t #f))
 
-    ((= (-> self fish-state) 'reeling)
+    ;; These reeling instructions are only part of the fisher tutorial.
+    ((and
+        (= (-> self fish-state) 'reeling)
+        (not
+          (task-closed?
+            (game-task fisher-game-tutorial)
+            (task-status need-introduction))))
+
       (cond
-        ((-> self fish-fighting?) (draw-mod-menu-text-custom "DON'T REEL!" 256 116 #f #t #f))
+        ((-> self fish-fighting?)
+          (draw-mod-menu-text-custom "DON'T REEL!" 256 116 #f #t #f))
 
         (else
           (draw-mod-menu-text-custom
@@ -4260,28 +4595,46 @@
             :b #x48
             :a #xa8)))
 
-      (draw-fisher-small-text
+      (draw-fisher-large-font-scaled
         (fisher-format-catch-name! self)
         256
-        (+ 116 menu-offset))
+        (+ 116 menu-offset)
+        0.60)
 
       (clear *fish-ui-str*)
-      (format *fish-ui-str* "~D.~D LBS" whole-lbs decimal-lbs)
+      (format
+        *fish-ui-str*
+        "LV. ~D   ~D.~D LBS"
+        (-> self caught-fish-level)
+        whole-lbs
+        decimal-lbs)
 
-      (draw-fisher-small-text *fish-ui-str* 256 (+ 142 menu-offset))
+      (draw-fisher-large-font-scaled
+        *fish-ui-str*
+        256
+        (+ 142 menu-offset)
+        0.52)
 
       (clear *fish-ui-str*)
-      (format *fish-ui-str* "WORTH: ~D PRECURSOR ORBS" (-> self caught-orb-value))
+      (format
+        *fish-ui-str*
+        "WORTH: ~D ORBS   +~D XP"
+        (-> self caught-orb-value)
+        (-> self caught-fish-xp))
 
-      (draw-fisher-small-text *fish-ui-str* 256 (+ 164 menu-offset))
+      (draw-fisher-large-font-scaled
+        *fish-ui-str*
+        256
+        (+ 164 menu-offset)
+        0.48)
 
-      (draw-mod-menu-text-custom
-        "PRESS <PAD_X> TO CONTINUE"
+      (clear *fish-ui-str*)
+      (format *fish-ui-str* "PRESS <PAD_X> TO CONTINUE")
+      (draw-fisher-large-font-scaled
+        *fish-ui-str*
         256
         (+ 181 menu-offset)
-        #f
-        #t
-        #f)))
+        0.52)))
 
   (none))
 
@@ -4370,14 +4723,14 @@
       (fisher-camera-catch-display! self)
       (fisher-update-catch-menu-animation! self)
       (fisher-draw-catch-ui! self)))
-  
-  (when 
-    (and 
-      (not (= (-> self cast-state) 'catch-transition))
-      
-    )
-    (fisher-draw-xp-meter!)
-    )
+
+  ;; XP reward presentation continues after the loot window closes.
+  (fisher-update-xp-gain-animation!)
+
+  (when
+    (not (= (-> self cast-state) 'catch-transition))
+
+    (fisher-draw-xp-meter!))
 
   (fisher-draw-fish-status! self)
   (none))
@@ -4409,21 +4762,35 @@
 
 (defstate idle (fisher-game)
   :virtual #t
-  :code (behavior ()
+  :code
+  (behavior ()
     (loop
-      (when (<= (vector-vector-distance (target-pos 0) (-> self pos)) (meters 5))
-        (draw-mod-menu-text-custom "PRESS <PAD_CIRCLE> TO START FISHING" 256 160 #f #t #f)
-        (when (cpad-pressed? 0 circle)
-          (cpad-clear! 0 circle)
-          (set! (-> self camera-state) 'before-cast)
-          (send-event *camera* 'change-state cam-fixed 0)
-          (go-virtual fishing)
-        )
-      )
-      (suspend)
-    )
-  )
-)
+      (when
+        (<=
+          (vector-vector-distance
+            (target-pos 0)
+            (-> self pos))
+          (meters 5))
+
+        (cond
+          ((cpad-pressed? 0 circle)
+            ;; Change state before drawing the idle prompt, so the prompt
+            ;; is not submitted on the frame fishing begins.
+            (cpad-clear! 0 circle)
+            (set! (-> self camera-state) 'before-cast)
+            (send-event *camera* 'change-state cam-fixed 0)
+            (go-virtual fishing))
+
+          (else
+            (draw-mod-menu-text-custom
+              "PRESS <PAD_CIRCLE> TO START FISHING"
+              256
+              160
+              #f
+              #t
+              #f))))
+
+      (suspend))))
 
 (defstate fishing (fisher-game)
   :virtual #t

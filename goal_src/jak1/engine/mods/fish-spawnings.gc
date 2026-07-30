@@ -26,23 +26,111 @@
   :bounds (static-spherem 0 0 0 7)
   :longest-edge (meters 4))
 
+(defun swimmer-pontoonfive-initialize-collision!
+  ((self swimmer-pontoonfive))
+
+  ;; Use collision mesh 0 embedded in the loaded pontoon art group.
+  ;; initialize-skeleton installs the jgeo; find-collision-meshes resolves
+  ;; this primitive's mesh-id against that jgeo afterward.
+  (let ((shape
+        (new 'process
+          'collide-shape
+          self
+          (collide-list-enum hit-by-player))))
+
+    (let ((mesh
+          (new 'process
+            'collide-shape-prim-mesh
+            shape
+            (the-as uint 0)
+            (the-as uint 0))))
+
+      (set! (-> mesh prim-core collide-as) (collide-kind ground-object))
+      (set! (-> mesh collide-with) (collide-kind target))
+
+      (set!
+        (-> mesh prim-core action)
+        (collide-action solid rider-plat-sticky))
+
+      (set!
+        (-> mesh prim-core offense)
+        (collide-offense indestructible))
+
+      (set! (-> mesh transform-index) 0)
+
+      ;; Broad-phase bound only. The actual flat pontoon collision comes
+      ;; from the collide-mesh stored in the art group's jgeo.
+      (set-vector!
+        (-> mesh local-sphere)
+        0.0
+        0.0
+        0.0
+        18432.0)
+
+      (set-root-prim! shape mesh))
+
+    (set! (-> shape nav-radius) 12288.0)
+    (backup-collide-with-as shape)
+    (set! (-> self root) shape))
+
+  (none))
+
+(defun swimmer-pontoonten-initialize-collision!
+  ((self swimmer-pontoonten))
+
+  ;; Use collision mesh 0 embedded in the loaded pontoon art group.
+  ;; initialize-skeleton installs the jgeo; find-collision-meshes resolves
+  ;; this primitive's mesh-id against that jgeo afterward.
+  (let ((shape
+        (new 'process
+          'collide-shape
+          self
+          (collide-list-enum hit-by-player))))
+
+    (let ((mesh
+          (new 'process
+            'collide-shape-prim-mesh
+            shape
+            (the-as uint 0)
+            (the-as uint 0))))
+
+      (set! (-> mesh prim-core collide-as) (collide-kind ground-object))
+      (set! (-> mesh collide-with) (collide-kind target))
+
+      (set!
+        (-> mesh prim-core action)
+        (collide-action solid rider-plat-sticky))
+
+      (set!
+        (-> mesh prim-core offense)
+        (collide-offense indestructible))
+
+      (set! (-> mesh transform-index) 0)
+
+      ;; Broad-phase bound only. The actual flat pontoon collision comes
+      ;; from the collide-mesh stored in the art group's jgeo.
+      (set-vector!
+        (-> mesh local-sphere)
+        0.0
+        0.0
+        0.0
+        25395.2)
+
+      (set-root-prim! shape mesh))
+
+    (set! (-> shape nav-radius) 20480.0)
+    (backup-collide-with-as shape)
+    (set! (-> self root) shape))
+
+  (none))
+
 (defstate swimmer-pontoon-die (swimmer-pontoon)
   :code
   (behavior ()
-    (when (-> self visual)
-      (deactivate
-        (-> (-> self visual) 0))
-
-      (set!
-        (-> self visual)
-        (the-as (pointer manipy) #f)))
-
     (cleanup-for-death self)
     (deactivate self)))
 
-(defstate swimmer-pontoon-float (swimmer-pontoon)
-  :virtual #t
-
+(defstate swimmer-pontoon-idle (swimmer-pontoon)
   :event
   (behavior
     ((proc process)
@@ -52,480 +140,140 @@
 
     (case message
       (('die)
-        (go swimmer-pontoon-die))
+        (go swimmer-pontoon-die))))
+
+  :enter
+  (behavior ()
+    (cond
+      ((= (-> self pontoon-type) 0)
+        (ja-no-eval
+          :group! pontoonfive-idle-ja
+          :num! (seek!)
+          :frame-num 0.0))
 
       (else
-        (rigid-body-platform-event-handler
-          proc
-          argc
-          message
-          block))))
+        (ja-no-eval
+          :group! pontoonten-idle-ja
+          :num! (seek!)
+          :frame-num 0.0))))
 
   :code
   (behavior ()
     (loop
-      ;; The rigid body owns collision and buoyancy. Keep the independent
-      ;; pontoon visual locked to that rigid-body transform.
-      (when (-> self visual)
-        (let ((visual-proc
-              (the-as manipy
-                (-> (-> self visual) 0 self))))
+      (suspend)
+      (ja :num! (seek!))))
 
-          (set!
-            (-> visual-proc root trans quad)
-            (-> self root-overlay trans quad))
-
-          (set!
-            (-> visual-proc root quat quad)
-            (-> self root-overlay quat quad))))
-
-      (suspend)))
-
-  :post rigid-body-platform-post)
-
-(defmethod rigid-body-platform-method-23
-  ((this swimmer-pontoon) (time-step float))
-
-  (call-parent-method this time-step)
-
-  (rigid-body-platform-method-27
-    this
-    (-> this anchor-point))
-
-  0
-  (none))
-
-(defmethod rigid-body-platform-method-30
-  ((this swimmer-pontoonfive))
-
-  (let ((moving-shape
-        (new 'process
-          'collide-shape-moving
-          this
-          (collide-list-enum hit-by-player))))
-
-    (set!
-      (-> moving-shape dynam)
-      (copy *standard-dynamics* 'process))
-
-    (set!
-      (-> moving-shape reaction)
-      default-collision-reaction)
-
-    (set!
-      (-> moving-shape no-reaction)
-      (the-as
-        (function
-          collide-shape-moving
-          collide-shape-intersect
-          vector
-          vector
-          none)
-        nothing))
-
-    (alloc-riders moving-shape 1)
-
-    (let ((mesh
-          (new 'process
-            'collide-shape-prim-mesh
-            moving-shape
-            (the-as uint 0)
-            (the-as uint 0))))
-
-      (set!
-        (-> mesh prim-core collide-as)
-        (collide-kind enemy))
-
-      (set!
-        (-> mesh collide-with)
-        (collide-kind target))
-
-      (set!
-        (-> mesh prim-core action)
-        (collide-action solid rider-plat-sticky))
-
-      (set!
-        (-> mesh prim-core offense)
-        (collide-offense indestructible))
-
-      (set! (-> mesh transform-index) 0)
-
-      (set-vector!
-        (-> mesh local-sphere)
-        0.0
-        0.0
-        0.0
-        18432.0)
-
-      (set-root-prim! moving-shape mesh))
-
-    (set!
-      (-> moving-shape nav-radius)
-      (* 0.75
-        (-> moving-shape root-prim local-sphere w)))
-
-    (backup-collide-with-as moving-shape)
-
-    (set!
-      (-> this root-overlay)
-      moving-shape))
-
-  0
-  (none))
-
-(defmethod rigid-body-platform-method-31
-  ((this swimmer-pontoonfive))
-
-  (initialize-skeleton
-    this
-    *swimmer-pontoonfive-sg*
-    '())
-
-  (rigid-body-platform-method-29
-    this
-    *swimmer-pontoonfive-constants*)
-
-  (set! (-> this float-height-offset) 6144.0)
-  (set! (-> this root-overlay nav-radius) 12288.0)
-
-  (let ((point
-        (-> this control-point-array data 0)))
-    (set-vector!
-      (-> point local-pos)
-      9216.0
-      0.0
-      12083.2
-      1.0))
-
-  (let ((point
-        (-> this control-point-array data 1)))
-    (set-vector!
-      (-> point local-pos)
-      9216.0
-      0.0
-      -12083.2
-      1.0))
-
-  (let ((point
-        (-> this control-point-array data 2)))
-    (set-vector!
-      (-> point local-pos)
-      -9216.0
-      0.0
-      -12083.2
-      1.0))
-
-  (let ((point
-        (-> this control-point-array data 3)))
-    (set-vector!
-      (-> point local-pos)
-      -9216.0
-      0.0
-      12083.2
-      1.0))
-
-  0
-  (none))
-
-(defmethod rigid-body-platform-method-30
-  ((this swimmer-pontoonten))
-
-  (let ((moving-shape
-        (new 'process
-          'collide-shape-moving
-          this
-          (collide-list-enum hit-by-player))))
-
-    (set!
-      (-> moving-shape dynam)
-      (copy *standard-dynamics* 'process))
-
-    (set!
-      (-> moving-shape reaction)
-      default-collision-reaction)
-
-    (set!
-      (-> moving-shape no-reaction)
-      (the-as
-        (function
-          collide-shape-moving
-          collide-shape-intersect
-          vector
-          vector
-          none)
-        nothing))
-
-    (alloc-riders moving-shape 1)
-
-    (let ((mesh
-          (new 'process
-            'collide-shape-prim-mesh
-            moving-shape
-            (the-as uint 0)
-            (the-as uint 0))))
-
-      (set!
-        (-> mesh prim-core collide-as)
-        (collide-kind enemy))
-
-      (set!
-        (-> mesh collide-with)
-        (collide-kind target))
-
-      (set!
-        (-> mesh prim-core action)
-        (collide-action solid rider-plat-sticky))
-
-      (set!
-        (-> mesh prim-core offense)
-        (collide-offense indestructible))
-
-      (set! (-> mesh transform-index) 0)
-
-      (set-vector!
-        (-> mesh local-sphere)
-        0.0
-        0.0
-        0.0
-        25395.2)
-
-      (set-root-prim! moving-shape mesh))
-
-    (set!
-      (-> moving-shape nav-radius)
-      (* 0.75
-        (-> moving-shape root-prim local-sphere w)))
-
-    (backup-collide-with-as moving-shape)
-
-    (set!
-      (-> this root-overlay)
-      moving-shape))
-
-  0
-  (none))
-
-(defmethod rigid-body-platform-method-31
-  ((this swimmer-pontoonten))
-
-  (initialize-skeleton
-    this
-    *swimmer-pontoonten-sg*
-    '())
-
-  (rigid-body-platform-method-29
-    this
-    *swimmer-pontoonten-constants*)
-
-  (set! (-> this float-height-offset) 6144.0)
-  (set! (-> this root-overlay nav-radius) 20480.0)
-
-  (let ((point
-        (-> this control-point-array data 0)))
-    (set-vector!
-      (-> point local-pos)
-      17408.0
-      0.0
-      10035.2
-      1.0))
-
-  (let ((point
-        (-> this control-point-array data 1)))
-    (set-vector!
-      (-> point local-pos)
-      17408.0
-      0.0
-      -10035.2
-      1.0))
-
-  (let ((point
-        (-> this control-point-array data 2)))
-    (set-vector!
-      (-> point local-pos)
-      -17408.0
-      0.0
-      -10035.2
-      1.0))
-
-  (let ((point
-        (-> this control-point-array data 3)))
-    (set-vector!
-      (-> point local-pos)
-      -17408.0
-      0.0
-      10035.2
-      1.0))
-
-  0
-  (none))
+  :post ja-post)
 
 (defbehavior swimmer-pontoonfive-init-by-other
   swimmer-pontoonfive
   ((spawn-pos vector)
    (rotation-degrees float))
 
-  (set!
-    (-> self visual)
-    (the-as (pointer manipy) #f))
-
+  (set! (-> self pontoon-type) 0)
 
   (logior!
     (-> self mask)
     (process-mask platform))
 
-  (rigid-body-platform-method-30 self)
-  (rigid-body-platform-method-31 self)
+  (logclear!
+    (-> self mask)
+    (process-mask actor-pause))
 
-  (set!
-    (-> self root-overlay trans quad)
-    (-> spawn-pos quad))
+  ;; Build collision first so it becomes the drawable root.
+  (swimmer-pontoonfive-initialize-collision! self)
+
+  ;; Build the pontoon model directly from the loaded art group.
+  (initialize-skeleton
+    self
+    *swimmer-pontoonfive-sg*
+    '())
+
+  ;; Resolve mesh-id 0 from pontoonfive's loaded jgeo collision group.
+  (find-collision-meshes (the-as collide-shape (-> self root)))
+
+  (#when PC_PORT
+    (set!
+      (-> self skel postbind-function)
+      process-drawable-joint-callback-pc))
+
+  (set! (-> self root trans quad) (-> spawn-pos quad))
+  (set! (-> self root trans w) 1.0)
 
   (quaternion-axis-angle!
-    (-> self root-overlay quat)
+    (-> self root quat)
     0.0
     1.0
     0.0
     (degrees rotation-degrees))
 
-  (set!
-    (-> self anchor-point quad)
-    (-> self root-overlay trans quad))
+  (vector-identity! (-> self root scale))
 
-  (set! (-> self water-anim) #f)
+  (set! (-> self root pause-adjust-distance) -122880.0)
+  (set! (-> self draw force-lod) 0)
 
-  (set!
-    (-> self root-overlay pause-adjust-distance)
-    -122880.0)
-
-  ;; Use a separate local manipy for guaranteed visual submission.
-  (set!
-    (-> self visual)
-    (manipy-spawn
-      spawn-pos
-      #f
-      *swimmer-pontoonfive-sg*
-      #f
-      :from *default-dead-pool*
-      :to *default-pool*
-      :name "swimmer-pontoonfive-visual"))
-
-  (when (-> self visual)
-    (let ((visual-proc
-          (the-as manipy
-            (-> (-> self visual) 0 self))))
-
-      (send-event visual-proc 'anim-mode 'loop)
-
-      (send-event
-        visual-proc
-        'max-vis-dist
-        (meters 999999.0))
-
-      (set!
-        (-> visual-proc root trans quad)
-        (-> self root-overlay trans quad))
-
-      (set!
-        (-> visual-proc root quat quad)
-        (-> self root-overlay quat quad))))
-
-  ;; Finalize the rigid body after assigning the runtime transform.
   (logclear!
     (-> self draw status)
     (draw-status hidden))
 
-  (logior!
-    (-> self skel status)
-    (janim-status inited))
-
   (transform-post)
-  (ja-post)
 
-  (go-virtual swimmer-pontoon-float))
+  (go swimmer-pontoon-idle))
 
 (defbehavior swimmer-pontoonten-init-by-other
   swimmer-pontoonten
   ((spawn-pos vector)
    (rotation-degrees float))
 
-  (set!
-    (-> self visual)
-    (the-as (pointer manipy) #f))
-
+  (set! (-> self pontoon-type) 1)
 
   (logior!
     (-> self mask)
     (process-mask platform))
 
-  (rigid-body-platform-method-30 self)
-  (rigid-body-platform-method-31 self)
+  (logclear!
+    (-> self mask)
+    (process-mask actor-pause))
 
-  (set!
-    (-> self root-overlay trans quad)
-    (-> spawn-pos quad))
+  ;; Build collision first so it becomes the drawable root.
+  (swimmer-pontoonten-initialize-collision! self)
+
+  ;; Build the pontoon model directly from the loaded art group.
+  (initialize-skeleton
+    self
+    *swimmer-pontoonten-sg*
+    '())
+
+  ;; Resolve mesh-id 0 from pontoonten's loaded jgeo collision group.
+  (find-collision-meshes (the-as collide-shape (-> self root)))
+
+  (#when PC_PORT
+    (set!
+      (-> self skel postbind-function)
+      process-drawable-joint-callback-pc))
+
+  (set! (-> self root trans quad) (-> spawn-pos quad))
+  (set! (-> self root trans w) 1.0)
 
   (quaternion-axis-angle!
-    (-> self root-overlay quat)
+    (-> self root quat)
     0.0
     1.0
     0.0
     (degrees rotation-degrees))
 
-  (set!
-    (-> self anchor-point quad)
-    (-> self root-overlay trans quad))
+  (vector-identity! (-> self root scale))
 
-  (set! (-> self water-anim) #f)
+  (set! (-> self root pause-adjust-distance) -122880.0)
+  (set! (-> self draw force-lod) 0)
 
-  (set!
-    (-> self root-overlay pause-adjust-distance)
-    -122880.0)
-
-  ;; Use a separate local manipy for guaranteed visual submission.
-  (set!
-    (-> self visual)
-    (manipy-spawn
-      spawn-pos
-      #f
-      *swimmer-pontoonten-sg*
-      #f
-      :from *default-dead-pool*
-      :to *default-pool*
-      :name "swimmer-pontoonten-visual"))
-
-  (when (-> self visual)
-    (let ((visual-proc
-          (the-as manipy
-            (-> (-> self visual) 0 self))))
-
-      (send-event visual-proc 'anim-mode 'loop)
-
-      (send-event
-        visual-proc
-        'max-vis-dist
-        (meters 999999.0))
-
-      (set!
-        (-> visual-proc root trans quad)
-        (-> self root-overlay trans quad))
-
-      (set!
-        (-> visual-proc root quat quad)
-        (-> self root-overlay quat quad))))
-
-  ;; Finalize the rigid body after assigning the runtime transform.
   (logclear!
     (-> self draw status)
     (draw-status hidden))
 
-  (logior!
-    (-> self skel status)
-    (janim-status inited))
-
   (transform-post)
-  (ja-post)
 
-  (go-virtual swimmer-pontoon-float))
+  (go swimmer-pontoon-idle))
 
 (defun spawn-pontoon-swimmer
   ((spawn-pos vector)
@@ -539,7 +287,7 @@
         spawn-pos
         rotation-degrees
         :name "swimmer-pontoonfive"
-        *active-pool*))
+        :to *active-pool*))
 
     ((= pontoon-type 1)
       (process-spawn
@@ -547,7 +295,7 @@
         spawn-pos
         rotation-degrees
         :name "swimmer-pontoonten"
-        *active-pool*))
+        :to *active-pool*))
 
     (else
       (format
@@ -1200,6 +948,120 @@
 
   (none))
 
+(defun fisher-fish-level ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-level-0))
+    ((= slot 1) (-> self fish-level-1))
+    ((= slot 2) (-> self fish-level-2))
+    ((= slot 3) (-> self fish-level-3))
+    ((= slot 4) (-> self fish-level-4))
+    ((= slot 5) (-> self fish-level-5))
+    ((= slot 6) (-> self fish-level-6))
+    ((= slot 7) (-> self fish-level-7))
+    ((= slot 8) (-> self fish-level-8))
+    ((= slot 9) (-> self fish-level-9))
+    ((= slot 10) (-> self fish-level-10))
+    ((= slot 11) (-> self fish-level-11))
+    ((= slot 12) (-> self fish-level-12))
+    ((= slot 13) (-> self fish-level-13))
+    ((= slot 14) (-> self fish-level-14))
+    ((= slot 15) (-> self fish-level-15))
+    ((= slot 16) (-> self fish-level-16))
+    ((= slot 17) (-> self fish-level-17))
+    ((= slot 18) (-> self fish-level-18))
+    ((= slot 19) (-> self fish-level-19))
+    ((= slot 20) (-> self fish-level-20))
+    (else (-> self fish-level-21))))
+
+(defun fisher-set-fish-level!
+  ((self fisher-game) (slot int) (value int))
+
+  (let ((safe-value
+        (max 1 (min *fisher-level-cap* value))))
+
+    (cond
+      ((= slot 0) (set! (-> self fish-level-0) safe-value))
+      ((= slot 1) (set! (-> self fish-level-1) safe-value))
+      ((= slot 2) (set! (-> self fish-level-2) safe-value))
+      ((= slot 3) (set! (-> self fish-level-3) safe-value))
+      ((= slot 4) (set! (-> self fish-level-4) safe-value))
+      ((= slot 5) (set! (-> self fish-level-5) safe-value))
+      ((= slot 6) (set! (-> self fish-level-6) safe-value))
+      ((= slot 7) (set! (-> self fish-level-7) safe-value))
+      ((= slot 8) (set! (-> self fish-level-8) safe-value))
+      ((= slot 9) (set! (-> self fish-level-9) safe-value))
+      ((= slot 10) (set! (-> self fish-level-10) safe-value))
+      ((= slot 11) (set! (-> self fish-level-11) safe-value))
+      ((= slot 12) (set! (-> self fish-level-12) safe-value))
+      ((= slot 13) (set! (-> self fish-level-13) safe-value))
+      ((= slot 14) (set! (-> self fish-level-14) safe-value))
+      ((= slot 15) (set! (-> self fish-level-15) safe-value))
+      ((= slot 16) (set! (-> self fish-level-16) safe-value))
+      ((= slot 17) (set! (-> self fish-level-17) safe-value))
+      ((= slot 18) (set! (-> self fish-level-18) safe-value))
+      ((= slot 19) (set! (-> self fish-level-19) safe-value))
+      ((= slot 20) (set! (-> self fish-level-20) safe-value))
+      (else (set! (-> self fish-level-21) safe-value))))
+
+  (none))
+
+(defun fisher-fish-weight-tenths ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-weight-tenths-0))
+    ((= slot 1) (-> self fish-weight-tenths-1))
+    ((= slot 2) (-> self fish-weight-tenths-2))
+    ((= slot 3) (-> self fish-weight-tenths-3))
+    ((= slot 4) (-> self fish-weight-tenths-4))
+    ((= slot 5) (-> self fish-weight-tenths-5))
+    ((= slot 6) (-> self fish-weight-tenths-6))
+    ((= slot 7) (-> self fish-weight-tenths-7))
+    ((= slot 8) (-> self fish-weight-tenths-8))
+    ((= slot 9) (-> self fish-weight-tenths-9))
+    ((= slot 10) (-> self fish-weight-tenths-10))
+    ((= slot 11) (-> self fish-weight-tenths-11))
+    ((= slot 12) (-> self fish-weight-tenths-12))
+    ((= slot 13) (-> self fish-weight-tenths-13))
+    ((= slot 14) (-> self fish-weight-tenths-14))
+    ((= slot 15) (-> self fish-weight-tenths-15))
+    ((= slot 16) (-> self fish-weight-tenths-16))
+    ((= slot 17) (-> self fish-weight-tenths-17))
+    ((= slot 18) (-> self fish-weight-tenths-18))
+    ((= slot 19) (-> self fish-weight-tenths-19))
+    ((= slot 20) (-> self fish-weight-tenths-20))
+    (else (-> self fish-weight-tenths-21))))
+
+(defun fisher-set-fish-weight-tenths!
+  ((self fisher-game) (slot int) (value int))
+
+  (let ((safe-value
+        (max 1 value)))
+
+    (cond
+      ((= slot 0) (set! (-> self fish-weight-tenths-0) safe-value))
+      ((= slot 1) (set! (-> self fish-weight-tenths-1) safe-value))
+      ((= slot 2) (set! (-> self fish-weight-tenths-2) safe-value))
+      ((= slot 3) (set! (-> self fish-weight-tenths-3) safe-value))
+      ((= slot 4) (set! (-> self fish-weight-tenths-4) safe-value))
+      ((= slot 5) (set! (-> self fish-weight-tenths-5) safe-value))
+      ((= slot 6) (set! (-> self fish-weight-tenths-6) safe-value))
+      ((= slot 7) (set! (-> self fish-weight-tenths-7) safe-value))
+      ((= slot 8) (set! (-> self fish-weight-tenths-8) safe-value))
+      ((= slot 9) (set! (-> self fish-weight-tenths-9) safe-value))
+      ((= slot 10) (set! (-> self fish-weight-tenths-10) safe-value))
+      ((= slot 11) (set! (-> self fish-weight-tenths-11) safe-value))
+      ((= slot 12) (set! (-> self fish-weight-tenths-12) safe-value))
+      ((= slot 13) (set! (-> self fish-weight-tenths-13) safe-value))
+      ((= slot 14) (set! (-> self fish-weight-tenths-14) safe-value))
+      ((= slot 15) (set! (-> self fish-weight-tenths-15) safe-value))
+      ((= slot 16) (set! (-> self fish-weight-tenths-16) safe-value))
+      ((= slot 17) (set! (-> self fish-weight-tenths-17) safe-value))
+      ((= slot 18) (set! (-> self fish-weight-tenths-18) safe-value))
+      ((= slot 19) (set! (-> self fish-weight-tenths-19) safe-value))
+      ((= slot 20) (set! (-> self fish-weight-tenths-20) safe-value))
+      (else (set! (-> self fish-weight-tenths-21) safe-value))))
+
+  (none))
+
 (defun fisher-roll-fish-suffix ()
   (let ((roll
         (rand-vu-int-range 0 99999)))
@@ -1242,7 +1104,7 @@
     ((= suffix 2) "HEALTHY")
     ((= suffix 3) "MUTANT")
     ((= suffix 4) "RARE")
-    ((= suffix 5) "LEGENDARY")
+    ((= suffix 5) "MEGA")
     (else "GOLDEN")))
 
 (defun fisher-species-name
@@ -1250,10 +1112,7 @@
 
   (cond
     ((= species 1)
-      (if
-        (= (-> self location-id) 2)
-        "GOLDEN HOUR"
-        "LARGEMOUTH ECOFISH"))
+      "LARGEMOUTH ECOFISH")
 
     ((= species 2)
       "BABAK ECOFISH")
@@ -1270,6 +1129,59 @@
     ((= suffix 4) 2.00)
     ((= suffix 5) 3.00)
     (else 5.00)))
+
+(defun fisher-roll-fish-weight-tenths
+  ((self fisher-game) (slot int))
+
+  (let* ((species
+          (fisher-fish-species self slot))
+
+      (suffix
+        (fisher-fish-suffix self slot))
+
+      (base-weight
+        (cond
+          ((= species 1) (rand-vu-int-range 20 50))
+          ((= species 2) (rand-vu-int-range 20 41))
+          (else (rand-vu-int-range 10 20)))))
+
+    (cond
+      ((= suffix 0)
+        (max
+          1
+          (the int
+            (*
+              (the float base-weight)
+              (rand-vu-float-range 0.45 0.65)))))
+
+      ((= suffix 1)
+        (max
+          1
+          (the int
+            (*
+              (the float base-weight)
+              (rand-vu-float-range 0.72 0.88)))))
+
+      ((= suffix 5) (* base-weight 2))
+      ((= suffix 6) (* base-weight 18))
+      (else base-weight))))
+
+(defun fisher-randomize-fish-level-and-weight!
+  ((self fisher-game) (slot int))
+
+  (fisher-set-fish-level!
+    self
+    slot
+    (fisher-roll-level-in-range
+      (-> self fish-level-min)
+      (-> self fish-level-max)))
+
+  (fisher-set-fish-weight-tenths!
+    self
+    slot
+    (fisher-roll-fish-weight-tenths self slot))
+
+  (none))
 
 (defun fisher-assign-table-slots!
   ((self fisher-game) (eco-count int) (largemouth-count int) (babak-count int))
@@ -1302,11 +1214,16 @@
 
       (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix))
 
+      (fisher-randomize-fish-level-and-weight! self i)
+
       (+! i 1)))
 
   (none))
 
 (defun fisher-configure-sandover-table! ((self fisher-game))
+  (set! (-> self fish-level-min) 1)
+  (set! (-> self fish-level-max) 3)
+
   (let ((eco-count 0)
       (largemouth-count 0))
 
@@ -1329,26 +1246,32 @@
   (none))
 
 (defun fisher-configure-training-lagoon-table! ((self fisher-game))
+  (set! (-> self fish-level-min) 1)
+  (set! (-> self fish-level-max) 1)
+
   (let ((eco-count
         (rand-vu-int-range 2 3))
 
-      (golden-hour-count
+      (largemouth-count
         (rand-vu-int-range 4 5)))
 
     (set! (-> self sandover-eco-count) eco-count)
 
-    ;; Reuse the secondary species slot for Golden Hour in this location.
-    (set! (-> self sandover-largemouth-count) golden-hour-count)
+    ;; Training uses the secondary species slot for Largemouth Ecofish.
+    (set! (-> self sandover-largemouth-count) largemouth-count)
 
     (fisher-assign-table-slots!
       self
       eco-count
-      golden-hour-count
+      largemouth-count
       0))
 
   (none))
 
 (defun fisher-configure-jungle-pillar-table! ((self fisher-game))
+  (set! (-> self fish-level-min) 5)
+  (set! (-> self fish-level-max) 8)
+
   (let ((total-count 0)
       (eco-count 0)
       (largemouth-count 0)
@@ -1555,6 +1478,8 @@
   (fisher-set-fish-turn-old-direction! self slot (fisher-fish-direction self slot))
 
   (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+
+  (fisher-randomize-fish-level-and-weight! self slot)
 
   (none))
 
@@ -2028,54 +1953,67 @@
   (fisher-play-fish-win-sound!)
 
   (let* ((species
-        (fisher-fish-species self slot))
+          (fisher-fish-species self slot))
 
-      (suffix (fisher-fish-suffix self slot))
+      (suffix
+        (fisher-fish-suffix self slot))
 
-      (base-weight
-        (cond
-          ((= species 1) (rand-vu-int-range 20 50))
+      (fish-level
+        (fisher-fish-level self slot))
 
-          ((= species 2) (rand-vu-int-range 20 41))
-
-          (else
-            (rand-vu-int-range 10 20))))
+      (jak-level
+        (fisher-current-level))
 
       (weight
-        (cond
-          ((= suffix 0) (max 1 (the int (* (the float base-weight) (rand-vu-float-range 0.45 0.65)))))
+        (fisher-fish-weight-tenths self slot))
 
-          ((= suffix 1) (max 1 (the int (* (the float base-weight) (rand-vu-float-range 0.72 0.88)))))
+      (value-mult
+        (fisher-suffix-value-multiplier suffix))
 
-          ((= suffix 5) (* base-weight 2))
-
-          ((= suffix 6) (* base-weight 18))
-
-          (else
-            base-weight)))
-
-      (value-mult (fisher-suffix-value-multiplier suffix))
+      (level-value-mult
+        (fisher-level-worth-multiplier fish-level jak-level))
 
       (base-value
         (if
           (or (= species 1) (= species 2))
           2.0
-          1.0)))
+          1.0))
+
+      (catch-xp
+        (fisher-calculate-catch-xp fish-level suffix))
+
+      (raw-orb-value
+        (the int
+          (+
+            (*
+              (the float weight)
+              0.1
+              base-value
+              value-mult
+              level-value-mult
+              0.5)
+            0.5)))
+
+      (levels-below
+        (- jak-level fish-level)))
 
     (set! (-> self caught-fish-species) species)
-
     (set! (-> self caught-fish-suffix) suffix)
-
+    (set! (-> self caught-fish-level) fish-level)
     (set! (-> self caught-weight-tenths) weight)
 
     (set!
       (-> self caught-orb-value)
-      (max
-        1
-        (the int
-          (+
-            (* (the float weight) 0.1 base-value value-mult 0.5)
-            0.5)))))
+      (if
+        (>= levels-below 5)
+        (max 0 raw-orb-value)
+        (max 1 raw-orb-value)))
+
+    ;; Keep XP pending while the loot window is open. The accepted amount
+    ;; is committed only after the flying +XP number reaches the meter.
+    (set!
+      (-> self caught-fish-xp)
+      (fisher-accepted-xp-amount catch-xp)))
 
   (set! (-> self fish-state) 'catch-return)
   (set! (-> self cast-state) 'catch-transition)
@@ -2092,4 +2030,998 @@
 
   (none))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Standalone fisherman NPC clone
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Custom fisherman dialogue
+;;
+;; The table is flat on purpose: every implemented dialogue occupies four
+;; consecutive strings. Dialogue 0 uses entries 0-3, dialogue 1 would use
+;; entries 4-7, and so on.
+;;
+;; To add another dialogue:
+;;   1. append four strings,
+;;   2. increase *fisher-man-dialogue-count*.
+;;
+;; To disable all dialogue, set the count to 0.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define *fisher-man-dialogue-count* 1)
+
+;; dialogue-kind:
+;;   0 = first tutorial
+;;   1 = waiting for 10 precursor orbs
+;;   2 = 10-orb completion/reward
+;;   3 = both tutorial tasks completed
+(define *fisher-man-dialogue-page-count* 6)
+
+(define *fisher-man-tutorial-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "AVAST! THERE BE VICIOUS FISH IN OUR WATERS!"
+    ""
+    ""
+    ""
+
+    "..."
+    "EHH.. SORRY LAD."
+    "I'VE JUST BEEN HAVIN' A LITTLE TROUBLE WITH"
+    "CATCHIN' THESE DAYS."
+
+    "SOMETHIN'S FISHY HERE."
+    "FIRST, ALL OF EVERYONE'S POWERCELLS WERE"
+    "TAKEN FROM THEM, NOW EVERYONE'S TELLIN"
+    "ME TO FISH FER THEM!"
+
+    "YE BEST BE HELPIN' ME OUT, FRIENDS."
+    ""
+    ""
+    ""
+
+    "HERE, IF YE CAN LEARN TO CATCH SOME FISH,"
+    "I'LL LET YE KEEP THIS OLD FISHIN' ROD AND LURE."
+    ""
+    ""
+
+    "FIND A FISHIN SPOT ON THIS ISLAND, AND"
+    "BRING BACK 10 PRECURSOR ORBS."
+    ""
+    "THERE'S BOUND TO BE ONE SOMEWHERE."
+    
+    ""
+    ""
+    ""
+    ""))
+
+(define *fisher-man-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    "AVAST! THERE BE VICIOUS FISH IN OUR WATERS!"
+    ""
+    ""
+    ""
+
+    "..."
+    "EHH.. SORRY LAD."
+    "I'VE JUST BEEN HAVIN' A LITTLE TROUBLE WITH"
+    "CATCHIN' THESE DAYS."
+
+    "SOMETHIN'S FISHY HERE."
+    "FIRST, ALL OF EVERYONE'S POWERCELLS WERE"
+    "TAKEN FROM THEM, NOW EVERYONE'S TELLIN"
+    "ME TO FISH FER THEM!"
+
+    "YE BEST BE HELPIN' ME OUT, FRIENDS."
+    ""
+    ""
+    ""
+
+    "HERE, IF YE CAN LEARN TO CATCH SOME FISH,"
+    "I'LL LET YE KEEP THIS OLD FISHIN' ROD AND LURE."
+    ""
+    ""
+
+    "FIND A FISHIN SPOT ON THIS ISLAND, AND"
+    "AND BRING BACK 10 PRECURSOR ORBS."
+    ""
+    "THERE'S BOUND TO BE ONE SOMEWHERE."
+    
+    ""
+    ""
+    ""
+    ""))
+
+(define *fisher-man-orb-reminder-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "AYE, DID YE NOT HEAR WHAT I SAID?"
+    ""
+    ""
+    ""
+
+    ;; Page 1
+    "GO FIND YERSELF A FISHIN' SPOT AND"
+    "CATCH SOME FISH!"
+    ""
+    ""
+
+    ;; Page 2
+    "BRING ME BACK 10 PRECURSOR ORBS."
+    "IT'LL PAY US TO GET OUT OF HERE."
+    ""
+    ""))
+
+(define *fisher-man-orb-complete-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "YADIDIT"
+    ""
+    ""
+    ""
+
+    ;; Page 1
+    "YE CAUGHT ME 10 PRECURSOR ORBS"
+    ""
+    ""
+    ""
+
+    ;; Page 2
+    "TAKE THESE LAD."
+    "THEY BE THE ONLY ONES I HAVE"
+    ""
+    ""
+
+    ;; Page 3
+    "SOME OF THE OTHERS MAY HAVE CELLS TOO,"
+    "YE SHOULD STILL EXPLORE AROUND."
+    ""
+    ""
+
+    ;; Page 4
+    "I'LL BE DOIN SOME FISHIN' AS WELL"
+    "BUT YOU BE NOT GETTIN THE CELLS"
+    "WITHOUT A PRICE"
+    ""
+
+    ;; Page 5
+    "..OH, AND ONE MORE THING"
+    ""
+    ""
+    ""
+
+    ;; Page 6
+    "THERE BE CERTAIN HOURS TO FISH, TOO!"
+    "SOME FER QUANTITY, SOME FER QUALITY."
+    "CERTAIN FISH CAN'T BE CAUGHT IN THE DAY"
+    "OR DARK"))
+
+(define *fisher-man-completed-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "YE GOT YER 4 FREE POWER CELLS"
+    "TAKE THE WARP GATE BACK AND"
+    "CATCH ME MORE FISH!"
+    ""))
+
+
+;; Persistent line buffers used by substring!.
+(define *fisher-man-dialogue-buffer-0*
+  (new 'global 'string 256 (the string #f)))
+
+(define *fisher-man-dialogue-buffer-1*
+  (new 'global 'string 256 (the string #f)))
+
+(define *fisher-man-dialogue-buffer-2*
+  (new 'global 'string 256 (the string #f)))
+
+(define *fisher-man-dialogue-buffer-3*
+  (new 'global 'string 256 (the string #f)))
+
+
+(defun fisher-man-valid-dialogue?
+  ((dialogue-type int))
+
+  (and
+    (>= dialogue-type 0)
+    (< dialogue-type *fisher-man-dialogue-count*)))
+
+(defun fisher-man-select-dialogue!
+  ((self fisher-man))
+
+  (cond
+    ;; First tutorial has not been completed.
+    ((not
+       (task-closed?
+         (game-task fisher-game-tutorial)
+         (task-status need-introduction)))
+
+      (set! (-> self dialogue-kind) 0)
+      (set! *fisher-man-dialogue-page-count* 6))
+
+    ;; Both tutorial tasks are complete.
+    ((task-closed?
+       (game-task fisher-game-tutorial-orbs)
+       (task-status need-introduction))
+
+      (set! (-> self dialogue-kind) 3)
+      (set! *fisher-man-dialogue-page-count* 1))
+
+    ;; Tutorial is complete, orb task is open, and Jak has at least 10 orbs.
+    ((>=
+       (the-as float
+         (send-event
+           *target*
+           'query
+           'pickup
+           (pickup-type money)))
+       10.0)
+
+      (set! (-> self dialogue-kind) 2)
+      (set! *fisher-man-dialogue-page-count* 7))
+
+    ;; Waiting for 10 precursor orbs.
+    (else
+      (set! (-> self dialogue-kind) 1)
+      (set! *fisher-man-dialogue-page-count* 3)))
+
+  (none))
+
+(defun fisher-man-dialogue-line
+  ((self fisher-man)
+   (line-index int))
+
+  (let ((index
+        (+ (* (-> self dialogue-page) 4)
+           line-index)))
+
+    (cond
+      ((or
+         (< (-> self dialogue-page) 0)
+         (>= (-> self dialogue-page)
+             *fisher-man-dialogue-page-count*)
+         (< line-index 0)
+         (>= line-index 4))
+        "")
+
+      ((= (-> self dialogue-kind) 0)
+        (-> *fisher-man-tutorial-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 2)
+        (-> *fisher-man-orb-complete-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 3)
+        (-> *fisher-man-completed-dialogue-lines* data index))
+
+      (else
+        (-> *fisher-man-orb-reminder-dialogue-lines* data index)))))
+
+(defun fisher-man-draw-dialogue-text
+  ((text string)
+   (text-x-pos int)
+   (text-y-pos int))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+
+  (pc-encode-utf8-string
+    matt-str
+    *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+
+    ;; Keep the attractive 24-pixel font selected by `large`,
+    ;; but scale the entire render down properly.
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color white)
+      (font-flags large shadow middle kerning)
+      0.50))
+
+  (none))
+
+(defun fisher-man-dialogue-total-length
+  ((self fisher-man))
+
+  (+
+    (length (fisher-man-dialogue-line self 0))
+    (length (fisher-man-dialogue-line self 1))
+    (length (fisher-man-dialogue-line self 2))
+    (length (fisher-man-dialogue-line self 3))))
+
+(defun fisher-man-visible-dialogue-line!
+  ((self fisher-man)
+   (line-index int)
+   (dst string))
+
+  (let* ((line-0
+          (fisher-man-dialogue-line
+            self
+            0))
+
+         (line-1
+          (fisher-man-dialogue-line
+            self
+            1))
+
+         (line-2
+          (fisher-man-dialogue-line
+            self
+            2))
+
+         (line
+          (fisher-man-dialogue-line
+            self
+            line-index))
+
+         (line-start
+          (cond
+            ((= line-index 0)
+              0)
+
+            ((= line-index 1)
+              (length line-0))
+
+            ((= line-index 2)
+              (+
+                (length line-0)
+                (length line-1)))
+
+            (else
+              (+
+                (length line-0)
+                (length line-1)
+                (length line-2)))))
+
+         (visible-count
+          (-
+            (-> self dialogue-char-count)
+            line-start))
+
+         (line-length
+          (length line)))
+
+    (cond
+      ((<= visible-count 0)
+        (clear dst))
+
+      ((>= visible-count line-length)
+        (copy-string<-string dst line))
+
+      (else
+        (substring!
+          dst
+          line
+          0
+          visible-count)))))
+
+(defun fisher-man-release-jak!
+  ((self fisher-man))
+
+  (when
+    (and
+      (-> self dialogue-grabbed?)
+      *target*)
+
+    (process-release? *target*))
+
+  (set!
+    (-> self dialogue-grabbed?)
+    #f)
+
+  (none))
+
+(defun fisher-man-near-jak?
+  ((self fisher-man))
+
+  (and
+    *target*
+    (<=
+      (vector-vector-distance
+        (-> self root trans)
+        (target-pos 0))
+      (meters 8.5))))
+
+(defun fisher-man-draw-small-text
+  ((text string)
+   (text-x-pos int)
+   (text-y-pos int))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+
+  (pc-encode-utf8-string
+    matt-str
+    *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color white)
+      (font-flags large middle shadow kerning)
+      0.55))
+
+  (none))
+
+(defun fisher-man-draw-dialogue-box!
+  ((self fisher-man))
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+
+    ;; Outer border and inner panel at the bottom of the screen.
+    (draw-sprite2d-xy
+      buf
+      34
+      139
+      444
+      80
+      (new 'static 'rgba
+        :r #x04
+        :g #x08
+        :b #x0c
+        :a #xe8))
+
+    (draw-sprite2d-xy
+      buf
+      39
+      144
+      434
+      70
+      (new 'static 'rgba
+        :r #x14
+        :g #x28
+        :b #x34
+        :a #xd8)))
+
+  ;; Small dialogue text.
+  (fisher-man-draw-dialogue-text
+    (fisher-man-visible-dialogue-line!
+      self
+      0
+      *fisher-man-dialogue-buffer-0*)
+    256
+    153)
+
+  (fisher-man-draw-dialogue-text
+    (fisher-man-visible-dialogue-line!
+      self
+      1
+      *fisher-man-dialogue-buffer-1*)
+    256
+    168)
+
+  (fisher-man-draw-dialogue-text
+    (fisher-man-visible-dialogue-line!
+      self
+      2
+      *fisher-man-dialogue-buffer-2*)
+    256
+    183)
+
+  (fisher-man-draw-dialogue-text
+    (fisher-man-visible-dialogue-line!
+      self
+      3
+      *fisher-man-dialogue-buffer-3*)
+    256
+    198)
+
+  ;; X advances/reveals dialogue. Show only the button icon.
+  (fisher-man-draw-small-text
+    "<PAD_X>"
+    446
+    205)
+
+  ;; Triangle still exits without completing anything.
+  (fisher-man-draw-small-text
+    "<PAD_TRIANGLE> EXIT"
+    421
+    114)
+
+  (none))
+
+(defun fisher-man-idle-interaction!
+  ((self fisher-man))
+
+  (let ((start-dialogue? #f))
+
+    (when
+      (and
+        (fisher-man-valid-dialogue?
+          (-> self dialogue-type))
+        (fisher-man-near-jak? self))
+
+      (fisher-man-draw-small-text
+        "PRESS <PAD_CIRCLE> TO TALK."
+        356
+        170)
+
+      (when
+        (cpad-pressed? 0 circle)
+
+        (cpad-clear! 0 circle)
+        (set! start-dialogue? #t)))
+
+    start-dialogue?))
+
+(defun fisher-man-initialize-collision!
+  ((self fisher-man))
+
+  ;; Exact collision layout used by the retail fisherman NPC.
+  (let ((shape
+        (new 'process
+          'collide-shape
+          self
+          (collide-list-enum hit-by-player))))
+
+    (let ((group
+          (new 'process
+            'collide-shape-prim-group
+            shape
+            (the-as uint 2)
+            0)))
+
+      (set! (-> group prim-core collide-as) (collide-kind enemy))
+      (set! (-> group collide-with) (collide-kind target))
+      (set! (-> group prim-core action) (collide-action solid))
+      (set! (-> group prim-core offense) (collide-offense indestructible))
+
+      (set-vector!
+        (-> group local-sphere)
+        6144.0
+        0.0
+        4096.0
+        14336.0)
+
+      (set-root-prim! shape group)
+
+      ;; Retail fisherman body sphere, attached to joint 3.
+      (let ((body
+            (new 'process
+              'collide-shape-prim-sphere
+              shape
+              (the-as uint 0))))
+
+        (set! (-> body prim-core collide-as) (collide-kind enemy))
+        (set! (-> body collide-with) (collide-kind target))
+        (set! (-> body prim-core action) (collide-action solid))
+        (set! (-> body prim-core offense) (collide-offense indestructible))
+        (set! (-> body transform-index) 3)
+
+        (set-vector!
+          (-> body local-sphere)
+          0.0
+          0.0
+          0.0
+          6553.6)
+
+        (append-prim group body))
+
+      ;; Retail fisherman upper sphere, attached to joint 57.
+      (let ((upper
+            (new 'process
+              'collide-shape-prim-sphere
+              shape
+              (the-as uint 0))))
+
+        (set! (-> upper prim-core collide-as) (collide-kind enemy))
+        (set! (-> upper collide-with) (collide-kind target))
+        (set! (-> upper prim-core action) (collide-action solid))
+        (set! (-> upper prim-core offense) (collide-offense indestructible))
+        (set! (-> upper transform-index) 57)
+
+        (set-vector!
+          (-> upper local-sphere)
+          0.0
+          4096.0
+          0.0
+          4096.0)
+
+        (append-prim group upper)))
+
+    (set!
+      (-> shape nav-radius)
+      (* 0.75
+        (-> shape root-prim local-sphere w)))
+
+    (backup-collide-with-as shape)
+
+    (set! (-> self root) shape))
+
+  (none))
+
+(defun fisher-man-initialize-taskable!
+  ((self fisher-man))
+
+  (stack-size-set! (-> self main-thread) 512)
+
+  (set! (-> self tasks) *fisher-man-tasks*)
+  (set! (-> self will-talk) #f)
+  (set! (-> self bounce-away) #f)
+  (set! (-> self skippable) #f)
+  (set! (-> self blend-on-exit) (the-as art-joint-anim #f))
+  (set! (-> self camera) (the-as handle #f))
+  (set! (-> self cell-x) (the-as handle #f))
+  (set! (-> self cell-for-task) (game-task none))
+
+  (set! (-> self center-joint-index) 3)
+  (set! (-> self cam-joint-index) 49)
+  (set! (-> self neck-joint-index) 33)
+
+  (set! (-> self cur-trans-hook) nothing)
+  (set! (-> self been-kicked) #f)
+
+  (set! (-> self sound-flava) (music-flava default))
+  (set! (-> self have-flava) #f)
+  (set! (-> self music) #f)
+  (set! (-> self have-music) #f)
+
+  (ambient-control-method-9 (-> self ambient))
+
+  (none))
+
+(defmethod should-display?
+  ((this fisher-man))
+
+  #t)
+
+(defmethod process-taskable-method-38
+  ((this fisher-man))
+
+  (none))
+
+(defmethod process-taskable-method-43
+  ((this fisher-man))
+
+  #f)
+
+(defbehavior fisher-man-init-by-other fisher-man ((spawn-pos vector) (dialogue-type int) (level-name symbol))
+  
+  (set! (-> self dialogue-type) dialogue-type)
+  (set! (-> self dialogue-kind) 0)
+  (set! (-> self dialogue-page) 0)
+  (set! (-> self level-name) level-name)
+
+  (set! (-> self dialogue-char-count) 0)
+  (set! (-> self dialogue-char-timer) 0.0)
+  (set! (-> self dialogue-grabbed?) #f)
+
+  (logclear! (-> self mask) (process-mask actor-pause))
+
+  (fisher-man-initialize-taskable! self)
+  (fisher-man-initialize-collision! self)
+
+  (initialize-skeleton
+    self
+    *fisher-sgc*
+    '())
+
+  (logior!
+    (-> self skel status)
+    (janim-status eye))
+
+  (#when PC_PORT
+    (set!
+      (-> self skel postbind-function)
+      process-drawable-joint-callback-pc))
+
+  (set! (-> self draw origin-joint-index) (the-as uint 3))
+  (set! (-> self draw shadow-joint-index) (the-as uint 3))
+  (set! (-> self center-joint-index) 3)
+  (set! (-> self cam-joint-index) 49)
+  (set! (-> self neck-joint-index) 33)
+  (set! (-> self draw-bounds-y-offset) (-> self draw bounds y))
+  (set! (-> self root pause-adjust-distance) -122880.0)
+  (set! (-> self shadow-backup) (-> self draw shadow))
+
+  (logclear!
+    (-> self draw status)
+    (draw-status hidden))
+
+  (set! (-> self root trans quad) (-> spawn-pos quad))
+  (set! (-> self root trans w) 1.0)
+
+  (set! (-> self draw force-lod) 0)
+
+  (ja
+    :group! fisher-idle-more-often-ja)
+
+  (transform-post)
+
+  (go idle))
+
+(defstate idle (fisher-man)
+
+  :enter
+  (behavior ()
+    ;; This is also reached after Triangle exits dialogue.
+    (fisher-man-release-jak! self))
+
+  :code
+  (behavior ()
+    (loop
+      (when
+      (and *level* *target* (= (pause-allowed?) #t) (>= (vector-vector-distance (-> self root trans) (target-pos 0)) (meters 100)) (!= (-> (level-get-target-inside *level*) name) (-> self level-name)))
+
+        (fisher-man-release-jak! self)
+        (set! *fisher-man* #f)
+        (kill-by-name "fisher-man" *active-pool*)
+        )
+
+      ;; Play the common idle and check proximity/input every rendered frame.
+      (ja-no-eval
+        :group! fisher-idle-more-often-ja
+        :num! (seek!)
+        :frame-num 0.0)
+
+      (until
+        (ja-done? 0)
+
+        (when
+          (fisher-man-idle-interaction! self)
+
+          (go dialogue))
+
+        (suspend)
+
+        (ja
+          :num! (seek!)))
+
+      ;; Secondary fisherman idle.
+      (ja-no-eval
+        :group! fisher-idle-less-often-ja
+        :num! (seek!)
+        :frame-num 0.0)
+
+      (until
+        (ja-done? 0)
+
+        (when
+          (fisher-man-idle-interaction! self)
+
+          (go dialogue))
+
+        (suspend)
+
+        (ja
+          :num! (seek!)))))
+
+  :post transform-post)
+
+(defstate dialogue
+  (fisher-man)
+
+  :enter
+  (behavior ()
+    (fisher-man-select-dialogue! self)
+    (set! (-> self dialogue-page) 0)
+    (set! (-> self dialogue-char-count) 0)
+    (set! (-> self dialogue-char-timer) 0.0)
+    (set! (-> self dialogue-grabbed?) #f)
+
+    (when *target*
+      (process-grab? *target*)
+      (set! (-> self dialogue-grabbed?) #t))
+
+    ;; Keep the fisherman in his common idle while the box is open.
+    (ja-no-eval
+      :group! fisher-idle-more-often-ja
+      :num! (seek!)
+      :frame-num 0.0))
+
+  :exit
+  (behavior ()
+    (fisher-man-release-jak! self))
+
+  :code
+  (behavior ()
+    (loop
+      (when
+        (and
+          *level*
+          *target*
+          (= (pause-allowed?) #t)
+          (!=
+            (-> (level-get-target-inside *level*) name)
+            (-> self level-name))
+          (>=
+            (vector-vector-distance
+              (-> self root trans)
+              (target-pos 0))
+            (meters 100)))
+
+        (fisher-man-release-jak! self)
+        (set! *fisher-man* #f)
+        (kill-by-name "fisher-man" *active-pool*))
+
+      (fisher-man-draw-dialogue-box! self)
+
+      ;; Reveal one character every 0.025 seconds.
+      (+!
+        (-> self dialogue-char-timer)
+        (-> *display* seconds-per-frame))
+
+      (while
+        (and
+          (>= (-> self dialogue-char-timer) 0.025)
+          (<
+            (-> self dialogue-char-count)
+            (fisher-man-dialogue-total-length self)))
+
+        (-! (-> self dialogue-char-timer) 0.025)
+        (+! (-> self dialogue-char-count) 1))
+      ;; X first completes the current page's typewriter reveal. Once the
+      ;; page is fully visible, X advances to the next page.
+      (when
+        (cpad-pressed? 0 x)
+
+        (cpad-clear! 0 x)
+
+        (cond
+          ((<
+             (-> self dialogue-char-count)
+             (fisher-man-dialogue-total-length self))
+
+            (set!
+              (-> self dialogue-char-count)
+              (fisher-man-dialogue-total-length self))
+
+            (set! (-> self dialogue-char-timer) 0.0))
+
+          ((<
+             (-> self dialogue-page)
+             (- *fisher-man-dialogue-page-count* 1))
+
+            (+! (-> self dialogue-page) 1)
+            (set! (-> self dialogue-char-count) 0)
+            (set! (-> self dialogue-char-timer) 0.0))
+
+          ;; End of the initial tutorial.
+          ((= (-> self dialogue-kind) 0)
+            (close-specific-task!
+              (game-task fisher-game-tutorial)
+              (task-status need-introduction))
+
+            (auto-save-command
+              'auto-save
+              0
+              0
+              *default-pool*)
+
+            (go idle))
+
+          ;; End of the 10-orb reward dialogue.
+          ((= (-> self dialogue-kind) 2)
+            ;; Remove the 10 precursor orbs.
+            (send-event
+              *target*
+              'get-pickup
+              (pickup-type money)
+              -10.0)
+
+            ;; For fuel-cell pickups, the numeric argument is the
+            ;; game-task ID of the power cell, not a quantity. Award all
+            ;; four Geyser Rock cells so they are stored under that level.
+            (send-event
+              *target*
+              'get-pickup
+              (pickup-type fuel-cell)
+              (the float (game-task training-gimmie)))
+
+            (send-event
+              *target*
+              'get-pickup
+              (pickup-type fuel-cell)
+              (the float (game-task training-door)))
+
+            (send-event
+              *target*
+              'get-pickup
+              (pickup-type fuel-cell)
+              (the float (game-task training-climb)))
+
+            (send-event
+              *target*
+              'get-pickup
+              (pickup-type fuel-cell)
+              (the float (game-task training-buzzer)))
+
+            (close-specific-task!
+              (game-task fisher-game-tutorial-orbs)
+              (task-status need-introduction))
+
+            (auto-save-command
+              'auto-save
+              0
+              0
+              *default-pool*)
+
+            (go idle))
+
+          ;; Reminder dialogue simply closes.
+          (else
+            (go idle))))
+
+      ;; Triangle exits without completing the tutorial.
+      (when
+        (cpad-pressed? 0 triangle)
+
+        (cpad-clear! 0 triangle)
+        (go idle))
+
+      (suspend)
+
+      (ja
+        :num! (seek!))))
+
+  :post transform-post)
+
+(defun spawn-fisher-man
+  ((spawn-pos vector)
+   (dialogue-type int)
+   (level-name symbol))
+
+  (when *fisher-man*
+    (set! *fisher-man* #f)
+    (kill-by-name "fisher-man" *active-pool*)
+    )
+
+  (set!
+    *fisher-man*
+    (process-spawn
+      fisher-man
+      spawn-pos
+      dialogue-type
+      level-name
+      :name "fisher-man"
+      :to *active-pool*))
+
+  (none))
+
+(defun kill-fisher-man ()
+  ;; Never leave Jak grabbed if this helper is called during dialogue.
+  (when
+    (and
+      *fisher-man*
+      (-> *fisher-man* 0 dialogue-grabbed?))
+
+    (process-release? *target*))
+
+  (when *fisher-man*
+    (kill-by-name "fisher-man" *active-pool*))
+
+  (set! *fisher-man* #f)
+
+  (none))

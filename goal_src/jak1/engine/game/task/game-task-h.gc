@@ -124,4 +124,6 @@
   (plunger-lurker-hit 113)
   (leaving-misty 114)
   (assistant-village3 115)
-  (max 116))
+  (fisher-game-tutorial 116)
+  (fisher-game-tutorial-orbs 117)
+  (max 118))

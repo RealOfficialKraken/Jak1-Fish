@@ -7,6 +7,8 @@
 ;; Compile this file before every other fishing source file.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define *fisher-level-cap* 20)
+
 (define *fisher-line-hp-max* 100.0)
 
 (define *fisher-line-hp* 100.0)
@@ -17,7 +19,7 @@
 
 (define *singlefish-session-active?* #f)
 
-(define *fisher-in-debug?* #t)
+(define *fisher-in-debug?* #f)
 
 (define *fisher-underwater-haze-override?* #f)
 
@@ -142,69 +144,37 @@
   (:state-methods
     main-menu-fish-swim))
 
-(deftype swimmer-pontoon (rigid-body-platform)
-  ((anchor-point vector :inline)
-   (visual       (pointer manipy)))
+(defskelgroup *fisher-sgc*
+  fisher
+  fisher-lod0-jg
+  fisher-idle-more-often-ja
+  ((fisher-lod0-mg (meters 20)) (fisher-lod1-mg (meters 40)) (fisher-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 -6 0 14)
+  :shadow fisher-shadow-mg)
+
+(deftype fisher-man (process-taskable)
+  ((dialogue-type         int)
+   (dialogue-kind         int)
+   (dialogue-page         int)
+   (level-name            symbol)
+   (dialogue-char-count   int)
+   (dialogue-char-timer   float)
+   (dialogue-grabbed?     symbol))
   (:states
-    swimmer-pontoon-die)
-  (:state-methods
-    swimmer-pontoon-float))
+    idle
+    dialogue))
+
+(define *fisher-man* (the (pointer fisher-man) #f))
+
+(deftype swimmer-pontoon (process-drawable)
+  ((pontoon-type int))
+  (:states
+    swimmer-pontoon-idle
+    swimmer-pontoon-die))
 
 (deftype swimmer-pontoonfive (swimmer-pontoon) ())
 
 (deftype swimmer-pontoonten (swimmer-pontoon) ())
-
-(define *swimmer-pontoonfive-constants*
-  (new 'static
-    'rigid-body-platform-constants
-    :drag-factor 4.0
-    :buoyancy-factor 3.0
-    :max-buoyancy-depth (meters 3)
-    :gravity-factor 1.0
-    :gravity (meters 80)
-    :player-weight (meters 35)
-    :player-bonk-factor 1.0
-    :player-dive-factor 1.0
-    :player-force-distance (meters 1000)
-    :player-force-clamp (meters 1000000)
-    :player-force-timeout (seconds 0.1)
-    :explosion-force (meters 1000)
-    :linear-damping 0.98
-    :angular-damping 0.98
-    :control-point-count 4
-    :mass 2.0
-    :inertial-tensor-x (meters 2.5)
-    :inertial-tensor-y (meters 2)
-    :inertial-tensor-z (meters 3.2)
-    :idle-distance (meters 90)
-    :platform #t
-    :sound-name "pontoonten"))
-
-(define *swimmer-pontoonten-constants*
-  (new 'static
-    'rigid-body-platform-constants
-    :drag-factor 4.0
-    :buoyancy-factor 3.0
-    :max-buoyancy-depth (meters 3)
-    :gravity-factor 1.0
-    :gravity (meters 80)
-    :player-weight (meters 35)
-    :player-bonk-factor 1.0
-    :player-dive-factor 1.0
-    :player-force-distance (meters 1000)
-    :player-force-clamp (meters 1000000)
-    :player-force-timeout (seconds 0.1)
-    :explosion-force (meters 1000)
-    :linear-damping 0.98
-    :angular-damping 0.95
-    :control-point-count 4
-    :mass 4.0
-    :inertial-tensor-x (meters 5)
-    :inertial-tensor-y (meters 2)
-    :inertial-tensor-z (meters 3.2)
-    :idle-distance (meters 90)
-    :platform #t
-    :sound-name "pontoonten"))
 
 (define matt-str (new 'global 'string 2048 (the-as string #f)))
 
@@ -299,10 +269,14 @@
     (caught-orb-value            int)
     (caught-fish-species         int)
     (caught-fish-suffix          int)
+    (caught-fish-level           int)
+    (caught-fish-xp              int)
     (catch-transition-time       float)
     (catch-menu-offset           float)
     (sandover-eco-count          int)
     (sandover-largemouth-count   int)
+    (fish-level-min              int)
+    (fish-level-max              int)
     (fish-species-0              int)
     (fish-species-1              int)
     (fish-species-2              int)
@@ -325,6 +299,28 @@
     (fish-species-19              int)
     (fish-species-20              int)
     (fish-species-21              int)
+    (fish-level-0                int)
+    (fish-level-1                int)
+    (fish-level-2                int)
+    (fish-level-3                int)
+    (fish-level-4                int)
+    (fish-level-5                int)
+    (fish-level-6                int)
+    (fish-level-7                int)
+    (fish-level-8                int)
+    (fish-level-9                int)
+    (fish-level-10                int)
+    (fish-level-11                int)
+    (fish-level-12                int)
+    (fish-level-13                int)
+    (fish-level-14                int)
+    (fish-level-15                int)
+    (fish-level-16                int)
+    (fish-level-17                int)
+    (fish-level-18                int)
+    (fish-level-19                int)
+    (fish-level-20                int)
+    (fish-level-21                int)
     (fish-suffix-0               int)
     (fish-suffix-1               int)
     (fish-suffix-2               int)
@@ -347,6 +343,28 @@
     (fish-suffix-19              int)
     (fish-suffix-20              int)
     (fish-suffix-21              int)
+    (fish-weight-tenths-0       int)
+    (fish-weight-tenths-1       int)
+    (fish-weight-tenths-2       int)
+    (fish-weight-tenths-3       int)
+    (fish-weight-tenths-4       int)
+    (fish-weight-tenths-5       int)
+    (fish-weight-tenths-6       int)
+    (fish-weight-tenths-7       int)
+    (fish-weight-tenths-8       int)
+    (fish-weight-tenths-9       int)
+    (fish-weight-tenths-10       int)
+    (fish-weight-tenths-11       int)
+    (fish-weight-tenths-12       int)
+    (fish-weight-tenths-13       int)
+    (fish-weight-tenths-14       int)
+    (fish-weight-tenths-15       int)
+    (fish-weight-tenths-16       int)
+    (fish-weight-tenths-17       int)
+    (fish-weight-tenths-18       int)
+    (fish-weight-tenths-19       int)
+    (fish-weight-tenths-20       int)
+    (fish-weight-tenths-21       int)
     (fish-distance-0             float)
     (fish-lane-0                 float)
     (fish-depth-0                float)
@@ -555,6 +573,7 @@
     (color-name                  string)
     (tier                        symbol)
     (prefix                      symbol)
+    (level                       int)
     (weight-tenths               int)
     (orb-value                   int)
     (base-orb-value              int)
@@ -617,6 +636,20 @@
 ;; Cross-file function declarations
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defun-extern draw-fisher-large-font-scaled string int int float none)
+(defun-extern fisher-add-fishing-xp! int int)
+(defun-extern fisher-accepted-xp-amount int int)
+(defun-extern fisher-start-xp-gain-animation! vector int none)
+(defun-extern fisher-update-xp-gain-animation! none)
+(defun-extern fisher-calculate-catch-xp int int int)
+(defun-extern fisher-current-level int)
+(defun-extern fisher-draw-xp-meter! none)
+(defun-extern fisher-level-fight-multiplier int int float)
+(defun-extern fisher-level-worth-multiplier int int float)
+(defun-extern fisher-xp-level-difference-multiplier int int float)
+(defun-extern fisher-xp-suffix-multiplier int float)
+(defun-extern fisher-roll-level-in-range int int int)
+(defun-extern fisher-xp-needed-for-level int int)
 (defun-extern draw-fisher-small-text string int int none)
 (defun-extern draw-mod-menu-text-custom string int int symbol symbol symbol none)
 (defun-extern fisher-apply-slot-appearance! fisher-game int manipy symbol none)
@@ -627,6 +660,10 @@
 (defun-extern fisher-finish-manipy-catch! fisher-game int none)
 (defun-extern fisher-fish-cooldown fisher-game int float)
 (defun-extern fisher-fish-direction fisher-game int float)
+(defun-extern fisher-fish-level fisher-game int int)
+(defun-extern fisher-fish-weight-tenths fisher-game int int)
+(defun-extern fisher-fight-damage-per-second fisher-game int float)
+(defun-extern fisher-fish-weight-damage-multiplier fisher-game int float)
 (defun-extern fisher-fish-distance fisher-game int float)
 (defun-extern fisher-fish-pointer fisher-game int (pointer manipy))
 (defun-extern fisher-fish-position! fisher-game int vector vector)
@@ -639,10 +676,14 @@
 (defun-extern fisher-move-manipy-toward! manipy vector float float)
 (defun-extern fisher-play-fish-win-sound! none)
 (defun-extern fisher-randomize-fish-slot! fisher-game int none)
+(defun-extern fisher-randomize-fish-level-and-weight! fisher-game int none)
+(defun-extern fisher-roll-fish-weight-tenths fisher-game int int)
 (defun-extern fisher-refill-missing-fish! fisher-game none)
 (defun-extern fisher-remove-lure-snake! fisher-game none)
 (defun-extern fisher-set-fish-cooldown! fisher-game int float none)
 (defun-extern fisher-set-fish-direction! fisher-game int float none)
+(defun-extern fisher-set-fish-level! fisher-game int int none)
+(defun-extern fisher-set-fish-weight-tenths! fisher-game int int none)
 (defun-extern fisher-set-fish-distance! fisher-game int float none)
 (defun-extern fisher-set-fish-pointer! fisher-game int (pointer manipy) none)
 (defun-extern fisher-set-fish-species! fisher-game int int none)
@@ -663,7 +704,6 @@
 (defun-extern main-menu-maintain-camera! none)
 (defun-extern main-menu-prepare-camera! none)
 (defun-extern main-menu-request-new-game-transition! none)
-(defun-extern main-menu-restore-gameplay-settings! none)
 (defun-extern main-menu-spawn-fish-agent! none)
 (defun-extern main-menu-start-new-game-transition! none)
 (defun-extern main-menu-update! none)
@@ -678,6 +718,7 @@
 (defun-extern maintain-training-pontoon! none)
 (defun-extern revert-scene-camera none)
 (defun-extern singlefish-start-session! fisher-game none)
+(defun-extern singlefish-prefix->suffix singlefish-base int)
 (defun-extern singlefish-vector-add-safe! vector vector vector vector)
 (defun-extern singlefish-vector-add-scaled-safe! vector vector vector float vector)
 (defun-extern singlefish-vector-copy-safe! vector vector vector)
@@ -687,6 +728,7 @@
 (defun-extern singlefish-vector-reset-safe! vector vector)
 (defun-extern singlefish-vector-scale-safe! vector vector float vector)
 (defun-extern singlefish-vector-sub-safe! vector vector vector vector)
+(defun-extern spawn-fisher-man vector int symbol none)
 (defun-extern spawn-fisher-game int vector vector vector float float float none)
 (defun-extern spawn-pontoon-swimmer vector int float none)
 (defun-extern turn-to-scene-camera vector vector none)

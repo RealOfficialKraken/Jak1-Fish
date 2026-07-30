@@ -6,6 +6,146 @@
 ;; Engine hooks and dialogue compatibility globals/functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define *fisher-active-location-id* -1)
+
+(defun fisher-despawn-current-area! ()
+  (when *fisher-game*
+    (set! *singlefish-session-active?* #f)
+    (+! *singlefish-session-id* 1)
+
+    (kill-by-name
+      "fisher-game"
+      *active-pool*)
+
+    (set!
+      *fisher-game*
+      (the-as (pointer fisher-game) #f)))
+
+  (set! *fisher-active-location-id* -1)
+
+  (none))
+
+(defun fisher-spawn-area-for-level! ((level-name symbol))
+  (cond
+    ;; Sandover Village.
+    ((= level-name 'village1)
+      (spawn-fisher-game
+        0
+        (new 'static 'vector
+          :x (meters -31.6360)
+          :y (meters 2.3620)
+          :z (meters 91.6117)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters -31.6360)
+          :y (meters 2.3620)
+          :z (meters 91.6117)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters -22.4873)
+          :y (meters 9.6994)
+          :z (meters 75.4411)
+          :w 1.0)
+        (meters 0)
+        (degrees 0)
+        (degrees 90))
+
+      (set! *fisher-active-location-id* 0))
+
+    ;; Forbidden Jungle.
+    ((= level-name 'jungle)
+      (spawn-fisher-game
+        1
+        (new 'static 'vector
+          :x (meters 473.7614)
+          :y (meters 1.6762)
+          :z (meters -224.9244)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 478.2005)
+          :y (meters 2.4101)
+          :z (meters -227.9264)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 492.6069)
+          :y (meters 7.3909)
+          :z (meters -238.3063)
+          :w 1.0)
+        (meters 0)
+        (degrees -35)
+        (degrees 55))
+
+      (set! *fisher-active-location-id* 1))
+
+    ;; Training lagoon.
+    ((= level-name 'training)
+      (spawn-fisher-game
+        2
+        (new 'static 'vector
+          :x (meters -1332.0715)
+          :y (meters 1.1072)
+          :z (meters 922.7199)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters -1331.3082)
+          :y (meters 1.1357)
+          :z (meters 925.2125)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters -1341.0826)
+          :y (meters 4.2468)
+          :z (meters 935.4356)
+          :w 1.0)
+        (meters 0.3323)
+        (degrees -35.3237)
+        (degrees 234))
+
+      (set! *fisher-active-location-id* 2)))
+
+  (none))
+
+(defun maintain-fisher-game! ()
+  (let ((inside
+        (when *level*
+          (level-get-target-inside *level*)))
+
+      (wanted-location-id
+        -1))
+
+    (when inside
+      (cond
+        ((= (-> inside name) 'village1)
+          (set! wanted-location-id 0))
+
+        ((= (-> inside name) 'jungle)
+          (set! wanted-location-id 1))
+
+        ((= (-> inside name) 'training)
+          (set! wanted-location-id 2))))
+
+    ;; Remove the process when Jak leaves a supported level or enters
+    ;; a different fishing level.
+    (when
+      (and
+        *fisher-game*
+        (!=
+          *fisher-active-location-id*
+          wanted-location-id))
+
+      (fisher-despawn-current-area!))
+
+    ;; Spawn the fishing process for Jak's current level.
+    (when
+      (and
+        (not *fisher-game*)
+        inside
+        (>= wanted-location-id 0))
+
+      (fisher-spawn-area-for-level!
+        (-> inside name))))
+
+  (none))
+
 (defun runs-every-frame ()
   ;;(increase-power-cell-by-one) This is a call to increase-power-cell-by-one defined in mod-common-functions.gc
   (if *show-input-display* (input-display-on) (input-display-off))
@@ -22,7 +162,49 @@
       (= (paused?) #f)
     )
     (maintain-training-pontoon!)
+    (maintain-fisher-game!)
   )
+(when
+  (and
+    *level*
+    *target*
+    (= (pause-allowed?) #t)
+    (= (paused?) #f))
+
+  (let ((current-level
+        (-> (level-get-target-inside *level*) name)))
+    (when
+      (and
+        *fisher-man*
+        (!=
+          current-level
+          (-> *fisher-man* 0 level-name)))
+
+      (kill-by-name "fisher-man" *active-pool*)
+      (set! *fisher-man* #f))
+    (when
+      (not *fisher-man*)
+
+      (cond
+        ((= current-level 'training)
+          (spawn-fisher-man
+            (new 'static 'vector
+              :x (meters -1307.8538)
+              :y (meters 7.4157)
+              :z (meters 1021.6666)
+              :w 1.0)
+            0
+            'training))
+
+        ((= current-level 'village1)
+          (spawn-fisher-man
+            (new 'static 'vector
+              :x (meters -56.7375)
+              :y (meters 9.4762)
+              :z (meters 54.4226)
+              :w 1.0)
+            1
+            'village1))))))
 
   ;; ensure orb-placer is spawned/killed as requested, debug menu is updated
   (when *debug-segment* (orb-placer-maintenance))
@@ -78,73 +260,17 @@
   (none))
 
 (defun runs-on-jak-spawn ()
-  (spawn-fisher-game
-    0
-
-    (new 'static 'vector :x (meters -31.6360) :y (meters 2.3620) :z (meters 91.6117) :w 1.0)
-
-    (new 'static 'vector :x (meters -31.6360) :y (meters 2.3620) :z (meters 91.6117) :w 1.0)
-
-    (new 'static 'vector :x (meters -22.4873) :y (meters 9.6994) :z (meters 75.4411) :w 1.0)
-
-    (meters 0)
-    (degrees 0)
-    (degrees 90))
-
-  (spawn-fisher-game
-    1
-
-    (new 'static 'vector :x (meters 473.7614) :y (meters 1.6762) :z (meters -224.9244) :w 1.0)
-
-    (new 'static 'vector :x (meters 478.2005) :y (meters 2.4101) :z (meters -227.9264) :w 1.0)
-
-    (new 'static 'vector :x (meters 492.6069) :y (meters 7.3909) :z (meters -238.3063) :w 1.0)
-
-    (meters 0)
-    (degrees -35)
-    (degrees 55))
-
-  ;; Training lagoon fishing area.
-  (spawn-fisher-game
-    2
-
-    ;; Net / interaction point.
-    (new 'static 'vector
-      :x (meters -1332.0715)
-      :y (meters 1.1072)
-      :z (meters 922.7199)
-      :w 1.0)
-
-    ;; Target/Jak position while fishing.
-    (new 'static 'vector
-      :x (meters -1331.3082)
-      :y (meters 1.1357)
-      :z (meters 925.2125)
-      :w 1.0)
-
-    ;; Camera position.
-    (new 'static 'vector
-      :x (meters -1341.0826)
-      :y (meters 4.2468)
-      :z (meters 935.4356)
-      :w 1.0)
-
-    ;; Nearby water surface.
-    (meters 0.3323)
-
-    ;; Derived from the net-to-camera direction.
-    (degrees -35.3237)
-
-    ;; Fishing field is perpendicular to the camera axis.
-    (degrees 234))
-
+  ;; The every-frame level watcher owns spawning. Calling it here simply
+  ;; makes the correct area appear immediately when this hook does fire.
+  (maintain-fisher-game!)
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
   (case death-event
-    (('dying) (set! *singlefish-session-active?* #f) (+! *singlefish-session-id* 1))
+    (('dying) (set! *singlefish-session-active?* #f) (+! *singlefish-session-id* 1)
+    )
     (('blackout)
-      (kill-by-name "fisher-game" *active-pool*)
+      (fisher-despawn-current-area!)
   ))
   (none))
 

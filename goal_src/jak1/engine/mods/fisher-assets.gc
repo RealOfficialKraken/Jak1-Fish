@@ -203,6 +203,26 @@
 
   (none))
 
+(defun draw-fisher-large-font-scaled ((text string) (text-x-pos int) (text-y-pos int) (text-scale float))
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str text)
+  (pc-encode-utf8-string
+    matt-str
+    *pc-encoded-matt-str*)
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color white)
+      (font-flags large middle shadow kerning)
+      text-scale))
+  (none))
+
 (defun singlefish-vector-reset-safe! ((dst vector)) (set! (-> dst x) 0.0) (set! (-> dst y) 0.0) (set! (-> dst z) 0.0) (set! (-> dst w) 1.0) dst)
 
 (defun singlefish-vector-copy-safe! ((dst vector) (src vector))

@@ -202,6 +202,44 @@
 ;; Task Control Definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define *fisher-man-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+
+      (new 'static
+        'task-cstage
+        :game-task (game-task fisher-game-tutorial)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-man-orb-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+
+      (new 'static
+        'task-cstage
+        :game-task (game-task fisher-game-tutorial-orbs)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
 ;; tasks for assistant (note: keira)
 (define *assistant-tasks*
   (new 'static
@@ -4963,7 +5001,11 @@
                               :flags (task-flags has-entity)
                               :condition
                               (lambda :behavior process-taskable ((arg0 task-control))
-                                #t)))))))
+                                #t))))
+               ;; Task 116
+               '*fisher-man-tasks*
+               ;; Task 117
+               '*fisher-man-orb-tasks*)))
 
 (defun task-control-reset ((arg0 symbol))
   "Reset all task controls and set their current stage"

@@ -214,6 +214,7 @@
      (set-time! (-> this continue-time))
      (set-time! (-> this death-time))
      (set-time! (-> this hit-time))
+     (close-specific-task! (game-task intro) (task-status need-resolution))
      (dotimes (v1-50 (the int (game-task max))) ;; changed from hard-coded 116 to (game-task max) mod-base-change
        (set! (-> this fuel-cell-time 0) 0)
        (nop!))
