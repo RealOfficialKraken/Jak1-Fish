@@ -2167,19 +2167,19 @@
     :type string
 
     ;; Page 0
-    "YADIDIT"
+    "YADIDIT!"
     ""
     ""
     ""
 
     ;; Page 1
-    "YE CAUGHT ME 10 PRECURSOR ORBS"
+    "YE GOT 10 PRECURSOR ORBS!"
     ""
     ""
     ""
 
     ;; Page 2
-    "TAKE THESE LAD."
+    "TAKE THESE POWERCELLS, LAD."
     "THEY BE THE ONLY ONES I HAVE"
     ""
     ""
@@ -2192,8 +2192,8 @@
 
     ;; Page 4
     "I'LL BE DOIN SOME FISHIN' AS WELL"
-    "BUT YOU BE NOT GETTIN THE CELLS"
-    "WITHOUT A PRICE"
+    "YOU'LL BE ABLE TO FIND ME IN ANY MAJOR AREA"
+    ""
     ""
 
     ;; Page 5

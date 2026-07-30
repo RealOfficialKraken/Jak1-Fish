@@ -193,14 +193,19 @@
   (none))
 
 (defun main-menu-restore-time-of-day! ()
-  (when
-    (and
-      *time-of-day-proc*
-      *main-menu-time-frozen?*)
+  (when *time-of-day-proc*
+    (let ((resume-ratio
+          (if
+            (> *main-menu-saved-time-ratio* 0.0)
+            *main-menu-saved-time-ratio*
+            (if *time-of-day-fast* 18000.0 300.0))))
 
-    (set!
-      (-> *time-of-day-proc* 0 time-ratio)
-      *main-menu-saved-time-ratio*)
+      ;; Jak 1 time-of-day-proc only uses time-ratio. Restore the saved
+      ;; gameplay rate, or the engine's normal ticking rate if the saved
+      ;; value was already zero when the menu was entered.
+      (set!
+        (-> *time-of-day-proc* 0 time-ratio)
+        resume-ratio))
 
     (set! *main-menu-time-frozen?* #f))
 
@@ -215,7 +220,10 @@
 
           (set!
             *main-menu-saved-time-ratio*
-            (-> *time-of-day-proc* 0 time-ratio))
+            (if
+              (> (-> *time-of-day-proc* 0 time-ratio) 0.0)
+              (-> *time-of-day-proc* 0 time-ratio)
+              (if *time-of-day-fast* 18000.0 300.0)))
 
           (set-time-of-day 8.1)
 
@@ -667,8 +675,10 @@
         bubble-pos
         bubble-offset)
 
+      ;; Keep menu bubbles in world space too. Part 3574 uses
+      ;; birth-func-camera-orient, so each 3D billboard faces the camera.
       (launch-particles
-        :system *sp-particle-system-2d*
+        :system *sp-particle-system-3d*
         (-> *part-id-table* 3574)
         bubble-pos))
 

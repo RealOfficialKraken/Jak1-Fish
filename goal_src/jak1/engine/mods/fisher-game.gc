@@ -6,6 +6,26 @@
 ;; Core fishing minigame, lure, casting, reeling, catches, fish behavior, camera and UI
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Underwater fishing background curtain colors
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define *fisher-background-cloud-visible?* #f)
+
+(define *fisher-curtain-color-0a* (new 'static 'rgba :r #x1c :g #x70 :b #x8c :a #xff))
+(define *fisher-curtain-color-0b* (new 'static 'rgba :r #x20 :g #x7a :b #x94 :a #xff))
+(define *fisher-curtain-color-1a* (new 'static 'rgba :r #x16 :g #x60 :b #x80 :a #xff))
+(define *fisher-curtain-color-1b* (new 'static 'rgba :r #x1a :g #x6a :b #x88 :a #xff))
+(define *fisher-curtain-color-2a* (new 'static 'rgba :r #x10 :g #x52 :b #x74 :a #xff))
+(define *fisher-curtain-color-2b* (new 'static 'rgba :r #x14 :g #x5c :b #x7c :a #xff))
+(define *fisher-curtain-color-3a* (new 'static 'rgba :r #x0c :g #x44 :b #x66 :a #xff))
+(define *fisher-curtain-color-3b* (new 'static 'rgba :r #x10 :g #x4e :b #x6e :a #xff))
+(define *fisher-curtain-color-4a* (new 'static 'rgba :r #x09 :g #x36 :b #x58 :a #xff))
+(define *fisher-curtain-color-4b* (new 'static 'rgba :r #x0c :g #x40 :b #x60 :a #xff))
+(define *fisher-curtain-color-5a* (new 'static 'rgba :r #x06 :g #x28 :b #x48 :a #xff))
+(define *fisher-curtain-color-5b* (new 'static 'rgba :r #x09 :g #x30 :b #x50 :a #xff))
+
 (defun spawn-fisher-net-at ((pos vector))
   (let ((net
         (manipy-spawn
@@ -180,6 +200,8 @@
   (set! (-> self underwater-wave-time) 0.0)
 
   (set! (-> self background-mist-time) 0.0)
+
+  (set! (-> self background-curtain-phase) 0.0)
 
   (set! (-> self hooked-fish) #f)
   (set! (-> self fish-state) 'free)
@@ -1185,7 +1207,7 @@
 
     (set! (-> spray-pos w) 1.0)
 
-    (launch-particles :system *sp-particle-system-2d* (-> *part-id-table* 3571) spray-pos)
+    (launch-particles :system *sp-particle-system-3d* (-> *part-id-table* 3571) spray-pos)
   )
 
   (none)
@@ -1313,48 +1335,156 @@
 
   (none))
 
+(defun fisher-background-cloud-particle-update
+  ((system sparticle-system)
+   (particle sparticle-cpuinfo)
+   (render-data pointer))
+
+  (let* ((dt
+          (-> *display* seconds-per-frame))
+
+      (age
+        (+ (-> particle omega) dt))
+
+      ;; Particle timers run at 300 ticks per second.
+      (remaining
+        (/ (the float (-> particle timer)) 300.0))
+
+      (fade-in
+        (fmax
+          0.0
+          (fmin
+            1.0
+            (/ age 2.5))))
+
+      (fade-out
+        (fmax
+          0.0
+          (fmin
+            1.0
+            (/ remaining 4.0))))
+
+      (visible-alpha
+        0.0))
+
+    (set! (-> particle omega) age)
+
+    ;; Keep the particle alive and updating above water, but suppress only
+    ;; its rendered alpha. Returning underwater reveals the existing field.
+    (when
+      *fisher-background-cloud-visible?*
+
+      (set!
+        visible-alpha
+        (*
+          (-> particle user-float)
+          (fmin fade-in fade-out))))
+
+    ;; 3D particles render from sprite-vec-data-3d, not from the
+    ;; CPU-side sprite copy. Write the alpha into the actual render record.
+    (set!
+      (->
+        (the-as sprite-vec-data-3d render-data)
+        r-g-b-a
+        w)
+      visible-alpha))
+
+  (none))
+
+(defun fisher-update-background-mist-color! ()
+  ;; Defpart 3572 stores its live RGB values in init-spec slots 7, 8 and 9.
+  (set!
+    (-> *part-id-table* 3572 init-specs 7 initial-valuef)
+    (fmax
+      0.0
+      (fmin 255.0 (-> *fisher-underwater-haze-color* x))))
+
+  (set!
+    (-> *part-id-table* 3572 init-specs 8 initial-valuef)
+    (fmax
+      0.0
+      (fmin 255.0 (-> *fisher-underwater-haze-color* y))))
+
+  (set!
+    (-> *part-id-table* 3572 init-specs 9 initial-valuef)
+    (fmax
+      0.0
+      (fmin 255.0 (-> *fisher-underwater-haze-color* z))))
+
+  (none))
+
 (defun fisher-launch-background-mist!
   ((self fisher-game))
 
-  (when
-    (and (-> self casted?) (-> self camera-underwater?))
-
-    (let ((particle-pos
+  (let ((background-forward
           (new 'stack-no-clear 'vector))
 
-        (side-axis (new 'stack-no-clear 'vector))
+        (background-side
+          (new 'stack-no-clear 'vector)))
 
-        (forward-distance (rand-vu-float-range (meters 5.0) (meters 55.0)))
+      (vector-copy!
+        background-forward
+        (-> self camera-axis))
 
-        (side-distance (rand-vu-float-range (meters -28.0) (meters 28.0)))
+      (set! (-> background-forward y) 0.0)
+      (set! (-> background-forward w) 0.0)
 
-        (depth
-          (rand-vu-float-range
-            (meters 2.5)
-            (meters 18.0))))
+      (vector-normalize!
+        background-forward
+        1.0)
 
-      (set! (-> side-axis x) (-> self playfield-axis z))
+      (set! (-> background-side x) (-> background-forward z))
+      (set! (-> background-side y) 0.0)
+      (set! (-> background-side z) (- (-> background-forward x)))
+      (set! (-> background-side w) 0.0)
 
-      (set! (-> side-axis y) 0.0)
+      (vector-normalize!
+        background-side
+        1.0)
 
-      (set! (-> side-axis z) (- (-> self playfield-axis x)))
+      (fisher-update-background-mist-color!)
 
-      (set! (-> side-axis w) 0.0)
+      ;; Add two huge overlapping puffs per pulse. They sit well in
+      ;; front of the curtain, with a fourteen-meter depth gap so the cloud
+      ;; cannot intersect or protrude through the curtain mesh.
+      (dotimes (i 2)
+        (let ((particle-pos
+              (new 'stack-no-clear 'vector)))
 
-      (vector-normalize! side-axis 1.0)
+          (vector+float*!
+            particle-pos
+            (-> self fisher-cam)
+            background-forward
+            (meters 78.0))
 
-      (vector+float*! particle-pos (-> self fishing-player-pos) (-> self playfield-axis) forward-distance)
+          (vector+float*!
+            particle-pos
+            particle-pos
+            (-> self playfield-axis)
+            (meters 27.75))
 
-      (vector+float*! particle-pos particle-pos side-axis side-distance)
+          (vector+float*!
+            particle-pos
+            particle-pos
+            background-side
+            (rand-vu-float-range
+              (meters -170.0)
+              (meters 170.0)))
 
-      (set! (-> particle-pos y) (- (-> self water-level) depth))
+          (set!
+            (-> particle-pos y)
+            (+
+              (-> self water-level)
+              (rand-vu-float-range
+                (meters -112.0)
+                (meters -4.0))))
 
-      (set! (-> particle-pos w) 1.0)
+          (set! (-> particle-pos w) 1.0)
 
-      (launch-particles
-        :system *sp-particle-system-2d*
-        (-> *part-id-table* 3572)
-        particle-pos)))
+          (launch-particles
+            :system *sp-particle-system-3d*
+            (-> *part-id-table* 3572)
+            particle-pos))))
 
   (none))
 
@@ -1364,28 +1494,20 @@
   (let ((dt
         (-> *display* seconds-per-frame)))
 
-    (cond
-      ((and
-          (-> self casted?)
-          (-> self camera-underwater?))
+    (-! (-> self background-mist-time) dt)
 
-        (-! (-> self background-mist-time) dt)
+    (when
+      (<= (-> self background-mist-time) 0.0)
 
-        (when
-          (<= (-> self background-mist-time) 0.0)
+      (fisher-launch-background-mist! self)
 
-          (fisher-launch-background-mist! self)
-
-          (set!
-            (-> self background-mist-time)
-            (rand-vu-float-range
-              0.045
-              0.11))))
-
-      (else
-        (set!
-          (-> self background-mist-time)
-          0.0))))
+      ;; The cloud field is replenished for the entire time the fishing
+      ;; state is active, regardless of camera height or cast state.
+      (set!
+        (-> self background-mist-time)
+        (rand-vu-float-range
+          0.30
+          0.45))))
 
   (none))
 
@@ -1509,12 +1631,31 @@
 )
 
 (defun fisher-update-camera-water! ((self fisher-game))
-  (when (and *camera* (> (-> *camera* num-slaves) 0))
-    (let ((cam-slave (-> *camera* slave 0 0))) (set! (-> self camera-underwater?) (< (-> cam-slave trans y) (-> self water-level))))
-  )
+  (cond
+    ((and
+        *camera*
+        (> (-> *camera* num-slaves) 0))
 
-  (none)
-)
+      (let ((cam-slave
+            (-> *camera* slave 0 0)))
+
+        (set!
+          (-> self camera-underwater?)
+          (<
+            (-> cam-slave trans y)
+            (-> self water-level)))
+
+        ;; Particle callbacks cannot safely dereference *fisher-game*.
+        ;; Mirror the current camera state into a plain global instead.
+        (set!
+          *fisher-background-cloud-visible?*
+          (-> self camera-underwater?))))
+
+    (else
+      (set! (-> self camera-underwater?) #f)
+      (set! *fisher-background-cloud-visible?* #f)))
+
+  (none))
 
 (defun fisher-draw-cast-bar ((charge float))
   (let ((fill-height (the int (* 116.0 charge)))
@@ -4014,7 +4155,7 @@
       (set! (-> bubble-pos w) 1.0)
 
       (launch-particles
-        :system *sp-particle-system-2d*
+        :system *sp-particle-system-3d*
         (-> *part-id-table* 3570)
         bubble-pos))
   )
@@ -4192,6 +4333,449 @@
   (none)
 )
 
+
+(defun fisher-set-background-curtain-color!
+  ((dst rgba)
+   (base-color vector)
+   (brightness float))
+
+  (set!
+    (-> dst r)
+    (the uint8
+      (fmax
+        0.0
+        (fmin
+          255.0
+          (* (-> base-color x) brightness)))))
+
+  (set!
+    (-> dst g)
+    (the uint8
+      (fmax
+        0.0
+        (fmin
+          255.0
+          (* (-> base-color y) brightness)))))
+
+  (set!
+    (-> dst b)
+    (the uint8
+      (fmax
+        0.0
+        (fmin
+          255.0
+          (* (-> base-color z) brightness)))))
+
+  (set! (-> dst a) #xff)
+
+  (none))
+
+(defun fisher-update-background-curtain-colors! ()
+  (let ((base-color
+        (new 'stack-no-clear 'vector)))
+
+    ;; Use the exact same time-of-day RGB as the underwater void/horizon.
+    (fisher-background-color! base-color)
+
+    ;; Entire curtain matches the void color exactly.
+    (fisher-set-background-curtain-color! *fisher-curtain-color-0a* base-color 1.00)
+    (fisher-set-background-curtain-color! *fisher-curtain-color-0b* base-color 1.00)
+
+    (fisher-set-background-curtain-color! *fisher-curtain-color-1a* base-color 1.00)
+    (fisher-set-background-curtain-color! *fisher-curtain-color-1b* base-color 1.00)
+
+    (fisher-set-background-curtain-color! *fisher-curtain-color-2a* base-color 1.00)
+    (fisher-set-background-curtain-color! *fisher-curtain-color-2b* base-color 1.00)
+
+    (fisher-set-background-curtain-color! *fisher-curtain-color-3a* base-color 1.00)
+    (fisher-set-background-curtain-color! *fisher-curtain-color-3b* base-color 1.00)
+
+    (fisher-set-background-curtain-color! *fisher-curtain-color-4a* base-color 1.00)
+    (fisher-set-background-curtain-color! *fisher-curtain-color-4b* base-color 1.00)
+
+    (fisher-set-background-curtain-color! *fisher-curtain-color-5a* base-color 1.00)
+    (fisher-set-background-curtain-color! *fisher-curtain-color-5b* base-color 1.00))
+
+  (none))
+
+(defun fisher-add-retail-flat-triangle!
+  ((buf dma-buffer)
+   (world-p0 vector)
+   (world-p1 vector)
+   (world-p2 vector)
+   (color rgba))
+
+  (let ((screen-points-a
+        (new 'stack 'vector4w-2))
+
+      (screen-points-b
+        (new 'stack 'vector4w-2)))
+
+    (set! (-> world-p0 w) 1.0)
+    (set! (-> world-p1 w) 1.0)
+    (set! (-> world-p2 w) 1.0)
+
+    (when
+      (and
+        (transform-point-qword!
+          (-> screen-points-a vector 0)
+          world-p0)
+
+        (transform-point-qword!
+          (-> screen-points-a vector 1)
+          world-p1)
+
+        (transform-point-qword!
+          (-> screen-points-b vector 0)
+          world-p2))
+
+      ;; Keep the real projected depth. Unlike the fishing line, the curtain
+      ;; must remain behind fish, particles, and other nearby world geometry.
+      (set! (-> screen-points-a vector 0 w) 1)
+      (set! (-> screen-points-a vector 1 w) 1)
+      (set! (-> screen-points-b vector 0 w) 1)
+
+      (set!
+        (-> screen-points-b vector 1 x)
+        (the-as int (-> color r)))
+
+      (set!
+        (-> screen-points-b vector 1 y)
+        (the-as int (-> color g)))
+
+      (set!
+        (-> screen-points-b vector 1 z)
+        (the-as int (-> color b)))
+
+      (set!
+        (-> screen-points-b vector 1 w)
+        (the-as int (-> color a)))
+
+      (dma-buffer-add-gif-tag
+        buf
+        (new 'static
+          'gif-tag64
+          :nloop 1
+          :pre 1
+          :nreg 6
+          :prim (gif-prim tri))
+        (gs-reg-list
+          rgbaq
+          xyzf2
+          rgbaq
+          xyzf2
+          rgbaq
+          xyzf2))
+
+      (dma-buffer-add-uint128
+        buf
+        (-> screen-points-b quad 1)
+        (-> screen-points-a quad 0)
+        (-> screen-points-b quad 1)
+        (-> screen-points-a quad 1)
+        (-> screen-points-b quad 1)
+        (-> screen-points-b quad 0))))
+
+  (none))
+
+(defun fisher-build-background-curtain-vertex!
+  ((self fisher-game)
+   (dst vector)
+   (curtain-center vector)
+   (curtain-forward vector)
+   (curtain-side vector)
+   (column int)
+   (row int))
+
+  (let* ((u
+          (/ (the float column) 20.0))
+
+      (v
+        (/ (the float row) 12.0))
+
+      (side-distance
+        (+ (meters -180.0)
+          (* (meters 360.0) u)))
+
+      ;; Keep the top edge exactly where it is now, but extend the wall
+      ;; farther downward and wider on both sides.
+      (base-y
+        (+ (-> self water-level)
+          (meters -0.75)
+          (* (meters -118.5) v)))
+
+      (phase
+        (-> self background-curtain-phase))
+
+      (wave-angle-a
+        (+
+          phase
+          (* (degrees 41.0) (the float column))
+          (* (degrees 19.0) (the float row))))
+
+      (wave-angle-b
+        (+
+          (* phase -0.63)
+          (* (degrees 83.0) (the float column))
+          (* (degrees -27.0) (the float row))))
+
+      (wave-angle-y
+        (+
+          (* phase 0.78)
+          (* (degrees 31.0) (the float column))
+          (* (degrees 46.0) (the float row))))
+
+      (forward-wave
+        (+
+          (* (meters 0.90) (sin wave-angle-a))
+          (* (meters 0.38) (sin wave-angle-b))))
+
+      (vertical-wave
+        (+
+          (* (meters 0.24) (sin wave-angle-y))
+          (* (meters 0.10) (sin wave-angle-b)))))
+
+    ;; Width runs across the live camera view.
+    (vector+float*!
+      dst
+      curtain-center
+      curtain-side
+      side-distance)
+
+    ;; Wave depth moves toward/away from the live camera.
+    (vector+float*!
+      dst
+      dst
+      curtain-forward
+      forward-wave)
+
+    (set! (-> dst y) (+ base-y vertical-wave))
+    (set! (-> dst w) 1.0))
+
+  dst)
+
+(defun fisher-draw-background-curtain!
+  ((self fisher-game))
+
+  (when
+    (and
+      (-> self casted?)
+      (-> self camera-underwater?)
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (+!
+      (-> self background-curtain-phase)
+      (*
+        (degrees 24.0)
+        (-> *display* seconds-per-frame)))
+
+    (when
+      (>=
+        (-> self background-curtain-phase)
+        (degrees 360.0))
+
+      (-!
+        (-> self background-curtain-phase)
+        (degrees 360.0)))
+
+    (let ((p00
+          (new 'stack-no-clear 'vector))
+
+        (p01
+          (new 'stack-no-clear 'vector))
+
+        (p10
+          (new 'stack-no-clear 'vector))
+
+        (p11
+          (new 'stack-no-clear 'vector))
+
+        (curtain-center
+          (new 'stack-no-clear 'vector))
+
+        (curtain-forward
+          (new 'stack-no-clear 'vector))
+
+        (curtain-side
+          (new 'stack-no-clear 'vector))
+
+        (curtain-color
+          (new 'static 'rgba
+            :r #x00
+            :g #x00
+            :b #x00
+            :a #xff)))
+
+      ;; camera-axis is the configured horizontal viewing direction for this
+      ;; fishing location. It remains fixed while the follow camera moves.
+      (vector-copy!
+        curtain-forward
+        (-> self camera-axis))
+
+      (set! (-> curtain-forward y) 0.0)
+      (set! (-> curtain-forward w) 0.0)
+
+      (vector-normalize!
+        curtain-forward
+        1.0)
+
+      ;; Horizontal axis across the configured camera view.
+      (set! (-> curtain-side x) (-> curtain-forward z))
+      (set! (-> curtain-side y) 0.0)
+      (set! (-> curtain-side z) (- (-> curtain-forward x)))
+      (set! (-> curtain-side w) 0.0)
+
+      (vector-normalize!
+        curtain-side
+        1.0)
+
+      ;; Anchor the curtain in the world at the fishing location. It is now
+      ;; 30 meters farther back than before: roughly three curtain grid cells.
+      (vector+float*!
+        curtain-center
+        (-> self fisher-cam)
+        curtain-forward
+        (meters 92.0))
+
+      ;; Center the fixed wall over the full 55.5-meter fish travel lane.
+      (vector+float*!
+        curtain-center
+        curtain-center
+        (-> self playfield-axis)
+        (meters 27.75))
+
+      (set! (-> curtain-center y) (-> self water-level))
+      (set! (-> curtain-center w) 1.0)
+
+      ;; fisher-force-underwater-background! runs immediately before this
+      ;; draw and writes the exact live void/horizon RGB here. Copy that
+      ;; already-applied color directly instead of recalculating it separately.
+      (set!
+        (-> curtain-color r)
+        (the uint8
+          (fmax
+            0.0
+            (fmin 255.0 (-> *fisher-underwater-haze-color* x)))))
+
+      (set!
+        (-> curtain-color g)
+        (the uint8
+          (fmax
+            0.0
+            (fmin 255.0 (-> *fisher-underwater-haze-color* y)))))
+
+      (set!
+        (-> curtain-color b)
+        (the uint8
+          (fmax
+            0.0
+            (fmin 255.0 (-> *fisher-underwater-haze-color* z)))))
+
+      (set! (-> curtain-color a) #xff)
+
+      ;; Bucket 66 is the retail sprite bucket. Sprite3 accepts ordinary
+      ;; direct-GIF packets before its normal sprite chain. This curtain chain
+      ;; is inserted first; the particle renderer appends bubbles afterward.
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id sprite))
+
+        ;; Use the real world z-buffer. The opaque curtain writes its depth;
+        ;; later world-space particles pass when they are physically in front.
+        (dma-buffer-add-gs-set
+          buf
+          (zbuf-1
+            (new 'static
+              'gs-zbuf
+              :zbp #x1c0
+              :psm (gs-psm ct24)))
+          (test-1
+            (new 'static
+              'gs-test
+              :ate #x0
+              :zte #x1
+              :ztst (gs-ztest greater-equal))))
+
+        ;; Batch every curtain triangle into one retail direct-GIF block.
+        (with-cnt-vif-block
+          (buf)
+
+          (dotimes (row 12)
+            (dotimes (column 20)
+              (fisher-build-background-curtain-vertex!
+                  self
+                  p00
+                  curtain-center
+                  curtain-forward
+                  curtain-side
+                  column
+                  row)
+
+                (fisher-build-background-curtain-vertex!
+                  self
+                  p01
+                  curtain-center
+                  curtain-forward
+                  curtain-side
+                  (+ column 1)
+                  row)
+
+                (fisher-build-background-curtain-vertex!
+                  self
+                  p10
+                  curtain-center
+                  curtain-forward
+                  curtain-side
+                  column
+                  (+ row 1))
+
+                (fisher-build-background-curtain-vertex!
+                  self
+                  p11
+                  curtain-center
+                  curtain-forward
+                  curtain-side
+                  (+ column 1)
+                  (+ row 1))
+
+                ;; This winding faces back toward the configured camera.
+                (fisher-add-retail-flat-triangle!
+                  buf
+                  p00
+                  p01
+                  p10
+                  curtain-color)
+
+              (fisher-add-retail-flat-triangle!
+                  buf
+                  p10
+                  p01
+                  p11
+                  curtain-color)))
+
+          ;; All curtain triangles share this one DIRECT transfer. Their GIF
+          ;; tags keep EOP clear, and this unconditional final tag terminates
+          ;; the stream after every visible triangle has been appended.
+          ;;
+          ;; The terminator cannot be skipped when an edge triangle fails
+          ;; projection, because it is outside both grid loops.
+          (dma-buffer-add-gif-tag
+            buf
+            (new 'static
+              'gif-tag64
+              :nloop 1
+              :eop 1
+              :nreg 1)
+            (gs-reg-list prim))
+
+          ;; Harmless packed PRIM write. It creates no vertices.
+          (dma-buffer-add-uint128
+            buf
+            (the-as uint128 0))))))
+
+  (none))
+
 (defun fisher-update-underwater-background! ((self fisher-game))
   (fisher-update-camera-water! self)
   (fisher-update-underwater-waves! self)
@@ -4205,7 +4789,9 @@
       #t))
 
   (cond
-    ((-> self camera-underwater?) (fisher-force-underwater-background!))
+    ((-> self camera-underwater?)
+      (fisher-force-underwater-background!)
+      (fisher-draw-background-curtain! self))
 
     (else
       (set!
@@ -4505,32 +5091,64 @@
 
 (defun fisher-draw-fish-status! ((self fisher-game))
   (when (> (-> self fish-message-time) 0.0)
-    (when (-> self fish-message) (draw-mod-menu-text-custom (the-as string (-> self fish-message)) 256 116 #f #t #f))
+    (when
+      (-> self fish-message)
 
-    (-! (-> self fish-message-time) (-> *display* seconds-per-frame))
+      (draw-mod-menu-text-custom
+        (the-as string (-> self fish-message))
+        256
+        116
+        #f
+        #t
+        #f))
 
-    (when (<= (-> self fish-message-time) 0.0)
+    (-!
+      (-> self fish-message-time)
+      (-> *display* seconds-per-frame))
+
+    (when
+      (<= (-> self fish-message-time) 0.0)
+
       (set! (-> self fish-message-time) 0.0)
       (set! (-> self fish-message) #f)))
 
   (cond
     ((= (-> self fish-state) 'approaching)
-      (draw-mod-menu-text-custom "?" 256 116 #f #t #f))
+      (draw-mod-menu-text-custom
+        "?"
+        256
+        116
+        #f
+        #t
+        #f))
 
     ((= (-> self fish-state) 'hook-window)
-      (draw-mod-menu-text-custom "PRESS <PAD_X> TO HOOK" 256 116 #f #t #f))
+      (draw-mod-menu-text-custom
+        "PRESS <PAD_X> TO HOOK"
+        256
+        116
+        #f
+        #t
+        #f))
 
-    ;; These reeling instructions are only part of the fisher tutorial.
+    ;; Show reeling instructions until the orb tutorial task is closed.
     ((and
         (= (-> self fish-state) 'reeling)
+
         (not
           (task-closed?
-            (game-task fisher-game-tutorial)
+            (game-task fisher-game-tutorial-orbs)
             (task-status need-introduction))))
 
       (cond
         ((-> self fish-fighting?)
-          (draw-mod-menu-text-custom "DON'T REEL!" 256 116 #f #t #f))
+          (draw-mod-menu-text-custom
+            "DON'T REEL!"
+            256
+            116
+            #f
+            #t
+            #f))
 
         (else
           (draw-mod-menu-text-custom
@@ -4646,6 +5264,14 @@
 
   (fisher-update-all-fish-debug! self)
 
+  ;; Keep cloud visibility synchronized even in ready/charging states.
+  ;; Reeling a lure all the way in must not leave the existing cloud hidden.
+  (fisher-update-camera-water! self)
+
+  ;; Keep the underwater cloud population alive for the entire fishing
+  ;; session. Rendering is still controlled separately by camera height.
+  (fisher-update-background-mist! self)
+
   (cond
     ((= (-> self cast-state) 'ready)
       (fisher-restore-normal-background!)
@@ -4689,7 +5315,6 @@
       (fisher-camera-follow-lure! self)
       (fisher-update-reel-hint! self)
       (fisher-update-underwater-background! self)
-      (fisher-update-background-mist! self)
       (fisher-update-camera-bubbles! self)
       (fisher-update-lure-snake! self)
       (fisher-draw-line-hp-bar)
@@ -4710,7 +5335,6 @@
 
       (fisher-update-reel-hint! self)
       (fisher-update-underwater-background! self)
-      (fisher-update-background-mist! self)
       (fisher-update-camera-bubbles! self)
       (fisher-update-lure-snake! self)
       (fisher-draw-line-hp-bar)
@@ -4854,6 +5478,7 @@
 
     (singlefish-end-session! self)
     (fisher-remove-lure-snake! self)
+    (set! *fisher-background-cloud-visible?* #f)
     (fisher-restore-normal-background!)
     (process-release? *target*)
     (go-virtual idle)
