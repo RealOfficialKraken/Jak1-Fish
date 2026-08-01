@@ -308,7 +308,21 @@
           (< starting-level *fisher-sink-lure-unlock-level*)
           (>= level *fisher-sink-lure-unlock-level*))
 
-        (+! *fisher-level-up-window-skill-mask* 2)))
+        (+! *fisher-level-up-window-skill-mask* 2))
+
+      (when
+        (and
+          (< starting-level *fisher-tug-line-unlock-level*)
+          (>= level *fisher-tug-line-unlock-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 4))
+
+      (when
+        (and
+          (< starting-level *fisher-fishing-clock-unlock-level*)
+          (>= level *fisher-fishing-clock-unlock-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 8)))
 
     (max 0 awarded-xp)))
 
@@ -433,7 +447,21 @@
                 (< old-level *fisher-sink-lure-unlock-level*)
                 (>= new-level *fisher-sink-lure-unlock-level*))
 
-              (+! *fisher-level-up-window-skill-mask* 2)))))))
+              (+! *fisher-level-up-window-skill-mask* 2))
+
+            (when
+              (and
+                (< old-level *fisher-tug-line-unlock-level*)
+                (>= new-level *fisher-tug-line-unlock-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 4))
+
+            (when
+              (and
+                (< old-level *fisher-fishing-clock-unlock-level*)
+                (>= new-level *fisher-fishing-clock-unlock-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 8)))))))
 
   (none))
 

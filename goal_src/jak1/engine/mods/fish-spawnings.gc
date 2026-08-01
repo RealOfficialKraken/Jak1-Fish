@@ -363,6 +363,37 @@
 
   (none))
 
+(defun maintain-misty-pontoon! ()
+  (let ((inside
+        (when *level*
+          (level-get-target-inside *level*))))
+
+    (cond
+      ((and
+          inside
+          (= (-> inside name) 'misty))
+
+        (when
+          (not *misty-pontoon-spawned?*)
+
+          ;; Misty Island fishing pontoon. The fishing spot, player position,
+          ;; camera and playfield vectors will be supplied separately.
+          (spawn-pontoon-swimmer
+            (new 'static 'vector
+              :x (meters 103.0353)
+              :y (meters 0.6031)
+              :z (meters 990.2777)
+              :w 1.0)
+            0
+            0.0)
+
+          (set! *misty-pontoon-spawned?* #t)))
+
+      (else
+        (set! *misty-pontoon-spawned?* #f))))
+
+  (none))
+
 (defun fisher-fish-distance ((self fisher-game) (slot int))
   (cond
     ((= slot 0) (-> self fish-distance-0))
@@ -1205,6 +1236,9 @@
     ((= species 4)
       "SCOUT FLY")
 
+    ((= species 5)
+      "POISONOUS EELFISH")
+
     (else
       "ECO DRUM")))
 
@@ -1231,13 +1265,16 @@
         (cond
           ;; Lurker Shark always weighs exactly 26.0 pounds.
           ((= species 3) 260)
+          ((= species 5) (rand-vu-int-range 30 40))
           ((= species 1) (rand-vu-int-range 20 50))
           ((= species 2) (rand-vu-int-range 20 41))
           (else (rand-vu-int-range 10 20)))))
 
     (cond
-      ;; Prefixes still affect its name/value, but never its fixed weight.
+      ;; Lurker Sharks and Poisonous EelFish retain their authored weight
+      ;; ranges regardless of prefix. Prefix still affects orb value/color.
       ((= species 3) 260)
+      ((= species 5) base-weight)
 
       ((= suffix 0)
         (max
@@ -1345,6 +1382,12 @@
 
   (none))
 
+(defun fisher-power-cell-task-count-for-location ((self fisher-game))
+  (cond
+    ((= (-> self location-id) 4) 5)
+    ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
+    (else 0)))
+
 (defun fisher-power-cell-task-for-location-index
   ((self fisher-game) (index int))
   (cond
@@ -1364,18 +1407,32 @@
         ((= index 2) (game-task jungle-canyon-end))
         (else (game-task jungle-temple-door))))
 
+    ;; Misty Island. The Muse and Cannon cells are intentionally excluded.
+    ((= (-> self location-id) 4)
+      (cond
+        ((= index 0) (game-task misty-boat))
+        ((= index 1) (game-task misty-warehouse))
+        ((= index 2) (game-task misty-bike))
+        ((= index 3) (game-task misty-bike-jump))
+        (else (game-task misty-eco-challenge))))
+
     (else (game-task none))))
 
 (defun fisher-find-missing-power-cell-task ((self fisher-game))
-  (let ((start (rand-vu-int-range 0 3))
+  (let* ((task-count (fisher-power-cell-task-count-for-location self))
+      (start
+        (if
+          (> task-count 0)
+          (rand-vu-int-range 0 (- task-count 1))
+          0))
       (step 0)
       (task (game-task none)))
 
-    (while (< step 4)
+    (while (< step task-count)
       (set! task
         (fisher-power-cell-task-for-location-index
           self
-          (mod (+ start step) 4)))
+          (mod (+ start step) task-count)))
 
       (when
         (and
@@ -1399,7 +1456,10 @@
   ;; that Jak has not completed can be selected.
   (when
     (and
-      (or (= (-> self location-id) 1) (= (-> self location-id) 3))
+      (or
+        (= (-> self location-id) 1)
+        (= (-> self location-id) 3)
+        (= (-> self location-id) 4))
       (> (-> self fish-count) 0)
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent? *fisher-power-cell-fish-chance*))
@@ -1445,6 +1505,7 @@
     ((= (-> self location-id) 1) (game-task jungle-buzzer))
     ((= (-> self location-id) 2) (game-task training-buzzer))
     ((= (-> self location-id) 3) (game-task beach-buzzer))
+    ((= (-> self location-id) 4) (game-task misty-buzzer))
     (else (game-task village1-buzzer))))
 
 (defun fisher-find-missing-buzzer-index
@@ -1672,6 +1733,74 @@
 
   (none))
 
+(defun fisher-configure-misty-table! ((self fisher-game))
+  (set! (-> self fish-level-min) 8)
+  (set! (-> self fish-level-max) 13)
+
+  (let ((largemouth-count 0)
+      (babak-count 0)
+      (eel-count 0)
+      (shark-count 0)
+      (slot 0))
+
+    (cond
+      ((fisher-golden-hour?)
+        (set! largemouth-count (rand-vu-int-range 3 4))
+        (set! babak-count (rand-vu-int-range 1 2))
+        (set! eel-count (rand-vu-int-range 6 10)))
+
+      (else
+        (set! largemouth-count (rand-vu-int-range 1 3))
+        (set! babak-count 1)
+        (set! eel-count (rand-vu-int-range 5 6))))
+
+    ;; Misty has a 38% chance to include exactly one Lurker Shark in addition
+    ;; to the requested Largemouth, Babak, and Poisonous EelFish counts.
+    (when (rand-vu-percent? 0.38)
+      (set! shark-count 1))
+
+    (set!
+      (-> self fish-count)
+      (min
+        22
+        (+ largemouth-count babak-count eel-count shark-count)))
+
+    (set! (-> self sandover-eco-count) eel-count)
+    (set! (-> self sandover-largemouth-count) largemouth-count)
+
+    (dotimes (i 22)
+      (fisher-set-fish-power-cell-task! self i 0))
+
+    ;; Put the shark first so later Scout Fly replacements cannot erase a
+    ;; successful 38% shark roll.
+    (when (> shark-count 0)
+      (fisher-set-fish-species! self slot 3)
+      (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+      (fisher-randomize-fish-level-and-weight! self slot)
+      (+! slot 1))
+
+    (dotimes (i babak-count)
+      (when (< slot (-> self fish-count))
+        (fisher-set-fish-species! self slot 2)
+        (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+        (fisher-randomize-fish-level-and-weight! self slot)
+        (+! slot 1)))
+
+    (dotimes (i largemouth-count)
+      (when (< slot (-> self fish-count))
+        (fisher-set-fish-species! self slot 1)
+        (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+        (fisher-randomize-fish-level-and-weight! self slot)
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-set-fish-species! self slot 5)
+      (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+      (fisher-randomize-fish-level-and-weight! self slot)
+      (+! slot 1)))
+
+  (none))
+
 (defun fisher-configure-location-table! ((self fisher-game))
   (cond
     ((= (-> self location-id) 1)
@@ -1682,6 +1811,9 @@
 
     ((= (-> self location-id) 3)
       (fisher-configure-sentinel-pontoon-table! self))
+
+    ((= (-> self location-id) 4)
+      (fisher-configure-misty-table! self))
 
     (else
       (fisher-configure-sandover-table! self)))
@@ -1707,6 +1839,8 @@
 
           ((= species 4) (if catch-display? 0.72 0.48))
 
+          ((= species 5) (if catch-display? 0.88 0.66))
+
           ((= species 2) (if catch-display? 0.95 0.75))
 
           (catch-display? 0.55)
@@ -1721,14 +1855,15 @@
       (z-scale 1.0)
 
       ;; Shark art must retain its authored colors.
-      (r (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 1) 0.32) ((= species 2) 1.00) (else 0.25)))
+      (r (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 5) 0.38) ((= species 1) 0.32) ((= species 2) 1.00) (else 0.25)))
 
-      (g (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 1) 0.78) ((= species 2) 1.00) (else 0.88)))
+      (g (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 5) 1.00) ((= species 1) 0.78) ((= species 2) 1.00) (else 0.88)))
 
       (b
         (cond
           ((= species 4) 1.00)
           ((= species 3) 1.00)
+          ((= species 5) 0.30)
           ((= species 1) 0.25)
           ((= species 2) 1.00)
           (else 1.00))))
@@ -1878,6 +2013,10 @@
       ;; Scout flies stay in the visible middle/deep band.
       ((= (fisher-fish-species self slot) 4)
         (rand-vu-float-range (meters 17.0) (meters 22.0)))
+
+      ;; Poisonous EelFish patrol the middle/deep water.
+      ((= (fisher-fish-species self slot) 5)
+        (rand-vu-float-range (meters 21.0) (meters 26.0)))
 
       (else
         (rand-vu-float-range
@@ -2038,6 +2177,8 @@
             ((= (fisher-fish-species owner slot) 3) *sharkey-sgc*)
 
             ((= (fisher-fish-species owner slot) 4) *buzzer-sgc*)
+
+            ((= (fisher-fish-species owner slot) 5) *catch-fishc-sgc*)
 
             (else
               *catch-fisha-sgc*))
@@ -2377,6 +2518,7 @@
   (set! (-> self fish-hook-time) 0.0)
   (set! (-> self fish-reel-progress) 0.0)
   (set! (-> self fish-fighting?) #f)
+  (set! (-> self hooked-fish-poison-dps) 0.0)
   (set! (-> self fish-fight-time) 0.0)
   (set! (-> self fish-fight-phase) 0.0)
   (set! (-> self fish-message) "SCARED OFF")
@@ -2453,7 +2595,9 @@
     (set! (-> self caught-fish-species) 4)
     (set! (-> self caught-fish-suffix) 2)
     (set! (-> self caught-fish-level) (fisher-fish-level self slot))
-    (set! (-> self caught-weight-tenths) 0)
+    ;; Scout Fly slots reuse fish-weight-tenths for their unique fly index.
+    ;; Set only the caught-display value to 500 tenths = 50.0 pounds.
+    (set! (-> self caught-weight-tenths) 500)
     (set! (-> self caught-orb-value) 0)
     (set! (-> self caught-fish-xp) 0)
     (set! (-> self caught-buzzer-task) (the int task))
@@ -2515,6 +2659,7 @@
         (base-value
           (cond
             ((= species 3) 3.0)
+            ((= species 5) 1.4)
             ((or (= species 1) (= species 2)) 2.0)
             (else 1.0)))
         (catch-xp
@@ -2552,10 +2697,17 @@
       (set! (-> self caught-weight-tenths) weight)
       (set!
         (-> self caught-orb-value)
-        (if
-          (>= levels-below 5)
-          (max 0 raw-orb-value)
-          (max 1 raw-orb-value)))
+        (let ((final-orb-value
+                (if
+                  (= species 3)
+                  ;; Lurker Shark pays one-third of its existing orb reward.
+                  ;; This does not change its weight, XP, or fight strength.
+                  (the int (+ (/ (the float raw-orb-value) 3.0) 0.5))
+                  raw-orb-value)))
+          (if
+            (>= levels-below 5)
+            (max 0 final-orb-value)
+            (max 1 final-orb-value))))
       (set!
         (-> self caught-fish-xp)
         (fisher-accepted-xp-amount catch-xp))
@@ -2597,14 +2749,16 @@
 ;; To disable all dialogue, set the count to 0.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define *fisher-man-dialogue-count* 1)
+(define *fisher-man-dialogue-count* 2)
 
 ;; dialogue-kind:
 ;;   0 = first tutorial
 ;;   1 = waiting for 10 precursor orbs
 ;;   2 = 10-orb completion/reward
 ;;   3 = both tutorial tasks completed
+;;   4 = village1 random fishing hint
 (define *fisher-man-dialogue-page-count* 6)
+(define *fisher-man-hint-count* 10)
 
 (define *fisher-man-tutorial-dialogue-lines*
   (new 'static
@@ -2742,21 +2896,21 @@
 
     ;; Page 4
     "I'LL BE DOIN SOME FISHIN' AS WELL"
-    "YOU'LL BE ABLE TO FIND ME IN ANY MAJOR AREA"
+    "YE CAN FIND ME IN THE VILLAGE AT THE DOCK."
     ""
     ""
 
     ;; Page 5
     "..OH, AND ONE MORE THING"
-    "THERE BE CERTAIN HOURS TO FISH, TOO!"
-    "WE FISHERMEN CALL THIS 'GOLDEN HOUR'."
+    ""
+    ""
     ""
 
     ;; Page 6
-    "IT BE THE BEST TIME TO FISH. ALTHOUGH,"
-    "CERTAIN FISH TYPES CAN ONLY BE CAUGHT"
-    "DURING SPECIFIC TIMES"
-    "KEEP AN EYE OUT, LAD."))
+    "SOME OF THE VILLAGERS DO HAVE POWERCELLS,"
+    "SO IT BE BEST TO TALK TO THEM."
+    ""
+    "NOW HAUL ME SOME FISH!"))
 
 (define *fisher-man-completed-dialogue-lines*
   (new 'static
@@ -2766,7 +2920,64 @@
     ;; Page 0
     "YE GOT YER 4 FREE POWER CELLS"
     "TAKE THE WARP GATE BACK AND"
-    "CATCH ME MORE FISH!"
+    "CATCH ME MORE FISH!!!"
+    ""))
+
+;; Ten one-page gameplay hints used only by the Village fisherman.
+;; Each hint occupies exactly four strings.
+(define *fisher-man-hint-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    "PUT SOME BACK INTO YER CAST, LAD!"
+    "A FULLER CAST GIVES YE MORE LINE HEALTH."
+    "A WEAK TOSS LEAVES LITTLE ROOM"
+    "FER A PROPER FIGHT."
+
+    "WHEN A FISH STARTS FIGHTIN', LET OFF THE REEL!"
+    "REELIN' AGAINST IT CHEWS THROUGH YER LINE."
+    "WAIT FER IT TO TIRE, THEN"
+    "HAUL THE SHRIMP IN."
+
+    "WATCH THE LEVEL SHOWN WITH EACH CATCH."
+    "FISH WELL ABOVE YER LEVEL HIT MUCH HARDER."
+    "LOWER LEVEL FISH ARE EASIER, BUT THATS NO"
+    "WAY TO LEARN HOW TO GET BETTER!"
+
+    "EVERY AREA HAS A SINGLE FISHING SPOT."
+    "THESE AREAS BE THE BEST WATERS TO FISH"
+    ""
+    ""
+
+    "SOME FISH CAN STEAL YER LURE IF YE"
+    "DON'T ACT QUICKLY ENOUGH ABOUT IT!"
+    ""
+    ""
+
+    "YE BEST PREPARE YOURSELF FOR THE"
+    "TROUBLE THAT LIES AHEAD."
+    "DANGEROUS FISH LIVE ABOUT IN OTHER"
+    "WATERS."
+
+    "SOME FISH ARE SO RARE, NO ONE KNOWS"
+    "ABOUT THEM! YE MIGHT FIND YERSELF A"
+    "LEGENDARY FISH, LAD."
+    ""
+
+    "GOLDEN HOURS RUN FROM 4 TO 6 AT DAWN,"
+    "AND THE EVENING AS WELL."
+    "MORE FISH STIR THEN, AND BETTER"
+    "TRAITS BE EASIER TO FIND."
+
+    "A GLOWING FISH MAY HAVE SWALLOWED A CELL."
+    "THE CELL MAKES IT HEAVIER,"
+    ""
+    "LAND IT, AND THE POWER CELL BE YOURS."
+
+    "SCOUT FLIES CAN BITE YER LURE TOO."
+    "EACH FISHING AREA HIDES SEVEN OF 'EM."
+    "MAYBE ONE OF 'EM HAS A POWERCELL!"
     ""))
 
 
@@ -2795,6 +3006,29 @@
   ((self fisher-man))
 
   (cond
+    ;; The Village fisherman is a repeatable hint NPC. Pick a fresh one-page
+    ;; hint each time Jak starts a conversation, avoiding an immediate repeat.
+    ((= (-> self dialogue-type) 1)
+      (let ((old-hint (-> self dialogue-hint-index))
+          (new-hint (rand-vu-int-range 0 (- *fisher-man-hint-count* 1))))
+
+        (when
+          (and
+            (> *fisher-man-hint-count* 1)
+            (= new-hint old-hint))
+
+          (+! new-hint 1)
+
+          (when
+            (>= new-hint *fisher-man-hint-count*)
+
+            (set! new-hint 0)))
+
+        (set! (-> self dialogue-hint-index) new-hint))
+
+      (set! (-> self dialogue-kind) 4)
+      (set! *fisher-man-dialogue-page-count* 1))
+
     ;; First tutorial has not been completed.
     ((not
        (task-closed?
@@ -2857,6 +3091,14 @@
 
       ((= (-> self dialogue-kind) 3)
         (-> *fisher-man-completed-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 4)
+        (->
+          *fisher-man-hint-dialogue-lines*
+          data
+          (+
+            (* (-> self dialogue-hint-index) 4)
+            line-index)))
 
       (else
         (-> *fisher-man-orb-reminder-dialogue-lines* data index)))))
@@ -3262,6 +3504,7 @@
   (set! (-> self dialogue-type) dialogue-type)
   (set! (-> self dialogue-kind) 0)
   (set! (-> self dialogue-page) 0)
+  (set! (-> self dialogue-hint-index) -1)
   (set! (-> self level-name) level-name)
 
   (set! (-> self dialogue-char-count) 0)

@@ -11,22 +11,42 @@
 
 (define *fisher-level-cap* 20)
 (define *fisher-stop-lure-unlock-level* 2)
-(define *fisher-sink-lure-unlock-level* 5)
 
-;; Sink Lure remains active for five seconds. Its 15-second cooldown begins
-;; immediately when activated, leaving ten seconds of downtime after a full use.
-(define *fisher-sink-lure-active-seconds* 5.0)
+;; Stop Lure freezes the free lure for three seconds and can be reused after
+;; its own 20-second cooldown.
+(define *fisher-stop-lure-active-seconds* 3.0)
+(define *fisher-stop-lure-cooldown-seconds* 20.0)
+(define *fisher-sink-lure-unlock-level* 5)
+(define *fisher-tug-line-unlock-level* 7)
+(define *fisher-fishing-clock-unlock-level* 10)
+
+;; Sink Lure remains active for 3.5 seconds. Its 15-second cooldown begins
+;; immediately when activated.
+(define *fisher-sink-lure-active-seconds* 3.5)
 (define *fisher-sink-lure-cooldown-seconds* 15.0)
 
-;; Number of unlocked abilities currently represented in the cooldown strip.
-;; Each ability receives 1 / count of the strip width. Increase this when a
-;; future cooldown-based fishing skill is added and draw its numbered segment.
-(define *fisher-cooldown-skill-count* 1)
+;; Tug Line is unlocked at level 7. It applies a rigid 2x reel-speed multiplier
+;; for exactly two seconds. Its 35-second cooldown begins immediately.
+(define *fisher-tug-line-active-seconds* 2.0)
+(define *fisher-tug-line-cooldown-seconds* 35.0)
+(define *fisher-tug-line-reel-multiplier* 2.0)
+
+;; Maximum number of cooldown-based abilities currently implemented. The draw
+;; code divides the strip equally among every unlocked cooldown skill.
+(define *fisher-cooldown-skill-count* 3)
 
 (define *fisher-line-hp-max* 100.0)
 
 ;; Overall chance for one eligible fish to carry one missing area power cell.
 (define *fisher-power-cell-fish-chance* 0.10)
+
+;; Poisonous EelFish drains line HP continuously while hooked.
+;; Ten HP per second makes the poison a meaningful line-breaking threat.
+(define *fisher-poison-eelfish-dps* 2.0)
+
+;; A fish rolls one smooth approach speed when the question mark appears.
+(define *fisher-approach-speed-min* 4.35)
+(define *fisher-approach-speed-max* 8.40)
 
 (define *fisher-line-hp* 100.0)
 
@@ -108,6 +128,7 @@
 
 (define *training-pontoon-spawned?* #f)
 (define *sentinel-pontoon-spawned?* #f)
+(define *misty-pontoon-spawned?* #f)
 
 (define *main-menu-saved-jak-pos*
   (new 'global 'vector))
@@ -174,6 +195,7 @@
   ((dialogue-type         int)
    (dialogue-kind         int)
    (dialogue-page         int)
+   (dialogue-hint-index   int)
    (level-name            symbol)
    (dialogue-char-count   int)
    (dialogue-char-timer   float)
@@ -241,10 +263,14 @@
     (lure-stop-active?           symbol)
     (lure-stop-used?             symbol)
     (lure-stop-time              float)
+    (lure-stop-cooldown          float)
     (lure-sink-active?           symbol)
     (lure-sink-used?             symbol)
     (lure-sink-time              float)
     (lure-sink-cooldown          float)
+    (tug-line-active?             symbol)
+    (tug-line-time                float)
+    (tug-line-cooldown            float)
     (lure-snake                  (pointer manipy))
     (lure-snake-angle            vector :inline)
     (lure-snake-angular-speed    vector :inline)
@@ -257,6 +283,7 @@
     (fish-state                  symbol)
     (fish-message                basic)
     (fish-message-time           float)
+    (fish-approach-speed          float)
     (buzzer-victory-pending?     symbol)
     (caught-buzzer-count         int)
     (caught-buzzer-task          int)
@@ -295,6 +322,7 @@
     (hooked-fish-facing         vector :inline)
     (hooked-fish-last-hook-pos  vector :inline)
     (fish-fighting?              symbol)
+    (hooked-fish-poison-dps       float)
     (fish-scare-on-arrival?       symbol)
     (caught-weight-tenths        int)
     (caught-orb-value            int)
@@ -635,6 +663,7 @@
     (base-scale                  float)
     (visual-scale                float)
     (swim-speed                  float)
+    (approach-speed              float)
     (nose-offset                 float)
     (model-forward-sign          float)
     (direction                   float)
@@ -792,6 +821,7 @@
 (defun-extern main-menu-update-title-screen! none)
 (defun-extern maintain-training-pontoon! none)
 (defun-extern maintain-sentinel-pontoon! none)
+(defun-extern maintain-misty-pontoon! none)
 (defun-extern revert-scene-camera none)
 (defun-extern singlefish-start-session! fisher-game none)
 (defun-extern singlefish-prefix->suffix singlefish-base int)

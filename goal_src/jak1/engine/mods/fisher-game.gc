@@ -69,6 +69,20 @@
 (define *fisher-level-up-window-time* 0.0)
 (define *fisher-level-up-window-offset* 150.0)
 (define *fisher-power-cell-reward-active?* #f)
+;; True only while Jak is actually inside the modal fishing state.
+;; The area process also exists while idle, so hooks must not use *fisher-game*
+;; alone as proof that fishing owns the HUD/camera/player.
+(define *fisher-session-active?* #f)
+
+(define *fisher-stop-lure-cooldown-color*
+  (new 'static 'rgba :r #xe8 :g #xb8 :b #x38 :a #xe8))
+
+(define *fisher-sink-lure-cooldown-color*
+  (new 'static 'rgba :r #x28 :g #xb8 :b #xe8 :a #xe8))
+
+;; Reddish-purple so Tug Line is visually distinct from Sink Lure.
+(define *fisher-tug-line-cooldown-color*
+  (new 'static 'rgba :r #xb8 :g #x38 :b #x78 :a #xe8))
 
 (defun fisher-level-up-window-active? ()
   (!= *fisher-level-up-window-state* 'hidden))
@@ -349,7 +363,7 @@
             0.36)
 
           (draw-fisher-large-font-scaled
-            "FOR 3 SECONDS - ONCE PER CAST."
+            "FOR 3 SECONDS - 20 SECOND COOLDOWN."
             256
             (+ 181 menu-offset)
             0.36))
@@ -361,7 +375,6 @@
             (+ 140 menu-offset)
             0.46)
 
-          ;; Jak 1 has no R1 font icon. Draw red R1 text beside white copy.
           (fisher-draw-reel-hint-text-red
             "R1"
             106
@@ -375,7 +388,7 @@
             0.37)
 
           (draw-fisher-large-font-scaled
-            "FOR 5 SECONDS - 15 SECOND COOLDOWN."
+            "FOR 3.5 SECONDS - 15 SECOND COOLDOWN."
             256
             (+ 181 menu-offset)
             0.35)
@@ -386,36 +399,100 @@
             (+ 197 menu-offset)
             0.32))
 
-        ((= skill-mask 3)
+        ((= skill-mask 4)
+          (fisher-draw-level-up-title!
+            "SKILL UNLOCKED: TUG LINE"
+            256
+            (+ 140 menu-offset)
+            0.46)
+
+          (fisher-draw-reel-hint-text-red
+            "L1"
+            98
+            (+ 163 menu-offset)
+            0.37)
+
+          (fisher-draw-reel-hint-text
+            " REELS A HOOKED FISH 2X FASTER"
+            118
+            (+ 163 menu-offset)
+            0.35)
+
+          (draw-fisher-large-font-scaled
+            "FOR 2 SECONDS - 35 SECOND COOLDOWN."
+            256
+            (+ 181 menu-offset)
+            0.35)
+
+          (draw-fisher-large-font-scaled
+            "THE SPEED CHANGE IS IMMEDIATE."
+            256
+            (+ 197 menu-offset)
+            0.32))
+
+        ((= skill-mask 8)
+          (fisher-draw-level-up-title!
+            "SKILL UNLOCKED: FISHING CLOCK"
+            256
+            (+ 140 menu-offset)
+            0.44)
+
+          (draw-fisher-large-font-scaled
+            "THE CURRENT TIME IS NOW ALWAYS SHOWN"
+            256
+            (+ 164 menu-offset)
+            0.34)
+
+          (draw-fisher-large-font-scaled
+            "WHILE FISHING. GOLDEN HOURS GLOW YELLOW."
+            256
+            (+ 181 menu-offset)
+            0.32))
+
+        ((> skill-mask 0)
+          ;; This compact combined card also handles debug/REPL XP grants that
+          ;; skip across more than one skill-unlock level at once.
           (fisher-draw-level-up-title!
             "SKILLS UNLOCKED"
             256
             (+ 137 menu-offset)
             0.46)
 
-          (draw-fisher-large-font-scaled
-            "<PAD_SQUARE> STOP LURE: FREEZE FOR 3 SECONDS."
-            256
-            (+ 159 menu-offset)
-            0.32)
+          (when
+            (nonzero? (logand skill-mask 1))
+            (draw-fisher-large-font-scaled
+              "<PAD_SQUARE> STOP LURE: 3 SEC / 20 SEC COOLDOWN."
+              256
+              (+ 157 menu-offset)
+              0.30))
 
-          (fisher-draw-reel-hint-text-red
-            "R1"
-            74
-            (+ 176 menu-offset)
-            0.34)
+          (when
+            (nonzero? (logand skill-mask 2))
+            (fisher-draw-reel-hint-text-red
+              "R1"
+              74
+              (+ 174 menu-offset)
+              0.32)
 
-          (fisher-draw-reel-hint-text
-            " SINK LURE: 3X FASTER FOR 5 SECONDS."
-            94
-            (+ 176 menu-offset)
-            0.34)
+            (fisher-draw-reel-hint-text
+              " SINK LURE: 3X DOWN FOR 3.5 SECONDS."
+              94
+              (+ 174 menu-offset)
+              0.30))
 
-          (draw-fisher-large-font-scaled
-            "STOP IS ONCE PER CAST. SINK HAS A COOLDOWN."
-            256
-            (+ 193 menu-offset)
-            0.31)))
+          (when
+            (nonzero? (logand skill-mask 4))
+            (fisher-draw-reel-hint-text-red
+              "L1"
+              74
+              (+ 191 menu-offset)
+              0.32)
+
+            (fisher-draw-reel-hint-text
+              " TUG LINE: 2X REEL FOR 2 SECONDS."
+              94
+              (+ 191 menu-offset)
+              0.30))))
 
       (draw-fisher-large-font-scaled
         "PRESS <PAD_X> TO CONTINUE"
@@ -596,10 +673,14 @@
   (set! (-> self lure-stop-active?) #f)
   (set! (-> self lure-stop-used?) #f)
   (set! (-> self lure-stop-time) 0.0)
+  (set! (-> self lure-stop-cooldown) 0.0)
   (set! (-> self lure-sink-active?) #f)
   (set! (-> self lure-sink-used?) #f)
   (set! (-> self lure-sink-time) 0.0)
   (set! (-> self lure-sink-cooldown) 0.0)
+  (set! (-> self tug-line-active?) #f)
+  (set! (-> self tug-line-time) 0.0)
+  (set! (-> self tug-line-cooldown) 0.0)
 
   (set! (-> self lure-y-velocity) 0.0)
 
@@ -616,6 +697,7 @@
   (set! (-> self fish-scare-on-arrival?) #f)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
+  (set! (-> self fish-approach-speed) 2.20)
   (set! (-> self buzzer-victory-pending?) #f)
   (set! (-> self caught-buzzer-count) 0)
   (set! (-> self caught-buzzer-task) 0)
@@ -654,6 +736,7 @@
   (vector-copy! (-> self hooked-fish-facing) (-> self lure-cast-axis))
   (vector-reset! (-> self hooked-fish-last-hook-pos))
   (set! (-> self fish-fighting?) #f)
+  (set! (-> self hooked-fish-poison-dps) 0.0)
   (set! (-> self fish-scare-on-arrival?) #f)
   (set! (-> self caught-weight-tenths) 0)
   (set! (-> self caught-orb-value) 0)
@@ -1622,7 +1705,23 @@
   (when
     (> (-> self reel-hint-time) 0.0)
 
-    ;; Always show reel. Level 2 adds Stop Lure; level 5 adds Sink Lure above it.
+    ;; Always show reel. Higher levels add each unlocked ability above it.
+    (when
+      (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
+
+      ;; Jak 1 has no <PAD_L1> font icon. Draw the button name in red.
+      (fisher-draw-reel-hint-text-red
+        "L1"
+        10
+        150
+        0.55)
+
+      (fisher-draw-reel-hint-text
+        " TUG LINE"
+        25
+        150
+        0.55))
+
     (when
       (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
 
@@ -2085,6 +2184,7 @@
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
   (set! (-> self reel-camera-blend) 0.0)
+  (set! (-> self hooked-fish-poison-dps) 0.0)
 
   (set! (-> self lure-x-velocity) 0.0)
   (set! (-> self lure-y-velocity) 0.0)
@@ -2100,13 +2200,16 @@
   (stop-sound-file "water-waves.wav")
   (fisher-remove-lure-snake! self)
   (set! (-> self reel-hint-time) 0.0)
+  ;; Ending/resetting a cast cancels Stop Lure, but its cooldown persists.
   (set! (-> self lure-stop-active?) #f)
-  (set! (-> self lure-stop-used?) #f)
   (set! (-> self lure-stop-time) 0.0)
   ;; Ending or resetting a cast cancels the active sink effect, but does not
   ;; bypass its cooldown. lure-sink-used? is cleared by the cooldown updater.
   (set! (-> self lure-sink-active?) #f)
   (set! (-> self lure-sink-time) 0.0)
+  ;; Tug Line ends with the current catch/cast, but its cooldown persists.
+  (set! (-> self tug-line-active?) #f)
+  (set! (-> self tug-line-time) 0.0)
   (set! (-> self bubble-time) -2.0)
 
   (none))
@@ -2801,6 +2904,11 @@
 (defun singlefish-begin-approach! ((self singlefish-base))
   (let ((owner (the-as fisher-game (-> self owner))))
     (set! (-> owner hooked-fish) self)
+    (set!
+      (-> self approach-speed)
+      (rand-vu-float-range
+        *fisher-approach-speed-min*
+        *fisher-approach-speed-max*))
     (set! (-> owner fish-state) 'approaching)
     (go-virtual singlefish-approach))
 
@@ -2931,7 +3039,14 @@
     (set! (-> owner caught-fish-suffix) suffix)
     (set! (-> owner caught-fish-level) (-> self level))
     (set! (-> owner caught-weight-tenths) (-> self weight-tenths))
-    (set! (-> owner caught-orb-value) (-> self orb-value))
+    ;; Lurker Shark pays only one-third of its normal calculated orb value.
+    ;; Weight, fishing XP, and fight difficulty are unchanged.
+    (set!
+      (-> owner caught-orb-value)
+      (if
+        (string= (-> self species-name) "Lurker Shark")
+        (max 1 (the int (+ (/ (the float (-> self orb-value)) 3.0) 0.5)))
+        (-> self orb-value)))
     (set! (-> owner caught-fish-xp) (fisher-accepted-xp-amount catch-xp))
 
     (set! (-> owner fish-state) 'catch-display)
@@ -2963,7 +3078,13 @@
       (top-y (- (-> owner water-level) (meters 3.0)))
 
       (bottom-y
-        (- (-> owner water-level) (meters 36.0))))
+        (- (-> owner water-level) (meters 36.0)))
+
+      (reel-mult
+        (if
+          (-> owner tug-line-active?)
+          *fisher-tug-line-reel-multiplier*
+          1.0)))
 
     (when
       (or (not (singlefish-owner-still-hooked? self)) (!= (-> owner fish-state) 'reeling))
@@ -3053,6 +3174,7 @@
                 (*
                   (-> owner lure-reel-x-speed)
                   (meters 1.0)
+                  reel-mult
                   dt)))
 
             (+!
@@ -3060,6 +3182,7 @@
               (*
                 (-> owner lure-reel-y-speed)
                 (meters 0.55)
+                reel-mult
                 dt)))
 
           (else
@@ -3347,6 +3470,8 @@
               ((= (-> self caught-fish-species) 3) *sharkey-sgc*)
 
               ((= (-> self caught-fish-species) 4) *buzzer-sgc*)
+
+              ((= (-> self caught-fish-species) 5) *catch-fishc-sgc*)
 
               (else
                 *catch-fisha-sgc*))
@@ -3975,17 +4100,58 @@
 
 (defun fisher-update-ability-cooldowns! ((self fisher-game))
   (let ((dt (-> *display* seconds-per-frame)))
+    (when (> (-> self lure-stop-cooldown) 0.0)
+      (-! (-> self lure-stop-cooldown) dt)
+
+      (when (<= (-> self lure-stop-cooldown) 0.0)
+        (set! (-> self lure-stop-cooldown) 0.0)
+        (set! (-> self lure-stop-used?) #f)))
+
     (when (> (-> self lure-sink-cooldown) 0.0)
       (-! (-> self lure-sink-cooldown) dt)
 
       (when (<= (-> self lure-sink-cooldown) 0.0)
         (set! (-> self lure-sink-cooldown) 0.0)
-        (set! (-> self lure-sink-used?) #f))))
+        (set! (-> self lure-sink-used?) #f)))
+
+    (when (> (-> self tug-line-cooldown) 0.0)
+      (-! (-> self tug-line-cooldown) dt)
+
+      (when (<= (-> self tug-line-cooldown) 0.0)
+        (set! (-> self tug-line-cooldown) 0.0)))
+
+    ;; Tug Line may only be started while a fish is actively being reeled.
+    ;; The multiplier begins immediately; there is no ramp-in or ease.
+    (when
+      (and
+        (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
+        (= (-> self fish-state) 'reeling)
+        (<= (-> self tug-line-cooldown) 0.0)
+        (not (-> self tug-line-active?))
+        (cpad-pressed? 0 l1))
+
+      (cpad-clear! 0 l1)
+      (set! (-> self tug-line-active?) #t)
+      (set! (-> self tug-line-time) *fisher-tug-line-active-seconds*)
+      (set! (-> self tug-line-cooldown) *fisher-tug-line-cooldown-seconds*))
+
+    (when
+      (-> self tug-line-active?)
+
+      (-! (-> self tug-line-time) dt)
+
+      (when
+        (or
+          (<= (-> self tug-line-time) 0.0)
+          (!= (-> self fish-state) 'reeling))
+
+        (set! (-> self tug-line-active?) #f)
+        (set! (-> self tug-line-time) 0.0))))
 
   (none))
 
 (defun fisher-draw-cooldown-segment!
-  ((slot int) (skill-count int) (ready-ratio float))
+  ((slot int) (skill-count int) (ready-ratio float) (fill-color rgba))
 
   (when
     (and
@@ -4014,8 +4180,7 @@
         ((buf (-> (current-frame) global-buf))
          (bucket-id subtitle))
 
-        ;; Each skill owns an equal-width section. With one cooldown this is
-        ;; 100% of the strip; two skills receive 50% each; three receive 33.33%.
+        ;; Each unlocked skill owns an equal-width section of the strip.
         (draw-sprite2d-xy
           buf segment-x 200 segment-width 3
           (new 'static 'rgba
@@ -4023,11 +4188,9 @@
 
         (when (> fill-width 0)
           (draw-sprite2d-xy
-            buf segment-x 200 fill-width 3
-            (new 'static 'rgba
-              :r #x28 :g #xb8 :b #xe8 :a #xe8)))
+            buf segment-x 200 fill-width 3 fill-color))
 
-        ;; A one-pixel divider keeps future cooldown segments distinct.
+        ;; A one-pixel divider keeps cooldown segments distinct.
         (when (> slot 0)
           (draw-sprite2d-xy
             buf (- segment-x 1) 200 1 3
@@ -4039,11 +4202,26 @@
 (defun fisher-draw-skill-cooldowns! ((self fisher-game))
   (when
     (and
-      (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
+      (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
       (current-frame)
       (-> (current-frame) global-buf))
 
-    (let ((ready-ratio
+    (let* ((level (fisher-current-level))
+        (skill-count
+          (cond
+            ((>= level *fisher-tug-line-unlock-level*) 3)
+            ((>= level *fisher-sink-lure-unlock-level*) 2)
+            (else 1)))
+        (stop-ready-ratio
+          (if
+            (<= *fisher-stop-lure-cooldown-seconds* 0.0)
+            1.0
+            (-
+              1.0
+              (/
+                (-> self lure-stop-cooldown)
+                *fisher-stop-lure-cooldown-seconds*))))
+        (sink-ready-ratio
           (if
             (<= *fisher-sink-lure-cooldown-seconds* 0.0)
             1.0
@@ -4051,7 +4229,16 @@
               1.0
               (/
                 (-> self lure-sink-cooldown)
-                *fisher-sink-lure-cooldown-seconds*)))))
+                *fisher-sink-lure-cooldown-seconds*))))
+        (tug-ready-ratio
+          (if
+            (<= *fisher-tug-line-cooldown-seconds* 0.0)
+            1.0
+            (-
+              1.0
+              (/
+                (-> self tug-line-cooldown)
+                *fisher-tug-line-cooldown-seconds*)))))
 
       ;; Thin frame directly above the existing level/XP meter.
       (with-dma-buffer-add-bucket
@@ -4068,12 +4255,31 @@
           (new 'static 'rgba
             :r #x38 :g #x48 :b #x58 :a #xd0)))
 
-      ;; Sink Lure is cooldown slot zero. Add future abilities as additional
-      ;; numbered calls and raise *fisher-cooldown-skill-count* accordingly.
+      ;; Cooldown order always follows skill acquisition order:
+      ;; Stop Lure, Sink Lure, then Tug Line.
       (fisher-draw-cooldown-segment!
         0
-        *fisher-cooldown-skill-count*
-        ready-ratio)))
+        skill-count
+        stop-ready-ratio
+        *fisher-stop-lure-cooldown-color*)
+
+      (when
+        (>= level *fisher-sink-lure-unlock-level*)
+
+        (fisher-draw-cooldown-segment!
+          1
+          skill-count
+          sink-ready-ratio
+          *fisher-sink-lure-cooldown-color*))
+
+      (when
+        (>= level *fisher-tug-line-unlock-level*)
+
+        (fisher-draw-cooldown-segment!
+          2
+          skill-count
+          tug-ready-ratio
+          *fisher-tug-line-cooldown-color*))))
 
   (none))
 
@@ -4087,6 +4293,7 @@
       ((= (fisher-fish-species self slot) 4) (meters 6.5))
       ((= (fisher-fish-species self slot) 1) (meters 10.5))
       ((= (fisher-fish-species self slot) 2) (meters 9.5))
+      ((= (fisher-fish-species self slot) 5) (meters 10.0))
       (else (meters 8.5)))))
 
 (defun fisher-update-lure! ((self fisher-game))
@@ -4097,24 +4304,34 @@
       (top-y (- (-> self water-level) (meters 3.0)))
       (bottom-y (- (-> self water-level) (meters 36.0)))
       (current-speed -0.18)
-      (bottom-current-speed -0.28))
+      (bottom-current-speed -0.28)
+      (reel-mult
+        (if
+          (and
+            (= (-> self fish-state) 'reeling)
+            (-> self tug-line-active?))
+          *fisher-tug-line-reel-multiplier*
+          1.0)))
 
     (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
 
     (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
 
-    ;; Fishing level 2 ability: freeze the free lure once per cast.
+    ;; Fishing level 2 ability: freeze the free lure for three seconds. It can
+    ;; be reused after its independent 20-second cooldown.
     (when
       (and
         (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
-        (not (-> self lure-stop-used?))
+        (<= (-> self lure-stop-cooldown) 0.0)
+        (not (-> self lure-stop-active?))
         (not (-> self lure-sink-active?))
         (cpad-pressed? 0 square))
 
       (cpad-clear! 0 square)
       (set! (-> self lure-stop-active?) #t)
       (set! (-> self lure-stop-used?) #t)
-      (set! (-> self lure-stop-time) 3.0)
+      (set! (-> self lure-stop-time) *fisher-stop-lure-active-seconds*)
+      (set! (-> self lure-stop-cooldown) *fisher-stop-lure-cooldown-seconds*)
       (set! (-> self lure-x-velocity) 0.0)
       (set! (-> self lure-y-velocity) 0.0))
 
@@ -4161,9 +4378,9 @@
 
     (cond
       ((cpad-hold? 0 x)
-        (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (- (* (meters 1.0) (-> self lure-reel-x-speed) dt)))
+        (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (- (* (meters 1.0) (-> self lure-reel-x-speed) reel-mult dt)))
 
-        (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-reel-y-speed) dt))
+        (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-reel-y-speed) reel-mult dt))
 
         (set! (-> self lure-x-velocity) (- (-> self lure-reel-x-speed)))
 
@@ -4308,6 +4525,7 @@
       (reference-weight
         (cond
           ((= species 3) 260.0)
+          ((= species 5) 35.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
           (else 15.0))))
@@ -4328,6 +4546,7 @@
         (cond
           ((= species 3) 105.0)
           ((= species 1) 52.0)
+          ((= species 5) 38.0)
           (else 34.0)))
 
       (fish-level
@@ -4363,7 +4582,31 @@
         (- (-> self water-level)
           (meters 3.0))))
 
+    ;; Poison damage is independent of ordinary fish fights and continues
+    ;; even while Jak is not holding X.
+    (when
+      (and
+        (>= (-> self hooked-fish-slot) 0)
+        (=
+          (fisher-fish-species self (-> self hooked-fish-slot))
+          5)
+        (> (-> self hooked-fish-poison-dps) 0.0))
+
+      (fisher-damage-line!
+        (*
+          (-> self hooked-fish-poison-dps)
+          dt)))
+
     (cond
+      (*fisher-line-broken?*
+        (let ((slot (-> self hooked-fish-slot)))
+          (fisher-reset-cast! self)
+          (set! (-> self fish-message) "POISON BROKE THE LINE")
+          (set! (-> self fish-message-time) 1.75)
+
+          (when (>= slot 0)
+            (fisher-fish-scared-off! self slot))))
+
       ((-> self fish-fighting?)
         (+! (-> self fish-fight-phase) (* (degrees 420.0) dt))
 
@@ -4461,7 +4704,7 @@
                         (fisher-move-manipy-toward!
                           fish-proc
                           hook-target
-                          (meters 6.60))))
+                          (meters (-> self fish-approach-speed)))))
 
                     (when
                       (<= remaining (meters 0.20))
@@ -4683,6 +4926,12 @@
                 (set! (-> self hooked-fish-slot) slot)
 
                 (set!
+                  (-> self fish-approach-speed)
+                  (rand-vu-float-range
+                    *fisher-approach-speed-min*
+                    *fisher-approach-speed-max*))
+
+                (set!
                   (-> self fish-state)
                   'approaching))))
 
@@ -4805,7 +5054,13 @@
           (else
             (singlefish-vector-normalize-safe! move-dir 1.0)
 
-            (set! step (fmin distance (* (meters 2.20) dt)))
+            (set!
+              step
+              (fmin
+                distance
+                (*
+                  (meters (-> self approach-speed))
+                  dt)))
 
             (singlefish-vector-add-scaled-safe!
               (-> self root trans)
@@ -5551,13 +5806,6 @@
   (fisher-update-underwater-waves! self)
   (fisher-restore-sky-base-position!)
 
-  (when
-    (-> self casted?)
-
-    (set!
-      *particles-flag*
-      #t))
-
   (cond
     ((-> self camera-underwater?)
       (fisher-force-underwater-background!)
@@ -5901,6 +6149,18 @@
       (set! (-> self fish-fight-base-y) (-> self lure-pos y))
       (set! (-> self reel-camera-blend) 0.0)
 
+      ;; Poisonous EelFish drain a flat 10 line HP per second while hooked.
+      (set!
+        (-> self hooked-fish-poison-dps)
+        (if
+          (and
+            (>= (-> self hooked-fish-slot) 0)
+            (=
+              (fisher-fish-species self (-> self hooked-fish-slot))
+              5))
+          *fisher-poison-eelfish-dps*
+          0.0))
+
       (set! (-> self fish-hook-time) 0.65)
       (set! (-> self fish-fight-time) 0.0)
       (set! (-> self fish-fighting?) #f))
@@ -5912,6 +6172,79 @@
       (cpad-clear! 0 x)
       (set! (-> self fish-state) 'catch-exit)
       (set! (-> self catch-transition-time) 0.0)))
+
+  (none))
+
+(defun fisher-draw-fishing-clock! ()
+  (when
+    (and
+      *fisher-session-active?*
+      (>= (fisher-current-level) *fisher-fishing-clock-unlock-level*)
+      *time-of-day-context*
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let* ((time-value
+            (-> *time-of-day-context* time))
+
+        (hour-24
+          (the int time-value))
+
+        (minute
+          (the int
+            (*
+              (- time-value (the float hour-24))
+              60.0)))
+
+        (hour-12
+          (cond
+            ((= hour-24 0) 12)
+            ((> hour-24 12) (- hour-24 12))
+            (else hour-24)))
+
+        (am?
+          (< hour-24 12))
+
+        (clock-color
+          (if
+            (fisher-golden-hour?)
+            (font-color yellow)
+            (font-color green))))
+
+      (clear matt-str)
+      (clear *pc-encoded-matt-str*)
+
+      (cond
+        ((< minute 10)
+          (format
+            matt-str
+            "~D:0~D ~A"
+            hour-12
+            minute
+            (if am? "AM" "PM")))
+
+        (else
+          (format
+            matt-str
+            "~D:~D ~A"
+            hour-12
+            minute
+            (if am? "AM" "PM"))))
+
+      (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        (draw-string-xy-scaled
+          *pc-encoded-matt-str*
+          buf
+          488
+          18
+          clock-color
+          (font-flags large right shadow kerning)
+          0.52))))
 
   (none))
 
@@ -6057,14 +6390,16 @@
         0.60)
 
       (cond
-        ;; Scout Fly catches have no weight, orb worth, or fishing XP. Their
-        ;; loot menu reports only the fly's level and the updated area count.
+        ;; Scout Fly catches display 50.0 pounds, but still award no
+        ;; precursor orbs and no fishing XP.
         ((= (-> self caught-fish-species) 4)
           (clear *fish-ui-str*)
           (format
             *fish-ui-str*
-            "LV. ~D"
-            (-> self caught-fish-level))
+            "LV. ~D   ~D.~D LBS"
+            (-> self caught-fish-level)
+            whole-lbs
+            decimal-lbs)
 
           (draw-fisher-large-font-scaled
             *fish-ui-str*
@@ -6269,6 +6604,7 @@
     (fisher-draw-skill-cooldowns! self))
 
   (fisher-draw-fish-status! self)
+  (fisher-draw-fishing-clock!)
   (none))
 
 (defun fisher-face-jak-right-side! ((self fisher-game))
@@ -6427,12 +6763,35 @@
 
       (suspend))))
 
+(defun fisher-maintain-player-control! ((self fisher-game))
+  ;; Fishing is modal. Keep Jak fixed at the authored fishing position every
+  ;; frame so no unrelated state transition can quietly restore player motion.
+  (when *target*
+    (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
+    (set! (-> *target* control trans quad) (-> self fishing-player-pos quad))
+    (vector-reset! (-> *target* root transv))
+    (set! *camera-read-analog* #f)
+    (set! *external-cam-mode* #f))
+  (none))
+
+(defun fisher-session-invalid? ((self fisher-game))
+  ;; A death/respawn or same-level save load can replace or reposition Jak
+  ;; without immediately changing the level. Treat a large displacement as a
+  ;; broken session and leave through the normal exit path instead of pulling
+  ;; the newly spawned Jak back into the minigame.
+  (or
+    (not *target*)
+    (> (vector-vector-distance (target-pos 0) (-> self fishing-player-pos)) (meters 18))))
+
 (defstate fishing (fisher-game)
   :virtual #t
 
   :enter
   (behavior ()
-    (process-grab? *target*)
+    (while (not (process-grab? *target*))
+      (suspend))
+
+    (set! *fisher-session-active?* #t)
 
     (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
 
@@ -6452,7 +6811,8 @@
     (singlefish-start-session! self)
 
     ;; Start the persistent background-mist emitter for this fishing session.
-    (set! *particles-flag* #t)
+    ;; Do not modify *particles-flag*: it is a global engine flag shared by
+    ;; blue eco and other normal game particle effects.
     (set! *fisher-background-cloud-session-active?* #t)
     (set! *fisher-background-cloud-visible?* #f)
     (fisher-launch-background-mist! self)
@@ -6461,6 +6821,11 @@
   :code
   (behavior ()
     (loop
+      (when (fisher-session-invalid? self)
+        (go-virtual exit))
+
+      (fisher-maintain-player-control! self)
+
       (when (= (-> self camera-state) 'before-cast) (fisher-face-jak-right-side! self) (fisher-camera-before-cast! self))
 
       (fisher-update-casting! self)
@@ -6500,7 +6865,14 @@
     (set! *fisher-background-cloud-visible?* #f)
     (set! *fisher-background-cloud-session-active?* #f)
     (fisher-restore-normal-background!)
-    (process-release? *target*)
+
+    ;; fisher-game still owns Jak here. Finish this release before spawning a
+    ;; reward movie; never poll process-release? again after ownership changes.
+    (when *target*
+      (while
+        (not (process-release? *target*))
+
+        (suspend)))
 
     ;; Reward movies must fully finish before fisher-game returns to idle.
     ;; Otherwise the prompt can reappear while the temporary fuel-cell still
@@ -6549,14 +6921,36 @@
           (else
             (set! *fisher-power-cell-reward-active?* #f)))
 
-        ;; Reassert every control/camera release after the movie cleanup.
-        (process-release? *target*)
-        (send-event *target* 'end-mode)
-        (send-event *camera* 'no-intro)
-        (send-event *camera* 'clear-entity)
-        (send-event *camera* 'change-state *camera-base-mode* (seconds 0.25))
-        (set! *camera-read-analog* (-> self saved-camera-read-analog))
-        (set! *external-cam-mode* (-> self saved-external-cam-mode))
+        ;; The reward process has finished. Detach its movie mode and camera,
+        ;; but do not call process-release? here: fisher-game already released
+        ;; Jak before the reward and no longer owns that grab.
+        (when *target*
+          (send-event *target* 'end-mode))
+
+        (when *camera*
+          (send-event *camera* 'no-intro)
+          (send-event *camera* 'clear-entity))
+
+        ;; Do not return fisher-game to idle while othercam still exists.
+        (while
+          (handle->process (-> *game-info* other-camera-handle))
+
+          (suspend))
+
+        ;; Now restore the normal gameplay camera and saved fishing settings.
+        (send-event
+          *camera*
+          'change-state
+          *camera-base-mode*
+          (seconds 0.25))
+
+        (set!
+          *camera-read-analog*
+          (-> self saved-camera-read-analog))
+
+        (set!
+          *external-cam-mode*
+          (-> self saved-external-cam-mode))
 
         ;; The caught carrier slot is ordinary again. Only after its reward is
         ;; complete may the area roll another missing-cell carrier.
@@ -6564,6 +6958,7 @@
           (fisher-add-power-cell-fish-slot! self))))
 
     (fisher-reset-cast! self)
+    (set! *fisher-session-active?* #f)
     (go-virtual idle)
   )
 )

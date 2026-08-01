@@ -8,10 +8,39 @@
 
 (define *fisher-active-location-id* -1)
 
+;; Normal power-cell movies can leave Jak in clone/movie mode even after the
+;; temporary othercam disappears. Queue a repair from the real pickup hook and
+;; perform it only after the movie has been gone for two complete frames.
+(define *fisher-cell-repair-pending?* #f)
+(define *fisher-cell-repair-clear-frames* 0)
+
 (defun fisher-despawn-current-area! ()
   (when *fisher-game*
-    (set! *singlefish-session-active?* #f)
-    (+! *singlefish-session-id* 1)
+    ;; fisher-game exists while the shoreline prompt is idle. Only perform
+    ;; modal fishing cleanup when Jak actually entered the fishing state.
+    (when *fisher-session-active?*
+      (set! *singlefish-session-active?* #f)
+      (+! *singlefish-session-id* 1)
+      (set! *fisher-background-cloud-visible?* #f)
+      (set! *fisher-background-cloud-session-active?* #f)
+      (set! *fisher-underwater-haze-override?* #f)
+      ;; Never disable *particles-flag* here. It is global engine state used
+      ;; by blue eco and other non-fishing particles.
+      (set! *camera-read-analog* #t)
+      (set! *external-cam-mode* #f)
+      (remove-setting! 'music-volume)
+      (stop-main-music)
+
+      (when *target*
+        (send-event *target* 'end-mode)
+        (process-release? *target*))
+
+      (when *camera*
+        (send-event *camera* 'no-intro)
+        (send-event *camera* 'clear-entity)
+        (send-event *camera* 'change-state *camera-base-mode* (seconds 0.25))))
+
+    (set! *fisher-session-active?* #f)
 
     (kill-by-name
       "fisher-game"
@@ -125,7 +154,34 @@
         (degrees -35.3237)
         (degrees 234))
 
-      (set! *fisher-active-location-id* 2)))
+      (set! *fisher-active-location-id* 2))
+
+    ;; Misty Island pontoon fishing area. Camera angle is derived from the
+    ;; Fishnet->Camera horizontal vector; playfield angle is derived from the
+    ;; supplied target->facing-point vector.
+    ((= level-name 'misty)
+      (spawn-fisher-game
+        4
+        (new 'static 'vector
+          :x (meters 103.0522)
+          :y (meters 1.7121)
+          :z (meters 992.6285)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 103.8267)
+          :y (meters 1.7334)
+          :z (meters 990.2062)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 107.1148)
+          :y (meters 6.5783)
+          :z (meters 1005.8063)
+          :w 1.0)
+        (meters 0.6031)
+        (degrees -180.8659)
+        (degrees 80.3413))
+
+      (set! *fisher-active-location-id* 4)))
 
   (none))
 
@@ -149,7 +205,10 @@
           (set! wanted-location-id 2))
 
         ((= (-> inside name) 'beach)
-          (set! wanted-location-id 3))))
+          (set! wanted-location-id 3))
+
+        ((= (-> inside name) 'misty)
+          (set! wanted-location-id 4))))
 
     ;; Remove the process when Jak leaves a supported level or enters
     ;; a different fishing level.
@@ -191,7 +250,53 @@
     )
     (maintain-training-pontoon!)
     (maintain-sentinel-pontoon!)
+    (maintain-misty-pontoon!)
     (maintain-fisher-game!)
+
+    ;; runs-on-cell-pickup is reliably called for the actual pickup, while a
+    ;; synthetic 'cutscene-end hook is not guaranteed to be called at all.
+    ;; Wait until othercam has stayed gone for two frames, then clear the
+    ;; leftover clone/movie mode and recreate only the idle fishing process.
+    (when
+      (and
+        *fisher-cell-repair-pending?*
+        (not *fisher-session-active?*)
+        (not *fisher-power-cell-reward-active?*))
+
+      (cond
+        ((handle->process (-> *game-info* other-camera-handle))
+          (set! *fisher-cell-repair-clear-frames* 0))
+
+        (else
+          (+! *fisher-cell-repair-clear-frames* 1)
+
+          (when (>= *fisher-cell-repair-clear-frames* 2)
+            ;; The retail movie is over, but Jak may still be left in its
+            ;; clone-animation mode. This is the state a Jak reload was
+            ;; clearing and is what prevents fisher-game from grabbing him.
+            (when *target*
+              (send-event *target* 'blend-shape #f)
+              (send-event *target* 'end-mode))
+
+            (when *camera*
+              (send-event *camera* 'no-intro)
+              (send-event *camera* 'clear-entity)
+              (send-event
+                *camera*
+                'change-state
+                *camera-base-mode*
+                (seconds 0.25)))
+
+            (set! *camera-read-analog* #t)
+            (set! *external-cam-mode* #f)
+
+            ;; Recreate the shoreline process only after Jak/camera cleanup.
+            (when *fisher-game*
+              (fisher-despawn-current-area!))
+            (maintain-fisher-game!)
+
+            (set! *fisher-cell-repair-pending?* #f)
+            (set! *fisher-cell-repair-clear-frames* 0)))))
   )
 (when
   (and
@@ -257,11 +362,19 @@
 (defun runs-on-cell-pickup ((cell-event symbol))
   (case cell-event
     (('pickup)
-      ;; Code here runs as soon as you pickup a powercell
-    )
+      ;; Fishing's own carrier reward performs its cleanup inside the fishing
+      ;; exit state. Queue this repair only for ordinary world power cells.
+      (when (not *fisher-power-cell-reward-active?*)
+        (set! *fisher-cell-repair-pending?* #t)
+        (set! *fisher-cell-repair-clear-frames* 0)))
+
     (('cutscene-end)
-      ;; Code here runs at the end of any powercell cutscene
-  ))
+      ;; Keep compatibility with builds that do emit this event, but let the
+      ;; frame-based repair above decide when othercam is truly finished.
+      (when (not *fisher-power-cell-reward-active?*)
+        (set! *fisher-cell-repair-pending?* #t)
+        (set! *fisher-cell-repair-clear-frames* 0))))
+
   (none))
 
 (defun runs-on-eco-pickup ((eco-type pickup-type) (parent process-tree))
@@ -289,18 +402,22 @@
   (none))
 
 (defun runs-on-jak-spawn ()
-  ;; The every-frame level watcher owns spawning. Calling it here simply
-  ;; makes the correct area appear immediately when this hook does fire.
+  ;; A same-level load/respawn must discard a genuinely active fishing
+  ;; session. Do not run modal cleanup merely because the idle prompt process
+  ;; exists; that was corrupting the normal HUD/camera before fishing began.
+  (when
+    (and *fisher-game* *fisher-session-active?*)
+    (fisher-despawn-current-area!))
   (maintain-fisher-game!)
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
-  (case death-event
-    (('dying) (set! *singlefish-session-active?* #f) (+! *singlefish-session-id* 1)
-    )
-    (('blackout)
-      (fisher-despawn-current-area!)
-  ))
+  (when *fisher-session-active?*
+    (case death-event
+      (('dying)
+        (fisher-despawn-current-area!))
+      (('blackout)
+        (fisher-despawn-current-area!))))
   (none))
 
 (defun in-dialogue! ((log int) (sec int))
