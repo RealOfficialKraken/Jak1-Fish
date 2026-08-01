@@ -44,6 +44,14 @@
 (define *fisher-xp-bar-flash-time* 0.0)
 (define *fisher-xp-level-bounce-time* 0.0)
 
+;; A level-up notice is queued while the XP meter fills, then handed to
+;; fisher-game after the meter reaches its final value.
+(define *fisher-level-up-window-pending?* #f)
+(define *fisher-level-up-window-request?* #f)
+(define *fisher-level-up-window-old-level* 1)
+(define *fisher-level-up-window-new-level* 1)
+(define *fisher-level-up-window-skill-mask* 0)
+
 (defun fisher-current-level ()
   (if
     *game-info*
@@ -185,7 +193,7 @@
               (the float (+ 15 (* (max 1 fish-level) 5)))
               (fisher-xp-level-difference-multiplier fish-level jak-level)
               (fisher-xp-suffix-multiplier suffix)
-              0.5)
+              0.65)
             0.5))))))
 
 (defun fisher-accepted-xp-amount
@@ -240,6 +248,9 @@
   (let ((level
         (fisher-current-level))
 
+      (starting-level
+        (fisher-current-level))
+
       (current-xp
         (max 0 (-> *game-info* total-deaths)))
 
@@ -272,6 +283,32 @@
 
     (set! (-> *game-info* auto-save-count) level)
     (set! (-> *game-info* total-deaths) current-xp)
+
+    ;; Direct REPL XP grants should also expose the notification. The normal
+    ;; catch animation converts this immediate request into a pending request
+    ;; until the XP meter has finished filling.
+    (when
+      (> level starting-level)
+
+      (set! *fisher-level-up-window-pending?* #f)
+      (set! *fisher-level-up-window-request?* #t)
+      (set! *fisher-level-up-window-old-level* starting-level)
+      (set! *fisher-level-up-window-new-level* level)
+      (set! *fisher-level-up-window-skill-mask* 0)
+
+      (when
+        (and
+          (< starting-level *fisher-stop-lure-unlock-level*)
+          (>= level *fisher-stop-lure-unlock-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 1))
+
+      (when
+        (and
+          (< starting-level *fisher-sink-lure-unlock-level*)
+          (>= level *fisher-sink-lure-unlock-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 2)))
 
     (max 0 awarded-xp)))
 
@@ -348,17 +385,55 @@
   (when
     (> amount 0)
 
-    (let ((awarded
+    (let* ((old-level
+          (fisher-current-level))
+
+        (awarded
           (fisher-add-fishing-xp! amount)))
 
       (when
         (> awarded 0)
 
-        ;; The old display level/XP were captured immediately before this call.
-        (set! *fisher-xp-bar-remaining* (the float awarded))
-        (set! *fisher-xp-bar-total* (the float awarded))
-        (set! *fisher-xp-bar-flash-time* 0.0)
-        (set! *fisher-xp-bar-anim-active?* #t))))
+        ;; The orb reward was already granted when the catch window closed,
+        ;; and fisher-add-fishing-xp! has now committed the XP. Save the
+        ;; complete catch rather than the pre-reward catch-display state.
+        (auto-save-command
+          'auto-save
+          0
+          0
+          *default-pool*)
+
+        (let ((new-level
+              (fisher-current-level)))
+
+          ;; The old display level/XP were captured immediately before this call.
+          (set! *fisher-xp-bar-remaining* (the float awarded))
+          (set! *fisher-xp-bar-total* (the float awarded))
+          (set! *fisher-xp-bar-flash-time* 0.0)
+          (set! *fisher-xp-bar-anim-active?* #t)
+
+          (when
+            (> new-level old-level)
+
+            (set! *fisher-level-up-window-pending?* #t)
+            (set! *fisher-level-up-window-request?* #f)
+            (set! *fisher-level-up-window-old-level* old-level)
+            (set! *fisher-level-up-window-new-level* new-level)
+            (set! *fisher-level-up-window-skill-mask* 0)
+
+            (when
+              (and
+                (< old-level *fisher-stop-lure-unlock-level*)
+                (>= new-level *fisher-stop-lure-unlock-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 1))
+
+            (when
+              (and
+                (< old-level *fisher-sink-lure-unlock-level*)
+                (>= new-level *fisher-sink-lure-unlock-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 2)))))))
 
   (none))
 
@@ -560,6 +635,12 @@
           ;; After the fill reaches its destination, fade the inner bar
           ;; smoothly back from its bright impact color.
           (set! *fisher-xp-bar-flash-time* 0.30)
+
+          (when
+            *fisher-level-up-window-pending?*
+
+            (set! *fisher-level-up-window-pending?* #f)
+            (set! *fisher-level-up-window-request?* #t))
 
           (when *game-info*
             (set!

@@ -1,6 +1,6 @@
 ;;-*-Lisp-*-
 (in-package goal)
-(bundles "JUN.DGO")
+(bundles "JUN.DGO" "GAME.CGO")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Shared assets, particles, skeleton groups, strings, drawing and vector helpers
@@ -16,6 +16,7 @@
     ;; Cancel the birth function's texture-specific quarter turn. This keeps
     ;; the 3D lakedrop quad facing the camera instead of lying horizontally.
     (:rot-x (degrees -90))
+    (:rot-y 0.0)
     (:scale-y :copy scale-x)
 
     (:r 220.0)
@@ -38,6 +39,7 @@
     (:num 12.0)
     (:scale-x (meters 0.05) (meters 0.08))
     (:rot-x (degrees -90))
+    (:rot-y 0.0)
     (:scale-y :copy scale-x)
     (:r 220.0)
     (:g 240.0)
@@ -58,29 +60,32 @@
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
 
-    (:scale-x (meters 22.0) (meters 18.0))
+    ;; One deterministic 3D backdrop tile. No random ranges means no frame-to-
+    ;; frame scale changes and therefore no visible jitter.
+    (:scale-x (meters 230.0))
     (:rot-x (degrees -90))
-    (:rot-z (degrees 0) (degrees 360))
-    (:scale-y (meters 15.0) (meters 12.0))
+    (:rot-y 0.0)
+    (:scale-y (meters 110.0))
 
-    ;; Indices 7, 8 and 9 are rewritten from the live underwater RGB.
-    (:r 0.0)
-    (:g 0.0)
-    (:b 0.0)
+    ;; RGB is rewritten from the live underwater background before each launch.
+    ;; Keep alpha very low; bigpuff is naturally bright when layered over the
+    ;; opaque curtain.
+    (:r 32.0)
+    (:g 80.0)
+    (:b 104.0)
+    (:a 22.0)
 
-    ;; Alpha begins at zero. The callback smoothly fades in, stays visible,
-    ;; fades out near death and hides rendering above the water surface.
-    (:a 0.0)
-    (:omega 0.0)
-    (:vel-x (meters -0.00008) (meters 0.00016))
-    (:vel-y (meters 0.00002) (meters 0.00012))
-    (:vel-z (meters -0.00008) (meters 0.00016))
-    (:scalevel-x (meters 0.00005) (meters 0.00004))
-    (:scalevel-y :copy scalevel-x)
-    (:timer (seconds 30.0) (seconds 10.0))
-    (:flags (bit2 bit3))
-    (:userdata 42.0)
-    (:func 'fisher-background-cloud-particle-update)))
+    ;; Absolutely no particle movement or scaling.
+    (:vel-x 0.0)
+    (:vel-y 0.0)
+    (:vel-z 0.0)
+    (:scalevel-x 0.0)
+    (:scalevel-y 0.0)
+
+    ;; One render refresh. The session emitter submits the same exact tile
+    ;; after the curtain every underwater frame.
+    (:timer (seconds 0.02))
+    (:flags (bit2 bit3))))
 
 (defpart 3574
   :init-specs
@@ -89,6 +94,7 @@
     (:num 1.0 2.0)
     (:scale-x (meters 0.025) (meters 0.085))
     (:rot-x (degrees -90))
+    (:rot-y 0.0)
     (:scale-y :copy scale-x)
     (:r 205.0 35.0)
     (:g 235.0 20.0)
@@ -102,6 +108,22 @@
     (:fade-a -0.16)
     (:timer (seconds 5.5) (seconds 3.5))
     (:flags (bit2 bit3))))
+
+(defskelgroup *sharkey-sgc*
+  sharkey
+  sharkey-lod0-jg
+  sharkey-idle-ja
+  ((sharkey-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 6))
+
+;; Scout-fly fish art. This uses the real buzzer skeleton and idle animation.
+(defskelgroup *buzzer-sgc*
+  buzzer
+  buzzer-lod0-jg
+  buzzer-idle-ja
+  ((buzzer-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 1 0 1.6)
+  :texture-level 2)
 
 (defskelgroup *fish-net-sgc* fish-net fish-net-lod0-jg fish-net-fishing-ja ((fish-net-lod0-mg (meters 999999))) :bounds (static-spherem 0 0 0 4))
 

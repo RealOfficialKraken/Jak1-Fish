@@ -159,16 +159,17 @@
   :event
     (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
       (case message
-        (('notify)
-         (case (-> block param 0)
-           (('pickup)
-            (if (type-type? (-> proc type) fuel-cell) (save-reminder (get-task-control (-> self entity extra perm task)) 1 0)))))))
+        ;; Activate immediately when Jak steps onto or strikes the eggtop.
+        (('touch 'attack)
+         (when
+           (not (-> self child))
+           (go eggtop-close #f)))))
   :exit
     (behavior ()
       (sound-stop (-> self sound-id)))
   :trans
     (behavior ()
-      (if (and (not (-> self child)) (task-complete? *game-info* (-> self entity extra perm task))) (go eggtop-close #f))
+      ;; No task or power-cell gate. The top is ready as soon as it spawns.
       (spawn (-> self part) (-> self root trans))
       (sound-play "electric-loop" :id (-> self sound-id)))
   :code
@@ -259,15 +260,14 @@
   (set! (-> this part) (create-launch-control group-jungle-blue-eco-room-open this))
   (set! (-> this sound-id) (new-sound-id))
   (cond
-    ((task-complete? *game-info* (-> this entity extra perm task)) (go eggtop-close #t))
+    ;; Preserve an already-completed save state.
+    ((task-complete? *game-info* (-> this entity extra perm task))
+      (go eggtop-close #t))
+
+    ;; Otherwise spawn directly into the pressable idle state.
+    ;; The old fuel-cell pickup is intentionally removed.
     (else
-     (birth-pickup-at-point (vector+! (new 'stack-no-clear 'vector) (-> this root trans) (new 'static 'vector :y 6144.0 :w 1.0))
-                            (pickup-type fuel-cell)
-                            (the float (-> this entity extra perm task))
-                            #f
-                            this
-                            (the-as fact-info #f))
-     (go eggtop-idle)))
+      (go eggtop-idle)))
   (none))
 
 (deftype jng-iris-door (eco-door) ())

@@ -1115,7 +1115,11 @@
       (if (-> self state-object) (spawn (-> self part) (-> self root root-prim prim-core world-sphere)))))
 
 (defmethod initialize ((this fuel-cell))
-  (stack-size-set! (-> this main-thread) 512)
+  ;; The fishing Scout Fly reward initializes a fuel-cell process and then
+  ;; suspends while presenting the standard victory sequence. The original
+  ;; 512-byte backup stack overflows before that first suspend, so reserve a
+  ;; larger stack for all fuel-cell processes.
+  (stack-size-set! (-> this main-thread) 2048)
   (let ((s5-0 (new 'process 'collide-shape-moving this (collide-list-enum hit-by-player))))
     (set! (-> s5-0 dynam) (copy *standard-dynamics* 'process))
     (set! (-> s5-0 reaction) default-collision-reaction)
@@ -1352,15 +1356,12 @@
   this)
 
 (defmethod init-from-entity! ((this buzzer) (arg0 entity-actor))
-  (initialize this)
-  (process-drawable-from-entity! this (-> this entity))
-  (initialize-params this 0 (the-as float 1024.0))
-  (set! (-> this collect-timeout) (seconds 2))
-  (update-transforms! (-> this root))
-  (update-trans! (-> this sound) (-> this root trans))
-  (if (and (-> this entity) (logtest? (-> this entity extra perm status) (entity-perm-status complete)))
-    (go (method-of-object this wait))
-    (go (method-of-object this pickup) #t (the-as handle #f)))
+  ;; Prevent level-authored buzzer pickups from becoming active processes.
+  (process-entity-status!
+    this
+    (entity-perm-status dead)
+    #t)
+  (deactivate this)
   (none))
 
 (defbehavior buzzer-init-by-other buzzer ((arg0 vector) (arg1 vector) (arg2 fact-info) (arg3 entity-actor))
@@ -1499,18 +1500,10 @@
               ((= v1-25 (pickup-type fuel-cell))
                 (set! sv-48 0)
                 #f)
+              ;; Buzzers may not spawn naturally from crates or other pickup births.
               ((= v1-25 (pickup-type buzzer))
-               (set! (-> s0-0 pickup-spawn-amount) arg2)
-               (let ((sv-176 (get-process *pickup-dead-pool* buzzer #x4000)))
-                 (set! v1-71
-                       (when sv-176
-                         (set! sv-192 (the-as (pointer process) v1-71))
-                         ((method-of-type buzzer activate) (the-as buzzer sv-176) arg4 'buzzer (the-as pointer #x70004000))
-                         (run-now-in-process sv-176 buzzer-init-by-other arg0 s1-0 s0-0 (-> self entity))
-                         (set! sv-192 (-> sv-176 ppointer))
-                         v1-71)))
-               (set! sv-48 0)
-               sv-48)
+                (set! sv-48 0)
+                #f)
               (else (format 0 "ERROR: unknown type of eco ~d~%" arg1) #f)))))
       sv-192)))
 

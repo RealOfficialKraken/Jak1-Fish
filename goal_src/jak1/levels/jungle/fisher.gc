@@ -693,6 +693,7 @@
    (cheat-temp      int32)
    (hard            symbol)
    (training        symbol)
+   (school-spawned? symbol)
    (params          fisher-params :inline))
   (:states
    fisher-done
@@ -840,7 +841,7 @@
                         :to
                         *entity-pool*)
          (sound-play "get-big-fish")
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-caught 5))
+         (send-event (ppointer->process (-> self parent)) 'fisher-fish-caught 200))
         (else
          (process-spawn part-tracker
                         :init
@@ -854,7 +855,7 @@
                         :to
                         *entity-pool*)
          (sound-play "get-small-fish")
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-caught 1)))
+         (send-event (ppointer->process (-> self parent)) 'fisher-fish-caught 200)))
       (set! (-> self vel) (/ (-> self vel) 4))
       (while (< 0.1 (-> self root scale x))
         (set! (-> self offset) (-> (the-as fisher (-> self parent 0)) paddle))
@@ -875,7 +876,7 @@
            (if (< 0.5 f0-2)
              (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA04" #t (-> self root trans))
              (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA05" #t (-> self root trans))))
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-die 5))
+         (send-event (ppointer->process (-> self parent)) 'fisher-fish-die 200))
         (else
          (let ((f0-5 (rand-float-gen)))
            (cond
@@ -890,7 +891,7 @@
              ((< 0.1666 f0-5) (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA09" #t (-> self root trans)))
              ((> (-> (the-as fisher (-> self parent 0)) missed) 0)
               (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA10" #t (-> self root trans)))))
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-die 1)))))
+         (send-event (ppointer->process (-> self parent)) 'fisher-fish-die 200)))))
 
 (defbehavior fisher-fish-init-by-other fisher-fish ((arg0 symbol) (arg1 float) (arg2 float))
   (set! (-> self mode) arg0)
@@ -1160,23 +1161,39 @@
     ((and (< (-> self params vel) 0.0) (>= 0.0 (-> self spawner)))
      (set! (-> self params vel) (- (-> self params vel)))
      (set! (-> self spawner) 0.0)))
-  (when (and (nonzero? (-> self params period)) (time-elapsed? (-> self spawn-time) (-> self params period)))
-    (let ((gp-0 (cond
-                  ((rand-vu-percent? (-> self params powerup-percent))
-                   (if (and (time-elapsed? (-> self ambient-big-one) (seconds 30))
-                            (play-ambient (-> self ambient) "FIS-TA03" #t (-> self root trans)))
-                     (set-time! (-> self ambient-big-one)))
-                   'powerup)
-                  ((rand-vu-percent? (-> self params bad-percent)) 'bad)
-                  ((rand-vu-percent? (-> self params deadly-percent)) 'deadly)
-                  (else 'normal))))
-      (if (and (!= gp-0 'bad) (< 0.8 (fabs (- (-> self spawner-last) (-> self spawner)))))
-        (set! (-> self spawner) (* 0.5 (+ (-> self spawner-last) (-> self spawner)))))
-      (set! (-> self spawner-last) (-> self spawner))
-      (set-time! (-> self spawn-time))
-      (sound-play "fish-spawn" :vol 70)
-      (fisher-spawn-ambient)
-      (process-spawn fisher-fish gp-0 (-> self spawner) (* 1.85 (-> self params fish-vel)) :to self)))
+  ;; Spawn every safe fish type together once, at the exact same lane.
+  ;; Poison fish use fishc through the bad/deadly modes, so those modes are
+  ;; deliberately excluded.
+  (when
+    (not (-> self school-spawned?))
+
+    (set! (-> self school-spawned?) #t)
+    (set! (-> self spawner) 0.5)
+    (set! (-> self spawner-last) 0.5)
+    (set-time! (-> self spawn-time))
+
+    (sound-play "fish-spawn" :vol 70)
+
+    ;; The initial parameter block has fish-vel = 0.0, so using it here
+    ;; creates motionless fish. Give the simultaneous school a fixed forward
+    ;; path speed equivalent to the normal early-game fish speed.
+    ;; fisha
+    (process-spawn
+      fisher-fish
+      'normal
+      0.5
+      2.775
+      :to
+      self)
+
+    ;; fishb
+    (process-spawn
+      fisher-fish
+      'powerup
+      0.5
+      2.775
+      :to
+      self))
   (let ((f1-14 (analog-input (the-as int (-> *cpad-list* cpads 0 leftx)) 128.0 32.0 110.0 28.0)))
     (+! (-> self paddle-vel) (* f1-14 (seconds-per-frame))))
   (seek! (-> self paddle-vel) 0.0 (* 15.0 (seconds-per-frame)))
@@ -1256,6 +1273,7 @@
       (set! (-> self missed) 0)
       (set! (-> self spawner) 0.5)
       (set! (-> self spawner-last) 0.5)
+      (set! (-> self school-spawned?) #f)
       (set! (-> self swing-time) 0)
       (set! (-> self block) -1)
       (set-time! (-> self block-time))

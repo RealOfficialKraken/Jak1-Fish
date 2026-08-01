@@ -751,17 +751,47 @@
 
 (defbehavior crate-init-by-other crate ((arg0 entity) (arg1 vector) (arg2 symbol))
   (params-init self arg0)
-  (set! (-> self root trans quad) (-> arg1 quad))
-  (set! (-> self look) arg2)
-  (set! (-> self defense) arg2)
-  (art-init self)
-  (check-dead self)
+
+  ;; Do not allow scout-fly buzzer crates or precursor-orb crates to exist.
+  ;; params-init has already read the crate's pickup type, but art/collision
+  ;; setup is stopped before the crate becomes visible or interactive.
+  (cond
+    ((or
+        (= (-> self fact pickup-type) (pickup-type buzzer))
+        (= (-> self fact pickup-type) (pickup-type money)))
+
+      (when (-> self entity)
+        (process-entity-status! self (entity-perm-status dead) #t)
+        (process-entity-status! self (entity-perm-status complete) #t))
+
+      (deactivate self))
+
+    (else
+      (set! (-> self root trans quad) (-> arg1 quad))
+      (set! (-> self look) arg2)
+      (set! (-> self defense) arg2)
+      (art-init self)
+      (check-dead self)))
+
   (none))
 
 (defmethod init-from-entity! ((this crate) (arg0 entity-actor))
   (params-init this arg0)
-  (art-init this)
-  (check-dead this)
+
+  ;; Remove the crate process itself, not merely the pickup it would contain.
+  (cond
+    ((or
+        (= (-> this fact pickup-type) (pickup-type buzzer))
+        (= (-> this fact pickup-type) (pickup-type money)))
+
+      (process-entity-status! this (entity-perm-status dead) #t)
+      (process-entity-status! this (entity-perm-status complete) #t)
+      (deactivate this))
+
+    (else
+      (art-init this)
+      (check-dead this)))
+
   (none))
 
 (defmethod params-init ((this crate) (arg0 entity))

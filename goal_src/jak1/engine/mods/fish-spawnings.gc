@@ -334,6 +334,35 @@
 
   (none))
 
+(defun maintain-sentinel-pontoon! ()
+  (let ((inside
+        (when *level*
+          (level-get-target-inside *level*))))
+
+    (cond
+      ((and
+          inside
+          (= (-> inside name) 'beach))
+
+        (when
+          (not *sentinel-pontoon-spawned?*)
+
+          (spawn-pontoon-swimmer
+            (new 'static 'vector
+              :x (meters -291.4279)
+              :y (meters 0.4322)
+              :z (meters -273.1889)
+              :w 1.0)
+            0
+            157.46)
+
+          (set! *sentinel-pontoon-spawned?* #t)))
+
+      (else
+        (set! *sentinel-pontoon-spawned?* #f))))
+
+  (none))
+
 (defun fisher-fish-distance ((self fisher-game) (slot int))
   (cond
     ((= slot 0) (-> self fish-distance-0))
@@ -1117,6 +1146,12 @@
     ((= species 2)
       "BABAK ECOFISH")
 
+    ((= species 3)
+      "LURKER SHARK")
+
+    ((= species 4)
+      "SCOUT FLY")
+
     (else
       "ECO DRUM")))
 
@@ -1141,11 +1176,16 @@
 
       (base-weight
         (cond
+          ;; Lurker Shark always weighs exactly 26.0 pounds.
+          ((= species 3) 260)
           ((= species 1) (rand-vu-int-range 20 50))
           ((= species 2) (rand-vu-int-range 20 41))
           (else (rand-vu-int-range 10 20)))))
 
     (cond
+      ;; Prefixes still affect its name/value, but never its fixed weight.
+      ((= species 3) 260)
+
       ((= suffix 0)
         (max
           1
@@ -1219,6 +1259,145 @@
       (+! i 1)))
 
   (none))
+
+(defun fisher-add-lurker-shark-slot!
+  ((self fisher-game))
+
+  ;; Sentinel Pontoon and Jungle Pillar have a 30% chance to replace one
+  ;; already-generated fish with exactly one Lurker Shark.
+  ;;
+  ;; When the roll fails, the original fish remains in this slot, so the
+  ;; location's total fish count never changes.
+  (when
+    (and
+      (> (-> self fish-count) 0)
+      (rand-vu-percent? 0.50))
+
+    (let ((slot
+          (- (-> self fish-count) 1)))
+
+      (fisher-set-fish-species! self slot 3)
+      (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+      (fisher-set-fish-level!
+        self
+        slot
+        (fisher-roll-level-in-range
+          (-> self fish-level-min)
+          (-> self fish-level-max)))
+      (fisher-set-fish-weight-tenths! self slot 260)))
+
+  (none))
+
+(defun fisher-buzzer-task-for-location ((self fisher-game))
+  (cond
+    ((= (-> self location-id) 1) (game-task jungle-buzzer))
+    ((= (-> self location-id) 2) (game-task training-buzzer))
+    ((= (-> self location-id) 3) (game-task beach-buzzer))
+    (else (game-task village1-buzzer))))
+
+(defun fisher-find-missing-buzzer-index
+  ((task game-task) (start int) (exclude int))
+
+  (let ((step 0)
+      (index 0))
+
+    (while (< step 7)
+      (set! index (mod (+ start step) 7))
+
+      (when
+        (and
+          (!= index exclude)
+          (not (got-buzzer? *game-info* task index)))
+
+        (return index))
+
+      (+! step 1))
+
+    -1))
+
+(defun fisher-add-buzzer-fish-slots! ((self fisher-game))
+  ;; One overall 50% roll whenever a Scout Fly group is eligible. These replace ordinary fish,
+  ;; so the total number of fish in the area does not increase.
+  (let* ((task (fisher-buzzer-task-for-location self))
+      (collected (buzzer-count *game-info* task))
+      (remaining (- 7 collected))
+      (spawn-count 0)
+      (first-index -1)
+      (second-index -1)
+      (start-index (rand-vu-int-range 0 6)))
+
+    (when
+      (and
+        (> remaining 0)
+        (> (-> self fish-count) 0)
+        (rand-vu-percent? 0.50))
+
+      (set! spawn-count 1)
+
+      ;; If at least two flies are missing, a successful school has a 35%
+      ;; chance to contain a second scout fly.
+      (when
+        (and
+          (> remaining 1)
+          (> (-> self fish-count) 1)
+          (rand-vu-percent? 0.35))
+
+        (set! spawn-count 2))
+
+      (set! first-index
+        (fisher-find-missing-buzzer-index task start-index -1))
+
+      (when (>= first-index 0)
+        (let ((slot (- (-> self fish-count) 1)))
+          (fisher-set-fish-species! self slot 4)
+          (fisher-set-fish-suffix! self slot 2)
+          (fisher-set-fish-level!
+            self
+            slot
+            (fisher-roll-level-in-range
+              (-> self fish-level-min)
+              (-> self fish-level-max)))
+          ;; Species 4 uses the weight field to retain its unique 0..6 fly ID.
+          (fisher-set-fish-weight-tenths! self slot first-index)
+
+          ;; During a live reroll this slot may still contain an ordinary fish
+          ;; process. Remove it so fisher-refill-missing-fish! creates the
+          ;; correct Scout Fly process using *buzzer-sgc*.
+          (let ((old-fish (fisher-fish-pointer self slot)))
+            (when old-fish
+              (deactivate (-> old-fish 0))
+              (fisher-set-fish-pointer!
+                self
+                slot
+                (the-as (pointer manipy) #f))))))
+
+      (when (= spawn-count 2)
+        (set! second-index
+          (fisher-find-missing-buzzer-index task (+ start-index 1) first-index))
+
+        (when (>= second-index 0)
+          (let ((slot (- (-> self fish-count) 2)))
+            (fisher-set-fish-species! self slot 4)
+            (fisher-set-fish-suffix! self slot 2)
+            (fisher-set-fish-level!
+              self
+              slot
+              (fisher-roll-level-in-range
+                (-> self fish-level-min)
+                (-> self fish-level-max)))
+            (fisher-set-fish-weight-tenths! self slot second-index)
+
+            ;; As above, force a live ordinary-fish process to be recreated as
+            ;; the selected Scout Fly.
+            (let ((old-fish (fisher-fish-pointer self slot)))
+              (when old-fish
+                (deactivate (-> old-fish 0))
+                (fisher-set-fish-pointer!
+                  self
+                  slot
+                  (the-as (pointer manipy) #f))))))))
+
+  (none)))
 
 (defun fisher-configure-sandover-table! ((self fisher-game))
   (set! (-> self fish-level-min) 1)
@@ -1298,7 +1477,44 @@
       self
       eco-count
       largemouth-count
-      babak-count))
+      babak-count)
+
+    (fisher-add-lurker-shark-slot! self))
+
+  (none))
+
+(defun fisher-configure-sentinel-pontoon-table! ((self fisher-game))
+  (set! (-> self fish-level-min) 2)
+  (set! (-> self fish-level-max) 4)
+
+  (let ((total-count 0)
+      (eco-count 0)
+      (largemouth-count 0)
+      (babak-count 0)
+      (remaining-count 0))
+
+    (if
+      (fisher-golden-hour?)
+      (set! total-count (rand-vu-int-range 12 14))
+      (set! total-count (rand-vu-int-range 5 8)))
+
+    ;; Keep all three Sentinel species represented while allowing the
+    ;; exact mix to vary each time the fishing session is configured.
+    (set! babak-count (rand-vu-int-range 1 (- total-count 2)))
+    (set! remaining-count (- total-count babak-count))
+    (set! largemouth-count (rand-vu-int-range 1 (- remaining-count 1)))
+    (set! eco-count (- remaining-count largemouth-count))
+
+    (set! (-> self sandover-eco-count) eco-count)
+    (set! (-> self sandover-largemouth-count) largemouth-count)
+
+    (fisher-assign-table-slots!
+      self
+      eco-count
+      largemouth-count
+      babak-count)
+
+    (fisher-add-lurker-shark-slot! self))
 
   (none))
 
@@ -1310,8 +1526,13 @@
     ((= (-> self location-id) 2)
       (fisher-configure-training-lagoon-table! self))
 
+    ((= (-> self location-id) 3)
+      (fisher-configure-sentinel-pontoon-table! self))
+
     (else
       (fisher-configure-sandover-table! self)))
+
+  (fisher-add-buzzer-fish-slots! self)
 
   (none))
 
@@ -1325,6 +1546,10 @@
 
       (base-scale
         (cond
+          ((= species 3) (if catch-display? 0.78 0.56))
+
+          ((= species 4) (if catch-display? 0.72 0.48))
+
           ((= species 2) (if catch-display? 0.95 0.75))
 
           (catch-display? 0.55)
@@ -1338,22 +1563,44 @@
 
       (z-scale 1.0)
 
-      (r (cond ((= species 1) 0.32) ((= species 2) 1.00) (else 0.25)))
+      ;; Shark art must retain its authored colors.
+      (r (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 1) 0.32) ((= species 2) 1.00) (else 0.25)))
 
-      (g (cond ((= species 1) 0.78) ((= species 2) 1.00) (else 0.88)))
+      (g (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 1) 0.78) ((= species 2) 1.00) (else 0.88)))
 
       (b
         (cond
+          ((= species 4) 1.00)
+          ((= species 3) 1.00)
           ((= species 1) 0.25)
           ((= species 2) 1.00)
           (else 1.00))))
 
-    (cond
-      ((= suffix 0) (set! x-scale 0.84) (set! z-scale 1.10))
+    ;; Prefix shape/size effects remain available. The shark preserves its
+    ;; authored color except for Mutant and Golden.
+    (when
+      (= suffix 0)
+      (set! x-scale 0.84)
+      (set! z-scale 1.10))
 
-      ((= suffix 1) (*! r 0.72) (*! g 0.72) (*! b 0.72))
+    (when
+      (= suffix 5)
+      (*! x-scale 2.0)
+      (*! y-scale 2.0)
+      (*! z-scale 2.0))
 
-      ((= suffix 3)
+    (when
+      (and
+        (!= species 4)
+        (or
+          (!= species 3)
+          (= suffix 3)
+          (= suffix 6)))
+
+      (cond
+        ((= suffix 1) (*! r 0.72) (*! g 0.72) (*! b 0.72))
+
+        ((= suffix 3)
         (let ((color-roll
               (mod
                 (+ (* slot 3) species)
@@ -1375,12 +1622,10 @@
 
       ((= suffix 4) (*! r 1.10) (*! g 1.10) (*! b 1.10))
 
-      ((= suffix 5) (*! x-scale 2.0) (*! y-scale 2.0) (*! z-scale 2.0))
-
-      ((= suffix 6)
-        (set! r 1.00)
-        (set! g 0.72)
-        (set! b 0.06)))
+        ((= suffix 6)
+          (set! r 1.00)
+          (set! g 0.72)
+          (set! b 0.06))))
 
     (set-vector! (-> fish-proc root scale) (* base-scale x-scale) (* base-scale y-scale) (* base-scale z-scale) 1.0)
 
@@ -1462,6 +1707,14 @@
 
       ((= (fisher-fish-species self slot) 2) (rand-vu-float-range (meters 26.0) (meters 29.0)))
 
+      ;; Lurker Shark is always a deepwater fish.
+      ((= (fisher-fish-species self slot) 3)
+        (rand-vu-float-range (meters 30.0) (meters 33.0)))
+
+      ;; Scout flies stay in the visible middle/deep band.
+      ((= (fisher-fish-species self slot) 4)
+        (rand-vu-float-range (meters 17.0) (meters 22.0)))
+
       (else
         (rand-vu-float-range
           (meters 10.0)
@@ -1477,9 +1730,11 @@
 
   (fisher-set-fish-turn-old-direction! self slot (fisher-fish-direction self slot))
 
-  (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
-
-  (fisher-randomize-fish-level-and-weight! self slot)
+  ;; A scout-fly slot stores its unique fly index in fish-weight-tenths.
+  ;; Do not overwrite that index when randomizing its movement.
+  (when (!= (fisher-fish-species self slot) 4)
+    (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+    (fisher-randomize-fish-level-and-weight! self slot))
 
   (none))
 
@@ -1601,6 +1856,10 @@
             ((= (fisher-fish-species owner slot) 1) *catch-fishb-sgc*)
 
             ((= (fisher-fish-species owner slot) 2) *fisher-junglefish-sg*)
+
+            ((= (fisher-fish-species owner slot) 3) *sharkey-sgc*)
+
+            ((= (fisher-fish-species owner slot) 4) *buzzer-sgc*)
 
             (else
               *catch-fisha-sgc*))
@@ -1947,12 +2206,114 @@
 
   (none))
 
+(defun fisher-catch-buzzer-fish! ((self fisher-game) (slot int))
+  (let* ((task (fisher-buzzer-task-for-location self))
+      (buzzer-index (fisher-fish-weight-tenths self slot))
+      (fish (fisher-fish-pointer self slot))
+      (before-count (buzzer-count *game-info* task))
+      (after-count before-count)
+      (awarded? #f))
+
+    ;; A live slot can never intentionally reuse a collected fly. Still, check
+    ;; again here and recover by selecting another missing index if its stored
+    ;; index became stale for any reason.
+    (when
+      (or
+        (< buzzer-index 0)
+        (>= buzzer-index 7)
+        (got-buzzer? *game-info* task buzzer-index))
+
+      (set!
+        buzzer-index
+        (fisher-find-missing-buzzer-index
+          task
+          (rand-vu-int-range 0 6)
+          -1)))
+
+    ;; Award the area-specific fly before drawing the loot menu.
+    (when
+      (and
+        (>= buzzer-index 0)
+        (< buzzer-index 7)
+        (not (got-buzzer? *game-info* task buzzer-index)))
+
+      (send-event
+        *target*
+        'get-pickup
+        (pickup-type buzzer)
+        (the float
+          (logior
+            (the int task)
+            (ash buzzer-index 16))))
+
+      (set! after-count (buzzer-count *game-info* task))
+      (set! awarded? (> after-count before-count))
+
+      (when awarded?
+        (runs-on-fly-pickup)
+        (close-specific-task! task (task-status need-hint))))
+
+    ;; Give the normal scout-fly HUD fly-in immediately, while preserving the
+    ;; reeled-in model for the fishing loot presentation.
+    (when
+      (and awarded? fish)
+      (let* ((fish-proc (the-as manipy (-> fish 0 self)))
+          (hud-fly
+            (manipy-spawn
+              (-> fish-proc root trans)
+              #f
+              *buzzer-sgc*
+              #f
+              :to *entity-pool*)))
+
+        (when hud-fly
+          (send-event
+            (ppointer->process hud-fly)
+            'become-hud-object
+            (ppointer->process (-> *hud-parts* buzzers))))))
+
+    (set! (-> self caught-fish-species) 4)
+    (set! (-> self caught-fish-suffix) 2)
+    (set! (-> self caught-fish-level) (fisher-fish-level self slot))
+    (set! (-> self caught-weight-tenths) 0)
+    (set! (-> self caught-orb-value) 0)
+    (set! (-> self caught-fish-xp) 0)
+    (set! (-> self caught-buzzer-task) (the int task))
+    (set! (-> self caught-buzzer-count) (buzzer-count *game-info* task))
+
+    ;; Only the seventh fly schedules the power-cell reward. All Scout Fly
+    ;; catches still use the normal catch transition and loot-menu animation.
+    (set!
+      (-> self buzzer-victory-pending?)
+      (and awarded? (>= (-> self caught-buzzer-count) 7)))
+
+    (set! (-> self fish-state) 'catch-return)
+    (set! (-> self cast-state) 'catch-transition)
+    (set! (-> self catch-transition-time) 0.0)
+    (set! (-> self catch-menu-offset) 150.0)
+    (set! (-> self camera-state) 'before-cast)
+    (set! (-> self casted?) #f)
+    (set! (-> self fish-fighting?) #f)
+    (set! (-> self fish-fight-time) 0.0)
+    (set! (-> self fish-fight-phase) 0.0)
+    (set! (-> self fish-fight-base-y) 0.0)
+    (stop-sound-file "water-waves.wav")
+    (fisher-remove-lure-snake! self))
+
+  (none))
+
 (defun fisher-finish-manipy-catch!
   ((self fisher-game) (slot int))
 
   (fisher-play-fish-win-sound!)
 
-  (let* ((species
+  (when (= (fisher-fish-species self slot) 4)
+    (fisher-catch-buzzer-fish! self slot))
+
+  ;; Buzzer catches already set up the full fishing exit. Do not run the
+  ;; ordinary fish reward/menu cleanup path afterward.
+  (unless (= (fisher-fish-species self slot) 4)
+    (let* ((species
           (fisher-fish-species self slot))
 
       (suffix
@@ -1974,13 +2335,20 @@
         (fisher-level-worth-multiplier fish-level jak-level))
 
       (base-value
-        (if
-          (or (= species 1) (= species 2))
-          2.0
-          1.0))
+        (cond
+          ((= species 3) 3.0)
+          ((or (= species 1) (= species 2)) 2.0)
+          (else 1.0)))
 
+      ;; Shark catches give substantially more XP than same-level fish.
       (catch-xp
-        (fisher-calculate-catch-xp fish-level suffix))
+        (the int
+          (+
+            (*
+              (the float
+                (fisher-calculate-catch-xp fish-level suffix))
+              (if (= species 3) 1.75 1.0))
+            0.5)))
 
       (raw-orb-value
         (the int
@@ -2026,7 +2394,7 @@
   (set! (-> self fish-fight-phase) 0.0)
   (set! (-> self fish-fight-base-y) 0.0)
   (stop-sound-file "water-waves.wav")
-  (fisher-remove-lure-snake! self)
+  (fisher-remove-lure-snake! self))
 
   (none))
 
@@ -2063,15 +2431,15 @@
     :type string
 
     ;; Page 0
-    "AVAST! THERE BE VICIOUS FISH IN OUR WATERS!"
+    "YOU BEST NOT BE HERE TO TELL ME"
+    "YE NEED ME TO FISH FER YA!"
     ""
-    ""
-    ""
+    "GO AWAY!"
 
     "..."
     "EHH.. SORRY LAD."
     "I'VE JUST BEEN HAVIN' A LITTLE TROUBLE WITH"
-    "CATCHIN' THESE DAYS."
+    "THE PEOPLE THESE DAYS."
 
     "SOMETHIN'S FISHY HERE."
     "FIRST, ALL OF EVERYONE'S POWERCELLS WERE"
@@ -2103,15 +2471,16 @@
     'boxed-array
     :type string
 
-    "AVAST! THERE BE VICIOUS FISH IN OUR WATERS!"
+    ;; Page 0
+    "YOU BEST NOT BE HERE TO TELL ME"
+    "YE NEED ME TO FISH FER YA!"
     ""
-    ""
-    ""
+    "GO AWAY!"
 
     "..."
     "EHH.. SORRY LAD."
     "I'VE JUST BEEN HAVIN' A LITTLE TROUBLE WITH"
-    "CATCHIN' THESE DAYS."
+    "THE PEOPLE THESE DAYS."
 
     "SOMETHIN'S FISHY HERE."
     "FIRST, ALL OF EVERYONE'S POWERCELLS WERE"
@@ -2129,7 +2498,7 @@
     ""
 
     "FIND A FISHIN SPOT ON THIS ISLAND, AND"
-    "AND BRING BACK 10 PRECURSOR ORBS."
+    "BRING BACK 10 PRECURSOR ORBS."
     ""
     "THERE'S BOUND TO BE ONE SOMEWHERE."
     
@@ -2157,7 +2526,7 @@
 
     ;; Page 2
     "BRING ME BACK 10 PRECURSOR ORBS."
-    "IT'LL PAY US TO GET OUT OF HERE."
+    ""
     ""
     ""))
 
@@ -2173,7 +2542,7 @@
     ""
 
     ;; Page 1
-    "YE GOT 10 PRECURSOR ORBS!"
+    "YE GOT ME 10 PRECURSOR ORBS!"
     ""
     ""
     ""
@@ -2198,15 +2567,15 @@
 
     ;; Page 5
     "..OH, AND ONE MORE THING"
-    ""
-    ""
+    "THERE BE CERTAIN HOURS TO FISH, TOO!"
+    "WE FISHERMEN CALL THIS 'GOLDEN HOUR'."
     ""
 
     ;; Page 6
-    "THERE BE CERTAIN HOURS TO FISH, TOO!"
-    "SOME FER QUANTITY, SOME FER QUALITY."
-    "CERTAIN FISH CAN'T BE CAUGHT IN THE DAY"
-    "OR DARK"))
+    "IT BE THE BEST TIME TO FISH. ALTHOUGH,"
+    "CERTAIN FISH TYPES CAN ONLY BE CAUGHT"
+    "DURING SPECIFIC TIMES"
+    "KEEP AN EYE OUT, LAD."))
 
 (define *fisher-man-completed-dialogue-lines*
   (new 'static

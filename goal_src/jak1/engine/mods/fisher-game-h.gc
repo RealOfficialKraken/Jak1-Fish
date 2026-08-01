@@ -7,7 +7,11 @@
 ;; Compile this file before every other fishing source file.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+
+
 (define *fisher-level-cap* 20)
+(define *fisher-stop-lure-unlock-level* 2)
+(define *fisher-sink-lure-unlock-level* 5)
 
 (define *fisher-line-hp-max* 100.0)
 
@@ -90,6 +94,7 @@
 (define *main-menu-saved-music-volume* 0.0)
 
 (define *training-pontoon-spawned?* #f)
+(define *sentinel-pontoon-spawned?* #f)
 
 (define *main-menu-saved-jak-pos*
   (new 'global 'vector))
@@ -220,6 +225,12 @@
     (bubble-time                 float)
     (stored-music-vol            float)
     (reel-hint-time              float)
+    (lure-stop-active?           symbol)
+    (lure-stop-used?             symbol)
+    (lure-stop-time              float)
+    (lure-sink-active?           symbol)
+    (lure-sink-used?             symbol)
+    (lure-sink-time              float)
     (lure-snake                  (pointer manipy))
     (lure-snake-angle            vector :inline)
     (lure-snake-angular-speed    vector :inline)
@@ -232,6 +243,9 @@
     (fish-state                  symbol)
     (fish-message                basic)
     (fish-message-time           float)
+    (buzzer-victory-pending?     symbol)
+    (caught-buzzer-count         int)
+    (caught-buzzer-task          int)
     (fish-count                  int)
     (fish-0                      (pointer manipy))
     (fish-1                      (pointer manipy))
@@ -638,6 +652,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun-extern draw-fisher-large-font-scaled string int int float none)
+(defun-extern fisher-smoothstep float float)
+(defun-extern fisher-draw-reel-hint-text string int int float none)
+(defun-extern fisher-draw-reel-hint-text-red string int int float none)
+(defun-extern fisher-reset-level-up-window! none)
 (defun-extern fisher-add-fishing-xp! int int)
 (defun-extern fisher-accepted-xp-amount int int)
 (defun-extern fisher-start-xp-gain-animation! vector int none)
@@ -651,6 +669,11 @@
 (defun-extern fisher-xp-suffix-multiplier int float)
 (defun-extern fisher-roll-level-in-range int int int)
 (defun-extern fisher-xp-needed-for-level int int)
+(define-extern *fisher-level-up-window-pending?* symbol)
+(define-extern *fisher-level-up-window-request?* symbol)
+(define-extern *fisher-level-up-window-old-level* int)
+(define-extern *fisher-level-up-window-new-level* int)
+(define-extern *fisher-level-up-window-skill-mask* int)
 (defun-extern draw-fisher-small-text string int int none)
 (defun-extern draw-mod-menu-text-custom string int int symbol symbol symbol none)
 (defun-extern fisher-apply-slot-appearance! fisher-game int manipy symbol none)
@@ -724,6 +747,7 @@
 (defun-extern main-menu-update-time-of-day! none)
 (defun-extern main-menu-update-title-screen! none)
 (defun-extern maintain-training-pontoon! none)
+(defun-extern maintain-sentinel-pontoon! none)
 (defun-extern revert-scene-camera none)
 (defun-extern singlefish-start-session! fisher-game none)
 (defun-extern singlefish-prefix->suffix singlefish-base int)

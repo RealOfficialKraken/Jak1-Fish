@@ -12,6 +12,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define *fisher-background-cloud-visible?* #f)
+(define *fisher-background-cloud-session-active?* #f)
 
 (define *fisher-curtain-color-0a* (new 'static 'rgba :r #x1c :g #x70 :b #x8c :a #xff))
 (define *fisher-curtain-color-0b* (new 'static 'rgba :r #x20 :g #x7a :b #x94 :a #xff))
@@ -25,6 +26,399 @@
 (define *fisher-curtain-color-4b* (new 'static 'rgba :r #x0c :g #x40 :b #x60 :a #xff))
 (define *fisher-curtain-color-5a* (new 'static 'rgba :r #x06 :g #x28 :b #x48 :a #xff))
 (define *fisher-curtain-color-5b* (new 'static 'rgba :r #x09 :g #x30 :b #x50 :a #xff))
+
+(defun fisher-set-particle-fishbox-rotation!
+  ((self fisher-game))
+
+  ;; The curtain plane is built from self.camera-axis:
+  ;;
+  ;;   camera-axis.x = sin(camera-angle)
+  ;;   camera-axis.z = cos(camera-angle)
+  ;;
+  ;; Therefore its actual world-space orientation is camera-angle around Y.
+  ;; Use that exact same yaw for every 3D underwater particle. Do not derive
+  ;; this from playfield-angle and do not use screen-space rot-z.
+  (let ((curtain-yaw
+          (-> self camera-angle)))
+
+    ;; All four definitions place rot-y at init-spec index 5.
+    (set!
+      (-> *part-id-table* 3570 init-specs 5 initial-valuef)
+      curtain-yaw)
+
+    (set!
+      (-> *part-id-table* 3571 init-specs 5 initial-valuef)
+      curtain-yaw)
+
+    (set!
+      (-> *part-id-table* 3572 init-specs 5 initial-valuef)
+      curtain-yaw)
+
+    (set!
+      (-> *part-id-table* 3574 init-specs 5 initial-valuef)
+      curtain-yaw))
+
+  (none))
+
+
+(define *fisher-level-up-window-state* 'hidden)
+(define *fisher-level-up-window-time* 0.0)
+(define *fisher-level-up-window-offset* 150.0)
+
+(defun fisher-level-up-window-active? ()
+  (!= *fisher-level-up-window-state* 'hidden))
+
+(defun fisher-level-up-blocking? ()
+  (or
+    *fisher-level-up-window-pending?*
+    *fisher-level-up-window-request?*
+    (fisher-level-up-window-active?)))
+
+(defun fisher-reset-level-up-window! ()
+  (set! *fisher-level-up-window-state* 'hidden)
+  (set! *fisher-level-up-window-time* 0.0)
+  (set! *fisher-level-up-window-offset* 150.0)
+  (set! *fisher-level-up-window-pending?* #f)
+  (set! *fisher-level-up-window-request?* #f)
+  (set! *fisher-level-up-window-old-level* 1)
+  (set! *fisher-level-up-window-new-level* 1)
+  (set! *fisher-level-up-window-skill-mask* 0)
+  (none))
+
+(defun fisher-begin-level-up-window! ()
+  (when
+    (and
+      *fisher-level-up-window-request?*
+      (= *fisher-level-up-window-state* 'hidden))
+
+    (set! *fisher-level-up-window-request?* #f)
+    (set! *fisher-level-up-window-state* 'enter)
+    (set! *fisher-level-up-window-time* 0.0)
+    (set! *fisher-level-up-window-offset* 150.0))
+
+  (none))
+
+(defun fisher-update-level-up-window! ()
+  (fisher-begin-level-up-window!)
+
+  (when
+    (fisher-level-up-window-active?)
+
+    (let ((dt
+          (-> *display* seconds-per-frame)))
+
+      (+! *fisher-level-up-window-time* dt)
+
+      (cond
+        ((= *fisher-level-up-window-state* 'enter)
+          (let* ((duration
+                0.65)
+
+              (progress
+                (fmin
+                  1.0
+                  (/ *fisher-level-up-window-time* duration)))
+
+              (ease
+                (fisher-smoothstep progress))
+
+              (bounce
+                (*
+                  10.0
+                  (sin (* (degrees 540.0) progress))
+                  (- 1.0 progress))))
+
+            (set!
+              *fisher-level-up-window-offset*
+              (+ (* 150.0 (- 1.0 ease)) bounce))
+
+            (when
+              (>= progress 1.0)
+
+              (set! *fisher-level-up-window-offset* 0.0)
+              (set! *fisher-level-up-window-time* 0.0)
+              (set! *fisher-level-up-window-state* 'display))))
+
+        ((= *fisher-level-up-window-state* 'display)
+          (when
+            (cpad-pressed? 0 x)
+
+            (cpad-clear! 0 x)
+            (set! *fisher-level-up-window-state* 'exit)
+            (set! *fisher-level-up-window-time* 0.0)))
+
+        ((= *fisher-level-up-window-state* 'exit)
+          (let* ((duration
+                0.48)
+
+              (progress
+                (fmin
+                  1.0
+                  (/ *fisher-level-up-window-time* duration)))
+
+              (ease
+                (fisher-smoothstep progress)))
+
+            (set!
+              *fisher-level-up-window-offset*
+              (* 150.0 ease))
+
+            (when
+              (>= progress 1.0)
+
+              (set! *fisher-level-up-window-state* 'hidden)
+              (set! *fisher-level-up-window-time* 0.0)
+              (set! *fisher-level-up-window-offset* 150.0)
+              (set! *fisher-level-up-window-skill-mask* 0)))))))
+
+  (none))
+
+(defun fisher-draw-level-up-title!
+  ((text string)
+   (text-x-pos int)
+   (text-y-pos int)
+   (text-scale float))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color orange)
+      (font-flags large middle shadow kerning)
+      text-scale))
+
+  (none))
+
+(defun fisher-draw-level-up-window! ()
+  (when
+    (and
+      (fisher-level-up-window-active?)
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let ((menu-offset
+          (the int *fisher-level-up-window-offset*))
+
+        (skill-mask
+          *fisher-level-up-window-skill-mask*)
+
+        ;; Keep the complete card inside Jak 1's visible 240-line UI area.
+        ;; Skill cards use a taller layout, but still stop at y = 230.
+        (panel-y
+          (if
+            (> *fisher-level-up-window-skill-mask* 0)
+            12
+            38))
+
+        (window-height
+          (if
+            (> *fisher-level-up-window-skill-mask* 0)
+            218
+            164))
+
+        (inner-height
+          (if
+            (> *fisher-level-up-window-skill-mask* 0)
+            210
+            156))
+
+        (continue-y
+          (if
+            (> *fisher-level-up-window-skill-mask* 0)
+            216
+            186)))
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        ;; Outer shadow/backplate.
+        (draw-sprite2d-xy
+          buf
+          48
+          (+ panel-y menu-offset)
+          416
+          window-height
+          (new 'static 'rgba
+            :r #x03
+            :g #x0c
+            :b #x14
+            :a #xe8))
+
+        ;; Inner blue panel.
+        (draw-sprite2d-xy
+          buf
+          52
+          (+ (+ panel-y 4) menu-offset)
+          408
+          inner-height
+          (new 'static 'rgba
+            :r #x0d
+            :g #x30
+            :b #x42
+            :a #xc8))
+
+        ;; Top title accent.
+        (draw-sprite2d-xy
+          buf
+          68
+          (+ (+ panel-y 38) menu-offset)
+          376
+          2
+          (new 'static 'rgba
+            :r #xd0
+            :g #x98
+            :b #x38
+            :a #xb0))
+
+        ;; Separate the general level-up information from the unlocked skill.
+        (when
+          (> skill-mask 0)
+
+          (draw-sprite2d-xy
+            buf
+            72
+            (+ 122 menu-offset)
+            368
+            2
+            (new 'static 'rgba
+              :r #x60
+              :g #x98
+              :b #xa8
+              :a #x98))))
+
+      (clear *fish-ui-str*)
+      (format
+        *fish-ui-str*
+        "LEVEL UP!  LV. ~D"
+        *fisher-level-up-window-new-level*)
+
+      (fisher-draw-level-up-title!
+        *fish-ui-str*
+        256
+        (+ (if (> skill-mask 0) 34 60) menu-offset)
+        0.62)
+
+      (draw-fisher-large-font-scaled
+        "YOUR FISHING POWER HAS INCREASED."
+        256
+        (+ (if (> skill-mask 0) 62 88) menu-offset)
+        0.40)
+
+      ;; Tighter line spacing and shorter copy keep this readable without
+      ;; allowing the text to run through the bottom of the screen.
+      (draw-fisher-large-font-scaled
+        "LOWER LEVEL FISH DEAL LESS LINE DAMAGE,"
+        256
+        (+ (if (> skill-mask 0) 82 108) menu-offset)
+        0.36)
+
+      (draw-fisher-large-font-scaled
+        "BUT ALSO GRANT LESS XP."
+        256
+        (+ (if (> skill-mask 0) 99 125) menu-offset)
+        0.38)
+
+      (cond
+        ((= skill-mask 1)
+          (fisher-draw-level-up-title!
+            "SKILL UNLOCKED: STOP LURE"
+            256
+            (+ 140 menu-offset)
+            0.46)
+
+          (draw-fisher-large-font-scaled
+            "PRESS <PAD_SQUARE> TO FREEZE THE LURE"
+            256
+            (+ 164 menu-offset)
+            0.36)
+
+          (draw-fisher-large-font-scaled
+            "FOR 3 SECONDS - ONCE PER CAST."
+            256
+            (+ 181 menu-offset)
+            0.36))
+
+        ((= skill-mask 2)
+          (fisher-draw-level-up-title!
+            "SKILL UNLOCKED: SINK LURE"
+            256
+            (+ 140 menu-offset)
+            0.46)
+
+          ;; Jak 1 has no R1 font icon. Draw red R1 text beside white copy.
+          (fisher-draw-reel-hint-text-red
+            "R1"
+            106
+            (+ 163 menu-offset)
+            0.37)
+
+          (fisher-draw-reel-hint-text
+            " SINKS THE LURE 3X FASTER"
+            126
+            (+ 163 menu-offset)
+            0.37)
+
+          (draw-fisher-large-font-scaled
+            "FOR 2 SECONDS - ONCE PER CAST."
+            256
+            (+ 181 menu-offset)
+            0.35)
+
+          (draw-fisher-large-font-scaled
+            "REELING OR A FISH BITE ENDS IT EARLY."
+            256
+            (+ 197 menu-offset)
+            0.32))
+
+        ((= skill-mask 3)
+          (fisher-draw-level-up-title!
+            "SKILLS UNLOCKED"
+            256
+            (+ 137 menu-offset)
+            0.46)
+
+          (draw-fisher-large-font-scaled
+            "<PAD_SQUARE> STOP LURE: FREEZE FOR 3 SECONDS."
+            256
+            (+ 159 menu-offset)
+            0.32)
+
+          (fisher-draw-reel-hint-text-red
+            "R1"
+            74
+            (+ 176 menu-offset)
+            0.34)
+
+          (fisher-draw-reel-hint-text
+            " SINK LURE: 3X FASTER FOR 2 SECONDS."
+            94
+            (+ 176 menu-offset)
+            0.34)
+
+          (draw-fisher-large-font-scaled
+            "EACH SKILL MAY BE USED ONCE PER CAST."
+            256
+            (+ 193 menu-offset)
+            0.31)))
+
+      (draw-fisher-large-font-scaled
+        "PRESS <PAD_X> TO CONTINUE"
+        256
+        (+ continue-y menu-offset)
+        0.43)))
+
+  (none))
 
 (defun spawn-fisher-net-at ((pos vector))
   (let ((net
@@ -193,6 +587,14 @@
 
   (set! (-> self reel-hint-time) 0.0)
 
+  (fisher-reset-level-up-window!)
+  (set! (-> self lure-stop-active?) #f)
+  (set! (-> self lure-stop-used?) #f)
+  (set! (-> self lure-stop-time) 0.0)
+  (set! (-> self lure-sink-active?) #f)
+  (set! (-> self lure-sink-used?) #f)
+  (set! (-> self lure-sink-time) 0.0)
+
   (set! (-> self lure-y-velocity) 0.0)
 
   (set! (-> self bubble-time) -2.0)
@@ -208,6 +610,9 @@
   (set! (-> self fish-scare-on-arrival?) #f)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
+  (set! (-> self buzzer-victory-pending?) #f)
+  (set! (-> self caught-buzzer-count) 0)
+  (set! (-> self caught-buzzer-task) 0)
   (set! (-> self fish-count) 0)
   (set! (-> self fish-0) (the-as (pointer manipy) #f))
   (set! (-> self fish-1) (the-as (pointer manipy) #f))
@@ -1175,11 +1580,67 @@
 
   (none))
 
+(defun fisher-draw-reel-hint-text-red
+  ((text string)
+   (text-x-pos int)
+   (text-y-pos int)
+   (text-scale float))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+
+  (format matt-str text)
+
+  (pc-encode-utf8-string
+    matt-str
+    *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+     (bucket-id subtitle))
+
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color red)
+      (font-flags large shadow kerning)
+      text-scale))
+
+  (none))
+
 (defun fisher-update-reel-hint! ((self fisher-game))
   (when
     (> (-> self reel-hint-time) 0.0)
 
-    ;; Keep this temporary lower-left hint smaller and slightly higher.
+    ;; Always show reel. Level 2 adds Stop Lure; level 5 adds Sink Lure above it.
+    (when
+      (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
+
+      ;; Jak 1 has no <PAD_R1> font icon. Draw the button name in red,
+      ;; followed by the action in the normal white hint color.
+      (fisher-draw-reel-hint-text-red
+        "R1"
+        10
+        162
+        0.55)
+
+      (fisher-draw-reel-hint-text
+        " SINK LURE"
+        25
+        162
+        0.55))
+
+    (when
+      (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
+
+      (fisher-draw-reel-hint-text
+        "<PAD_SQUARE> TO STOP LURE"
+        10
+        174
+        0.55))
+
     (fisher-draw-reel-hint-text
       "<PAD_X> TO REEL"
       10
@@ -1206,6 +1667,8 @@
     (set! (-> spray-pos y) (- (-> self water-level) (meters 0.05)))
 
     (set! (-> spray-pos w) 1.0)
+
+    (fisher-set-particle-fishbox-rotation! self)
 
     (launch-particles :system *sp-particle-system-3d* (-> *part-id-table* 3571) spray-pos)
   )
@@ -1335,180 +1798,96 @@
 
   (none))
 
-(defun fisher-background-cloud-particle-update
-  ((system sparticle-system)
-   (particle sparticle-cpuinfo)
-   (render-data pointer))
-
-  (let* ((dt
-          (-> *display* seconds-per-frame))
-
-      (age
-        (+ (-> particle omega) dt))
-
-      ;; Particle timers run at 300 ticks per second.
-      (remaining
-        (/ (the float (-> particle timer)) 300.0))
-
-      (fade-in
-        (fmax
-          0.0
-          (fmin
-            1.0
-            (/ age 2.5))))
-
-      (fade-out
-        (fmax
-          0.0
-          (fmin
-            1.0
-            (/ remaining 4.0))))
-
-      (visible-alpha
-        0.0))
-
-    (set! (-> particle omega) age)
-
-    ;; Keep the particle alive and updating above water, but suppress only
-    ;; its rendered alpha. Returning underwater reveals the existing field.
-    (when
-      *fisher-background-cloud-visible?*
-
-      (set!
-        visible-alpha
-        (*
-          (-> particle user-float)
-          (fmin fade-in fade-out))))
-
-    ;; 3D particles render from sprite-vec-data-3d, not from the
-    ;; CPU-side sprite copy. Write the alpha into the actual render record.
-    (set!
-      (->
-        (the-as sprite-vec-data-3d render-data)
-        r-g-b-a
-        w)
-      visible-alpha))
-
-  (none))
 
 (defun fisher-update-background-mist-color! ()
-  ;; Defpart 3572 stores its live RGB values in init-spec slots 7, 8 and 9.
-  (set!
-    (-> *part-id-table* 3572 init-specs 7 initial-valuef)
-    (fmax
-      0.0
-      (fmin 255.0 (-> *fisher-underwater-haze-color* x))))
-
+  ;; Match the live underwater background exactly. Visibility now comes from
+  ;; the texture at low alpha, not from artificially brightening its RGB.
   (set!
     (-> *part-id-table* 3572 init-specs 8 initial-valuef)
-    (fmax
-      0.0
-      (fmin 255.0 (-> *fisher-underwater-haze-color* y))))
+    (-> *fisher-underwater-haze-color* x))
 
   (set!
     (-> *part-id-table* 3572 init-specs 9 initial-valuef)
-    (fmax
-      0.0
-      (fmin 255.0 (-> *fisher-underwater-haze-color* z))))
+    (-> *fisher-underwater-haze-color* y))
+
+  (set!
+    (-> *part-id-table* 3572 init-specs 10 initial-valuef)
+    (-> *fisher-underwater-haze-color* z))
+
+  (none))
+
+(defun fisher-submit-background-mist!
+  ((self fisher-game))
+
+  ;; Submit immediately after the curtain so this true 3D sprite remains in
+  ;; front of it in the retail render chain.
+  (when
+    (and
+      *fisher-background-cloud-session-active?*
+      (-> self camera-underwater?))
+
+    (let ((curtain-forward
+            (new 'stack-no-clear 'vector))
+
+          (particle-pos
+            (new 'stack-no-clear 'vector)))
+
+      (singlefish-vector-copy-safe!
+        curtain-forward
+        (-> self camera-axis))
+
+      (set! (-> curtain-forward y) 0.0)
+      (set! (-> curtain-forward w) 0.0)
+      (vector-normalize! curtain-forward 1.0)
+
+      (fisher-update-background-mist-color!)
+      (fisher-set-particle-fishbox-rotation! self)
+
+      ;; Exactly one giant 3D bigpuff.
+      ;;
+      ;; Curtain depth: 92m.
+      ;; Bigpuff depth: 86m, so it stays visibly in front.
+      ;;
+      ;; Its center is placed far below the waterline. Combined with the fixed
+      ;; vertical scale in part 3572, its upper edge stays in the same place
+      ;; instead of protruding above it.
+      (vector+float*!
+        particle-pos
+        (-> self fisher-cam)
+        curtain-forward
+        (meters 86.0))
+
+      (vector+float*!
+        particle-pos
+        particle-pos
+        (-> self playfield-axis)
+        (meters 27.75))
+
+      (set!
+        (-> particle-pos y)
+        (- (-> self water-level) (meters 54.0)))
+
+      (set! (-> particle-pos w) 1.0)
+
+      (launch-particles
+        :system *sp-particle-system-3d*
+        (-> *part-id-table* 3572)
+        particle-pos)))
 
   (none))
 
 (defun fisher-launch-background-mist!
   ((self fisher-game))
 
-  (let ((background-forward
-          (new 'stack-no-clear 'vector))
-
-        (background-side
-          (new 'stack-no-clear 'vector)))
-
-      (vector-copy!
-        background-forward
-        (-> self camera-axis))
-
-      (set! (-> background-forward y) 0.0)
-      (set! (-> background-forward w) 0.0)
-
-      (vector-normalize!
-        background-forward
-        1.0)
-
-      (set! (-> background-side x) (-> background-forward z))
-      (set! (-> background-side y) 0.0)
-      (set! (-> background-side z) (- (-> background-forward x)))
-      (set! (-> background-side w) 0.0)
-
-      (vector-normalize!
-        background-side
-        1.0)
-
-      (fisher-update-background-mist-color!)
-
-      ;; Add two huge overlapping puffs per pulse. They sit well in
-      ;; front of the curtain, with a fourteen-meter depth gap so the cloud
-      ;; cannot intersect or protrude through the curtain mesh.
-      (dotimes (i 2)
-        (let ((particle-pos
-              (new 'stack-no-clear 'vector)))
-
-          (vector+float*!
-            particle-pos
-            (-> self fisher-cam)
-            background-forward
-            (meters 78.0))
-
-          (vector+float*!
-            particle-pos
-            particle-pos
-            (-> self playfield-axis)
-            (meters 27.75))
-
-          (vector+float*!
-            particle-pos
-            particle-pos
-            background-side
-            (rand-vu-float-range
-              (meters -170.0)
-              (meters 170.0)))
-
-          (set!
-            (-> particle-pos y)
-            (+
-              (-> self water-level)
-              (rand-vu-float-range
-                (meters -112.0)
-                (meters -4.0))))
-
-          (set! (-> particle-pos w) 1.0)
-
-          (launch-particles
-            :system *sp-particle-system-3d*
-            (-> *part-id-table* 3572)
-            particle-pos))))
-
+  ;; The persistent object is the session emitter. Individual render tiles are
+  ;; refreshed after the curtain each underwater frame to guarantee ordering.
+  (set! *fisher-background-cloud-session-active?* #t)
   (none))
 
 (defun fisher-update-background-mist!
   ((self fisher-game))
 
-  (let ((dt
-        (-> *display* seconds-per-frame)))
-
-    (-! (-> self background-mist-time) dt)
-
-    (when
-      (<= (-> self background-mist-time) 0.0)
-
-      (fisher-launch-background-mist! self)
-
-      ;; The cloud field is replenished for the entire time the fishing
-      ;; state is active, regardless of camera height or cast state.
-      (set!
-        (-> self background-mist-time)
-        (rand-vu-float-range
-          0.30
-          0.45))))
-
+  ;; Nothing is submitted here. Submission must occur after the curtain draw.
   (none))
 
 (defun fisher-force-underwater-background! ()
@@ -1712,6 +2091,12 @@
   (stop-sound-file "water-waves.wav")
   (fisher-remove-lure-snake! self)
   (set! (-> self reel-hint-time) 0.0)
+  (set! (-> self lure-stop-active?) #f)
+  (set! (-> self lure-stop-used?) #f)
+  (set! (-> self lure-stop-time) 0.0)
+  (set! (-> self lure-sink-active?) #f)
+  (set! (-> self lure-sink-used?) #f)
+  (set! (-> self lure-sink-time) 0.0)
   (set! (-> self bubble-time) -2.0)
 
   (none))
@@ -2422,11 +2807,24 @@
   (none))
 
 (defun singlefish-fail-hook! ((self singlefish-base))
-  (let ((owner (the-as fisher-game (-> self owner))))
+  (let ((owner (the-as fisher-game (-> self owner)))
+
+      (lurker-shark?
+        (string= (-> self species-name) "Lurker Shark")))
+
     (when (= (-> owner hooked-fish) self) (set! (-> owner hooked-fish) #f) (set! (-> owner fish-state) 'free))
 
-    (set! (-> owner fish-message) "SCARED OFF")
-    (set! (-> owner fish-message-time) 1.5)
+    (cond
+      (lurker-shark?
+        ;; Return the line immediately after the shark steals the lure.
+        (fisher-reset-cast! owner)
+        (set! (-> owner fish-message) "LURE STOLEN")
+        (set! (-> owner fish-message-time) 1.75))
+
+      (else
+        (set! (-> owner fish-message) "SCARED OFF")
+        (set! (-> owner fish-message-time) 1.5)))
+
     (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
     (set! (-> self turning?) #f)
     (let ((escape-forward
@@ -2766,6 +3164,16 @@
       xp-start
       (-> owner caught-fish-xp))
 
+    ;; Preserve auto-saving for the legacy catch path as well.
+    (when
+      (<= (-> owner caught-fish-xp) 0)
+
+      (auto-save-command
+        'auto-save
+        0
+        0
+        *default-pool*))
+
     (when (> (-> owner fish-count) 0)
       (-! (-> owner fish-count) 1))
 
@@ -2926,6 +3334,10 @@
 
               ((= (-> self caught-fish-species) 2) *fisher-junglefish-sg*)
 
+              ((= (-> self caught-fish-species) 3) *sharkey-sgc*)
+
+              ((= (-> self caught-fish-species) 4) *buzzer-sgc*)
+
               (else
                 *catch-fisha-sgc*))
             #f
@@ -3039,68 +3451,144 @@
 
   (none))
 
+(defun fisher-finish-buzzer-catch-menu! ((self fisher-game))
+  (let* ((slot (-> self hooked-fish-slot))
+      (fish
+        (if
+          (>= slot 0)
+          (fisher-fish-pointer self slot)
+          (the-as (pointer manipy) #f))))
+
+    ;; Remove the catch-display model.
+    (when fish
+      (deactivate (-> fish 0)))
+
+    (when (>= slot 0)
+      (fisher-set-fish-pointer!
+        self
+        slot
+        (the-as (pointer manipy) #f)))
+
+    (set! (-> self hooked-fish-slot) -1)
+    (set! (-> self fish-state) 'free)
+    (set! (-> self fish-message) "SCOUT FLY CAUGHT")
+    (set! (-> self fish-message-time) 1.25)
+    (set! (-> self caught-weight-tenths) 0)
+    (set! (-> self caught-orb-value) 0)
+    (set! (-> self caught-fish-level) 1)
+    (set! (-> self caught-fish-xp) 0)
+    (set! (-> self catch-transition-time) 0.0)
+    (set! (-> self catch-menu-offset) 0.0)
+
+    (cond
+      ;; The seventh fly closes fishing only after the loot menu finishes.
+      ((-> self buzzer-victory-pending?)
+        (set! (-> self cast-state) 'buzzer-exit))
+
+      ;; Earlier flies return to fishing. The used special slot becomes a
+      ;; normal fish slot. If no second Scout Fly remains active, immediately
+      ;; perform another 30% area-specific Scout Fly spawn roll.
+      (else
+        (when (>= slot 0)
+          (fisher-set-fish-species! self slot 0)
+          (fisher-randomize-fish-slot! self slot))
+
+        (let ((active-buzzer-count 0))
+          (dotimes (fish-slot (-> self fish-count))
+            (when (= (fisher-fish-species self fish-slot) 4)
+              (+! active-buzzer-count 1)))
+
+          ;; Do not reroll while the second member of an existing Scout Fly
+          ;; pair is still swimming. Once the active group is gone, this can
+          ;; replace one or two ordinary slots, but never beyond the area's
+          ;; remaining unique Scout Fly indexes.
+          (when (= active-buzzer-count 0)
+            (fisher-add-buzzer-fish-slots! self)))
+
+        (set! (-> self caught-buzzer-count) 0)
+        (set! (-> self caught-buzzer-task) 0)
+        (fisher-reset-cast! self))))
+
+  (none))
+
 (defun fisher-sell-manipy-catch!
   ((self fisher-game))
 
-  (when *target*
-    (send-event
-      *target*
-      'get-pickup
-      (pickup-type money)
-      (the float (-> self caught-orb-value))))
+  (cond
+    ((= (-> self caught-fish-species) 4)
+      (fisher-finish-buzzer-catch-menu! self))
 
-  (let ((slot
-        (-> self hooked-fish-slot))
+    (else
+      (when *target*
+        (send-event
+          *target*
+          'get-pickup
+          (pickup-type money)
+          (the float (-> self caught-orb-value))))
 
-      (xp-start
-        (new 'stack-no-clear 'vector)))
+      (let ((slot
+            (-> self hooked-fish-slot))
 
-    (fisher-catch-display-fish-position! self xp-start)
+          (xp-start
+            (new 'stack-no-clear 'vector)))
 
-    (when (>= slot 0)
-      (let ((fish
-            (fisher-fish-pointer
+        (fisher-catch-display-fish-position! self xp-start)
+
+        (when (>= slot 0)
+          (let ((fish
+                (fisher-fish-pointer
+                  self
+                  slot)))
+
+            (when fish
+              (let ((fish-proc
+                    (the-as manipy
+                      (-> fish 0 self))))
+
+                (vector-copy!
+                  xp-start
+                  (-> fish-proc root trans))
+
+                (set! (-> xp-start w) 1.0))
+
+              (deactivate (-> fish 0)))
+
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (the-as (pointer manipy) #f))
+
+            (fisher-randomize-fish-slot!
               self
               slot)))
 
-        (when fish
-          (let ((fish-proc
-                (the-as manipy
-                  (-> fish 0 self))))
+        (fisher-start-xp-gain-animation!
+          xp-start
+          (-> self caught-fish-xp))
 
-            (vector-copy!
-              xp-start
-              (-> fish-proc root trans))
+        ;; Positive XP catches save after XP is committed by the XP animation.
+        ;; A zero-XP catch still needs its orb reward and catch state saved.
+        (when
+          (<= (-> self caught-fish-xp) 0)
 
-            (set! (-> xp-start w) 1.0))
+          (auto-save-command
+            'auto-save
+            0
+            0
+            *default-pool*)))
 
-          (deactivate (-> fish 0)))
+      (set! (-> self hooked-fish-slot) -1)
+      (set! (-> self fish-state) 'free)
+      (set! (-> self fish-message) "FISH SOLD")
+      (set! (-> self fish-message-time) 1.25)
+      (set! (-> self caught-weight-tenths) 0)
+      (set! (-> self caught-orb-value) 0)
+      (set! (-> self caught-fish-level) 1)
+      (set! (-> self caught-fish-xp) 0)
+      (set! (-> self catch-transition-time) 0.0)
+      (set! (-> self catch-menu-offset) 0.0)
 
-        (fisher-set-fish-pointer!
-          self
-          slot
-          (the-as (pointer manipy) #f))
-
-        (fisher-randomize-fish-slot!
-          self
-          slot)))
-
-    (fisher-start-xp-gain-animation!
-      xp-start
-      (-> self caught-fish-xp)))
-
-  (set! (-> self hooked-fish-slot) -1)
-  (set! (-> self fish-state) 'free)
-  (set! (-> self fish-message) "FISH SOLD")
-  (set! (-> self fish-message-time) 1.25)
-  (set! (-> self caught-weight-tenths) 0)
-  (set! (-> self caught-orb-value) 0)
-  (set! (-> self caught-fish-level) 1)
-  (set! (-> self caught-fish-xp) 0)
-  (set! (-> self catch-transition-time) 0.0)
-  (set! (-> self catch-menu-offset) 0.0)
-
-  (fisher-reset-cast! self)
+      (fisher-reset-cast! self)))
 
   (none))
 
@@ -3251,6 +3739,8 @@
     ((= (fisher-fish-species self (-> self hooked-fish-slot)) 1) (meters 0.55))
 
     ((= (fisher-fish-species self (-> self hooked-fish-slot)) 2) (meters 0.48))
+
+    ((= (fisher-fish-species self (-> self hooked-fish-slot)) 3) (meters 1.20))
 
     (else
       (meters 0.42))))
@@ -3467,6 +3957,59 @@
 
     (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
 
+    ;; Fishing level 2 ability: freeze the free lure once per cast.
+    (when
+      (and
+        (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
+        (not (-> self lure-stop-used?))
+        (not (-> self lure-sink-active?))
+        (cpad-pressed? 0 square))
+
+      (cpad-clear! 0 square)
+      (set! (-> self lure-stop-active?) #t)
+      (set! (-> self lure-stop-used?) #t)
+      (set! (-> self lure-stop-time) 3.0)
+      (set! (-> self lure-x-velocity) 0.0)
+      (set! (-> self lure-y-velocity) 0.0))
+
+    ;; Fishing level 5 ability: sink at triple speed for two seconds, once per cast.
+    (when
+      (and
+        (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
+        (not (-> self lure-sink-used?))
+        (not (-> self lure-stop-active?))
+        (cpad-pressed? 0 r1))
+
+      (cpad-clear! 0 r1)
+      (set! (-> self lure-sink-active?) #t)
+      (set! (-> self lure-sink-used?) #t)
+      (set! (-> self lure-sink-time) 2.0))
+
+    ;; Any reeling cancels either lure ability early.
+    (when
+      (cpad-hold? 0 x)
+
+      (when
+        (-> self lure-stop-active?)
+        (set! (-> self lure-stop-active?) #f)
+        (set! (-> self lure-stop-time) 0.0))
+
+      (when
+        (-> self lure-sink-active?)
+        (set! (-> self lure-sink-active?) #f)
+        (set! (-> self lure-sink-time) 0.0)))
+
+    (when
+      (-> self lure-sink-active?)
+
+      (-! (-> self lure-sink-time) dt)
+
+      (when
+        (<= (-> self lure-sink-time) 0.0)
+
+        (set! (-> self lure-sink-active?) #f)
+        (set! (-> self lure-sink-time) 0.0)))
+
     (cond
       ((cpad-hold? 0 x)
         (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (- (* (meters 1.0) (-> self lure-reel-x-speed) dt)))
@@ -3476,6 +4019,19 @@
         (set! (-> self lure-x-velocity) (- (-> self lure-reel-x-speed)))
 
         (set! (-> self lure-y-velocity) 0.0)
+      )
+
+      ((-> self lure-stop-active?)
+        (set! (-> self lure-x-velocity) 0.0)
+        (set! (-> self lure-y-velocity) 0.0)
+
+        (-! (-> self lure-stop-time) dt)
+
+        (when
+          (<= (-> self lure-stop-time) 0.0)
+
+          (set! (-> self lure-stop-active?) #f)
+          (set! (-> self lure-stop-time) 0.0))
       )
 
       (else
@@ -3501,12 +4057,19 @@
           (else (set! (-> self lure-x-velocity) 0.0))
         )
 
-        (-! (-> self lure-y-velocity) (* 1.2 dt))
+        (let ((sink-mult
+              (if (-> self lure-sink-active?) 3.0 1.0)))
 
-        (when
-          (< (-> self lure-y-velocity) (- (-> self lure-fall-speed)))
+          (-! (-> self lure-y-velocity) (* 1.2 sink-mult dt))
 
-          (set! (-> self lure-y-velocity) (- (-> self lure-fall-speed)))
+          (when
+            (<
+              (-> self lure-y-velocity)
+              (- (* (-> self lure-fall-speed) sink-mult)))
+
+            (set!
+              (-> self lure-y-velocity)
+              (- (* (-> self lure-fall-speed) sink-mult))))
         )
 
         (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-y-velocity) dt))
@@ -3595,6 +4158,7 @@
       ;; Reference weights preserve the old damage at an average poundage.
       (reference-weight
         (cond
+          ((= species 3) 260.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
           (else 15.0))))
@@ -3612,18 +4176,29 @@
           (fisher-fish-species self slot))
 
       (base-damage
-        (if (= species 1) 52.0 34.0))
+        (cond
+          ((= species 3) 105.0)
+          ((= species 1) 52.0)
+          (else 34.0)))
 
       (fish-level
         (fisher-fish-level self slot))
 
       (jak-level
-        (fisher-current-level)))
+        (fisher-current-level))
+
+      (level-mult
+        (fisher-level-fight-multiplier fish-level jak-level)))
 
     (*
       base-damage
       (fisher-fish-weight-damage-multiplier self slot)
-      (fisher-level-fight-multiplier fish-level jak-level))))
+
+      ;; Lurker Shark remains dangerous even when Jak outlevels it.
+      (if
+        (= species 3)
+        (fmax 1.15 level-mult)
+        level-mult))))
 
 (defun fisher-update-manipy-reeling!
   ((self fisher-game))
@@ -3736,9 +4311,17 @@
                             slot))
 
                         (else
-                          (set! (-> self fish-hook-time) 1.15)
+                          (set!
+                            (-> self fish-hook-time)
+                            (if
+                              (= (fisher-fish-species self slot) 3)
+                              0.45
+                              1.15))
 
                           (fisher-play-fish-bite-sound!)
+
+                          (set! (-> self lure-sink-active?) #f)
+                          (set! (-> self lure-sink-time) 0.0)
 
                           (set!
                             (-> self fish-state)
@@ -3754,9 +4337,19 @@
                   (when
                     (<= (-> self fish-hook-time) 0.0)
 
-                    (fisher-fish-scared-off!
-                      self
-                      slot)))
+                    (cond
+                      ((= (fisher-fish-species self slot) 3)
+                        ;; The shark takes the lure and immediately returns the
+                        ;; line to Jak instead of leaving it cast.
+                        (fisher-fish-scared-off! self slot)
+                        (fisher-reset-cast! self)
+                        (set! (-> self fish-message) "LURE STOLEN")
+                        (set! (-> self fish-message-time) 1.75))
+
+                      (else
+                        (fisher-fish-scared-off!
+                          self
+                          slot)))))
 
                 ((= (-> self fish-state) 'reeling)
                   (fisher-hook-target! self hook-target)
@@ -4029,8 +4622,15 @@
           ((<= distance (meters 0.12))
             (set! (-> self root trans quad) (-> target-root quad))
 
-            (set! (-> self hook-time) 1.0)
+            (set!
+              (-> self hook-time)
+              (if
+                (string= (-> self species-name) "Lurker Shark")
+                0.40
+                1.0))
             (fisher-play-fish-bite-sound!)
+            (set! (-> owner lure-sink-active?) #f)
+            (set! (-> owner lure-sink-time) 0.0)
             (set! (-> owner fish-state) 'hook-window)
             (go-virtual singlefish-hook-window))
 
@@ -4153,6 +4753,8 @@
             (meters 4.0))))
 
       (set! (-> bubble-pos w) 1.0)
+
+      (fisher-set-particle-fishbox-rotation! self)
 
       (launch-particles
         :system *sp-particle-system-3d*
@@ -4288,7 +4890,7 @@
     (set! (-> self camera-blend) 0.0)
     (set! (-> self cast-duration) 1.0)
     (set! (-> self casted?) #t)
-    (set! (-> self reel-hint-time) 3.0)
+    (set! (-> self reel-hint-time) 6.0)
 
     (set! (-> self lure-x-velocity) 0.0)
     (set! (-> self lure-y-velocity) 0.0)
@@ -4791,7 +5393,10 @@
   (cond
     ((-> self camera-underwater?)
       (fisher-force-underwater-background!)
-      (fisher-draw-background-curtain! self))
+      (fisher-draw-background-curtain! self)
+
+      ;; Submit the 3D bigpuff chain after the curtain packet.
+      (fisher-submit-background-mist! self))
 
     (else
       (set!
@@ -5164,20 +5769,25 @@
 (defun fisher-format-catch-name! ((self fisher-game))
   (clear *fish-ui-str*)
 
-  (format
-    *fish-ui-str*
-    (fisher-suffix-name
-      (-> self caught-fish-suffix)))
+  (cond
+    ((= (-> self caught-fish-species) 4)
+      (format *fish-ui-str* "SCOUT FLY"))
 
-  (format
-    *fish-ui-str*
-    " ")
+    (else
+      (format
+        *fish-ui-str*
+        (fisher-suffix-name
+          (-> self caught-fish-suffix)))
 
-  (format
-    *fish-ui-str*
-    (fisher-species-name
-      self
-      (-> self caught-fish-species)))
+      (format
+        *fish-ui-str*
+        " ")
+
+      (format
+        *fish-ui-str*
+        (fisher-species-name
+          self
+          (-> self caught-fish-species)))))
 
   *fish-ui-str*)
 
@@ -5219,32 +5829,61 @@
         (+ 116 menu-offset)
         0.60)
 
-      (clear *fish-ui-str*)
-      (format
-        *fish-ui-str*
-        "LV. ~D   ~D.~D LBS"
-        (-> self caught-fish-level)
-        whole-lbs
-        decimal-lbs)
+      (cond
+        ;; Scout Fly catches have no weight, orb worth, or fishing XP. Their
+        ;; loot menu reports only the fly's level and the updated area count.
+        ((= (-> self caught-fish-species) 4)
+          (clear *fish-ui-str*)
+          (format
+            *fish-ui-str*
+            "LV. ~D"
+            (-> self caught-fish-level))
 
-      (draw-fisher-large-font-scaled
-        *fish-ui-str*
-        256
-        (+ 142 menu-offset)
-        0.52)
+          (draw-fisher-large-font-scaled
+            *fish-ui-str*
+            256
+            (+ 142 menu-offset)
+            0.52)
 
-      (clear *fish-ui-str*)
-      (format
-        *fish-ui-str*
-        "WORTH: ~D ORBS   +~D XP"
-        (-> self caught-orb-value)
-        (-> self caught-fish-xp))
+          (clear *fish-ui-str*)
+          (format
+            *fish-ui-str*
+            "~D/7 CAUGHT"
+            (-> self caught-buzzer-count))
 
-      (draw-fisher-large-font-scaled
-        *fish-ui-str*
-        256
-        (+ 164 menu-offset)
-        0.48)
+          (draw-fisher-large-font-scaled
+            *fish-ui-str*
+            256
+            (+ 164 menu-offset)
+            0.52))
+
+        (else
+          (clear *fish-ui-str*)
+          (format
+            *fish-ui-str*
+            "LV. ~D   ~D.~D LBS"
+            (-> self caught-fish-level)
+            whole-lbs
+            decimal-lbs)
+
+          (draw-fisher-large-font-scaled
+            *fish-ui-str*
+            256
+            (+ 142 menu-offset)
+            0.52)
+
+          (clear *fish-ui-str*)
+          (format
+            *fish-ui-str*
+            "WORTH: ~D ORBS   +~D XP"
+            (-> self caught-orb-value)
+            (-> self caught-fish-xp))
+
+          (draw-fisher-large-font-scaled
+            *fish-ui-str*
+            256
+            (+ 164 menu-offset)
+            0.48)))
 
       (clear *fish-ui-str*)
       (format *fish-ui-str* "PRESS <PAD_X> TO CONTINUE")
@@ -5272,7 +5911,24 @@
   ;; session. Rendering is still controlled separately by camera height.
   (fisher-update-background-mist! self)
 
+  ;; Level-up notices are modal. A crossed level blocks the next cast while
+  ;; the XP bar finishes, then the window uses the catch menu's exact entrance
+  ;; and exit timing until the player dismisses it with X.
+  (fisher-update-level-up-window!)
+
   (cond
+    ((fisher-level-up-window-active?)
+      (fisher-restore-normal-background!)
+      (fisher-draw-level-up-window!))
+
+    ((or
+        *fisher-level-up-window-pending?*
+        *fisher-level-up-window-request?*)
+
+      ;; The XP meter is still finishing its level-up animation. Do not allow
+      ;; a new cast before the modal level-up window appears.
+      (fisher-restore-normal-background!))
+
     ((= (-> self cast-state) 'ready)
       (fisher-restore-normal-background!)
 
@@ -5340,6 +5996,11 @@
       (fisher-draw-line-hp-bar)
       (fisher-draw-line! self))
 
+    ((= (-> self cast-state) 'buzzer-exit)
+      ;; Leave through the normal exit state so every fishing/camera/particle
+      ;; parameter is restored in one place.
+      (go-virtual exit))
+
     ((= (-> self cast-state) 'catch-transition) (fisher-restore-normal-background!) (fisher-update-catch-return! self))
 
     ((= (-> self cast-state) 'catch-display)
@@ -5352,7 +6013,9 @@
   (fisher-update-xp-gain-animation!)
 
   (when
-    (not (= (-> self cast-state) 'catch-transition))
+    (and
+      (not (= (-> self cast-state) 'catch-transition))
+      (not (fisher-level-up-window-active?)))
 
     (fisher-draw-xp-meter!))
 
@@ -5383,6 +6046,104 @@
 
   (none)
 )
+
+
+;; Present the seventh Scout Fly reward through the same ordering used by
+;; the retail fuel-cell pickup: initialize and clone, place the temporary cell
+;; at Jak, award the exact area task, start othercam from joint 10, play the
+;; randomized spool, then perform the standard camera/target cleanup.
+(defbehavior fisher-buzzer-power-cell-reward fuel-cell ((task int))
+  (initialize self)
+  (set! (-> self fact pickup-type) (pickup-type fuel-cell))
+  (set! (-> self fact pickup-amount) (the float task))
+  (initialize-params self 0 (the-as float 1024.0))
+  (logclear! (-> self mask) (process-mask actor-pause))
+  (set! (-> self actor-pause) #f)
+
+  ;; Let fisher-game finish restoring its normal camera and controls.
+  (suspend)
+
+  (when *target*
+    (sound-play "pu-powercell")
+    (clear-collide-with-as (-> self root))
+    (logclear! (-> self mask) (process-mask actor-pause))
+    (logclear! (-> self draw status) (draw-status hidden))
+
+    (if (nonzero? (-> self sound))
+      (stop! (-> self sound)))
+
+    ;; Do not begin while another movie camera still owns the view.
+    (while (handle->process (-> *game-info* other-camera-handle))
+      (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
+      (suspend))
+
+    ;; This initializes Jak's clone-animation mode for this exact fuel-cell
+    ;; drawable, just like the retail pickup state.
+    (while (not (send-event *target* 'clone-anim self))
+      (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
+      (suspend))
+
+    ;; We have no level-authored movie-pos, so use the retail fallback: place
+    ;; the cell at Jak, match Jak's yaw, and ground it before othercam reads
+    ;; camera joint 10 from the fuel-cell skeleton.
+    (move-to-point! (-> self root) (-> *target* control trans))
+    (set-yaw-angle-clear-roll-pitch!
+      (-> self root)
+      (y-angle (-> *target* control)))
+    (move-to-ground
+      (-> self root)
+      (the-as float 40960.0)
+      (the-as float 40960.0)
+      #f
+      (collide-kind background))
+    (set! (-> self base quad) (-> self root trans quad))
+    (set! (-> self old-base quad) (-> self root trans quad))
+    (update-transforms! (-> self root))
+    (ja-post)
+
+    (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
+
+    ;; Award the actual area's Collect 7 Scout Flies task exactly once, at the
+    ;; same point where a normal fuel-cell pickup records its reward.
+    (send-event
+      *target*
+      'get-pickup
+      (pickup-type fuel-cell)
+      (the float task))
+
+    (set! (-> self draw bounds w) 32768.0)
+    (logior! (-> self skel status) (janim-status inited))
+    (send-event *target* 'blend-shape #t)
+
+    (add-setting! 'music-volume 'rel (-> *setting-control* current music-volume-movie) 0)
+    (add-setting! 'sfx-volume 'rel (-> *setting-control* current sfx-volume-movie) 0)
+    (add-setting! 'ambient-volume 'rel (-> *setting-control* current ambient-volume-movie) 0)
+
+    (process-spawn othercam self 10 #f #t :to self)
+    (auto-save-command 'auto-save 0 0 *default-pool*)
+
+    (ja-play-spooled-anim
+      (-> self victory-anim)
+      (the-as art-joint-anim fuel-cell-idle-ja)
+      (the-as art-joint-anim #f)
+      (the-as (function process-drawable symbol) false-func))
+
+    (remove-setting! 'music-volume)
+    (remove-setting! 'sfx-volume)
+    (remove-setting! 'ambient-volume)
+    (send-event *target* 'blend-shape #f)
+    (send-event *target* 'end-mode)
+    (send-event *camera* 'no-intro)
+    (send-event *camera* 'clear-entity)
+    (ja-channel-set! 0)
+
+    ;; Match the retail pickup's two-frame settling period before the reward
+    ;; process is released.
+    (suspend)
+    (suspend))
+
+  (deactivate self)
+  (none))
 
 (defstate idle (fisher-game)
   :virtual #t
@@ -5439,6 +6200,12 @@
 
     (fisher-reset-cast! self)
     (singlefish-start-session! self)
+
+    ;; Start the persistent background-mist emitter for this fishing session.
+    (set! *particles-flag* #t)
+    (set! *fisher-background-cloud-session-active?* #t)
+    (set! *fisher-background-cloud-visible?* #f)
+    (fisher-launch-background-mist! self)
   )
 
   :code
@@ -5449,7 +6216,10 @@
       (fisher-update-casting! self)
 
       (when
-        (and (= (-> self cast-state) 'ready) (cpad-pressed? 0 triangle))
+        (and
+          (= (-> self cast-state) 'ready)
+          (not (fisher-level-up-blocking?))
+          (cpad-pressed? 0 triangle))
 
         (cpad-clear! 0 triangle)
         (go-virtual exit)
@@ -5479,8 +6249,28 @@
     (singlefish-end-session! self)
     (fisher-remove-lure-snake! self)
     (set! *fisher-background-cloud-visible?* #f)
+    (set! *fisher-background-cloud-session-active?* #f)
     (fisher-restore-normal-background!)
     (process-release? *target*)
+
+    ;; The seventh Scout Fly finishes its loot menu first. Only now, after
+    ;; fishing has been fully restored, award the area's buzzer power cell and
+    ;; play a normal randomized victory spool.
+    (when (-> self buzzer-victory-pending?)
+      (let ((reward-task (-> self caught-buzzer-task)))
+        (set! (-> self buzzer-victory-pending?) #f)
+        (set! (-> self caught-buzzer-count) 0)
+        (set! (-> self caught-buzzer-task) 0)
+
+        (when (> reward-task 1)
+          ;; The reward process uses this exact area task as its fuel-cell
+          ;; pickup amount and records it during the normal movie sequence.
+          (process-spawn
+            fuel-cell
+            :init fisher-buzzer-power-cell-reward
+            reward-task
+            :to *entity-pool*))))
+
     (go-virtual idle)
   )
 )

@@ -77,6 +77,31 @@
 
       (set! *fisher-active-location-id* 1))
 
+    ;; Sentinel Beach pontoon.
+    ((= level-name 'beach)
+      (spawn-fisher-game
+        3
+        (new 'static 'vector
+          :x (meters -293.0688)
+          :y (meters 1.7276)
+          :z (meters -272.6693)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters -291.4147)
+          :y (meters 1.4129)
+          :z (meters -273.1604)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters -308.8099)
+          :y (meters 5.1921)
+          :z (meters -278.8588)
+          :w 1.0)
+        (meters 0.4322)
+        (degrees 65)
+        (degrees -35))
+
+      (set! *fisher-active-location-id* 3))
+
     ;; Training lagoon.
     ((= level-name 'training)
       (spawn-fisher-game
@@ -121,7 +146,10 @@
           (set! wanted-location-id 1))
 
         ((= (-> inside name) 'training)
-          (set! wanted-location-id 2))))
+          (set! wanted-location-id 2))
+
+        ((= (-> inside name) 'beach)
+          (set! wanted-location-id 3))))
 
     ;; Remove the process when Jak leaves a supported level or enters
     ;; a different fishing level.
@@ -162,6 +190,7 @@
       (= (paused?) #f)
     )
     (maintain-training-pontoon!)
+    (maintain-sentinel-pontoon!)
     (maintain-fisher-game!)
   )
 (when
