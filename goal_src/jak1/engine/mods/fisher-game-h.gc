@@ -13,7 +13,20 @@
 (define *fisher-stop-lure-unlock-level* 2)
 (define *fisher-sink-lure-unlock-level* 5)
 
+;; Sink Lure remains active for five seconds. Its 15-second cooldown begins
+;; immediately when activated, leaving ten seconds of downtime after a full use.
+(define *fisher-sink-lure-active-seconds* 5.0)
+(define *fisher-sink-lure-cooldown-seconds* 15.0)
+
+;; Number of unlocked abilities currently represented in the cooldown strip.
+;; Each ability receives 1 / count of the strip width. Increase this when a
+;; future cooldown-based fishing skill is added and draw its numbered segment.
+(define *fisher-cooldown-skill-count* 1)
+
 (define *fisher-line-hp-max* 100.0)
+
+;; Overall chance for one eligible fish to carry one missing area power cell.
+(define *fisher-power-cell-fish-chance* 0.10)
 
 (define *fisher-line-hp* 100.0)
 
@@ -231,6 +244,7 @@
     (lure-sink-active?           symbol)
     (lure-sink-used?             symbol)
     (lure-sink-time              float)
+    (lure-sink-cooldown          float)
     (lure-snake                  (pointer manipy))
     (lure-snake-angle            vector :inline)
     (lure-snake-angular-speed    vector :inline)
@@ -246,6 +260,8 @@
     (buzzer-victory-pending?     symbol)
     (caught-buzzer-count         int)
     (caught-buzzer-task          int)
+    (power-cell-victory-pending? symbol)
+    (caught-power-cell-task      int)
     (fish-count                  int)
     (fish-0                      (pointer manipy))
     (fish-1                      (pointer manipy))
@@ -380,6 +396,28 @@
     (fish-weight-tenths-19       int)
     (fish-weight-tenths-20       int)
     (fish-weight-tenths-21       int)
+    (fish-power-cell-task-0         int)
+    (fish-power-cell-task-1         int)
+    (fish-power-cell-task-2         int)
+    (fish-power-cell-task-3         int)
+    (fish-power-cell-task-4         int)
+    (fish-power-cell-task-5         int)
+    (fish-power-cell-task-6         int)
+    (fish-power-cell-task-7         int)
+    (fish-power-cell-task-8         int)
+    (fish-power-cell-task-9         int)
+    (fish-power-cell-task-10        int)
+    (fish-power-cell-task-11        int)
+    (fish-power-cell-task-12        int)
+    (fish-power-cell-task-13        int)
+    (fish-power-cell-task-14        int)
+    (fish-power-cell-task-15        int)
+    (fish-power-cell-task-16        int)
+    (fish-power-cell-task-17        int)
+    (fish-power-cell-task-18        int)
+    (fish-power-cell-task-19        int)
+    (fish-power-cell-task-20        int)
+    (fish-power-cell-task-21        int)
     (fish-distance-0             float)
     (fish-lane-0                 float)
     (fish-depth-0                float)
@@ -663,6 +701,7 @@
 (defun-extern fisher-calculate-catch-xp int int int)
 (defun-extern fisher-current-level int)
 (defun-extern fisher-draw-xp-meter! none)
+(defun-extern fisher-draw-skill-cooldowns! fisher-game none)
 (defun-extern fisher-level-fight-multiplier int int float)
 (defun-extern fisher-level-worth-multiplier int int float)
 (defun-extern fisher-xp-level-difference-multiplier int int float)
@@ -674,6 +713,8 @@
 (define-extern *fisher-level-up-window-old-level* int)
 (define-extern *fisher-level-up-window-new-level* int)
 (define-extern *fisher-level-up-window-skill-mask* int)
+(define-extern *fisher-xp-fly-active?* symbol)
+(define-extern *fisher-xp-bar-anim-active?* symbol)
 (defun-extern draw-fisher-small-text string int int none)
 (defun-extern draw-mod-menu-text-custom string int int symbol symbol symbol none)
 (defun-extern fisher-apply-slot-appearance! fisher-game int manipy symbol none)
@@ -697,6 +738,9 @@
 (defun-extern fisher-fish-weight-damage-multiplier fisher-game int float)
 (defun-extern fisher-fish-distance fisher-game int float)
 (defun-extern fisher-fish-pointer fisher-game int (pointer manipy))
+(defun-extern fisher-fish-power-cell-task fisher-game int int)
+(defun-extern fisher-set-fish-power-cell-task! fisher-game int int none)
+(defun-extern fisher-add-power-cell-fish-slot! fisher-game none)
 (defun-extern fisher-fish-position! fisher-game int vector vector)
 (defun-extern fisher-fish-scared-off! fisher-game int none)
 (defun-extern fisher-fish-species fisher-game int int)

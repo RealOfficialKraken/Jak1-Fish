@@ -87,6 +87,29 @@
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
 
+
+(defpart 3575
+  :init-specs
+  ((:texture (starflash effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 1.65))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:scale-y (meters 1.45))
+    (:r 255.0)
+    (:g 232.0)
+    (:b 48.0)
+    (:a 118.0)
+    (:vel-x 0.0)
+    (:vel-y 0.0)
+    (:vel-z 0.0)
+    (:scalevel-x 0.0)
+    (:rotvel-z (degrees -0.35))
+    (:scalevel-y 0.0)
+    (:timer (seconds 0.02))
+    (:flags (bit2 bit3))))
+
 (defpart 3574
   :init-specs
   ((:texture (lakedrop effects))

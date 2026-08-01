@@ -1091,6 +1091,59 @@
 
   (none))
 
+(defun fisher-fish-power-cell-task ((self fisher-game) (slot int))
+  (cond
+    ((= slot 0) (-> self fish-power-cell-task-0))
+    ((= slot 1) (-> self fish-power-cell-task-1))
+    ((= slot 2) (-> self fish-power-cell-task-2))
+    ((= slot 3) (-> self fish-power-cell-task-3))
+    ((= slot 4) (-> self fish-power-cell-task-4))
+    ((= slot 5) (-> self fish-power-cell-task-5))
+    ((= slot 6) (-> self fish-power-cell-task-6))
+    ((= slot 7) (-> self fish-power-cell-task-7))
+    ((= slot 8) (-> self fish-power-cell-task-8))
+    ((= slot 9) (-> self fish-power-cell-task-9))
+    ((= slot 10) (-> self fish-power-cell-task-10))
+    ((= slot 11) (-> self fish-power-cell-task-11))
+    ((= slot 12) (-> self fish-power-cell-task-12))
+    ((= slot 13) (-> self fish-power-cell-task-13))
+    ((= slot 14) (-> self fish-power-cell-task-14))
+    ((= slot 15) (-> self fish-power-cell-task-15))
+    ((= slot 16) (-> self fish-power-cell-task-16))
+    ((= slot 17) (-> self fish-power-cell-task-17))
+    ((= slot 18) (-> self fish-power-cell-task-18))
+    ((= slot 19) (-> self fish-power-cell-task-19))
+    ((= slot 20) (-> self fish-power-cell-task-20))
+    (else (-> self fish-power-cell-task-21))))
+
+(defun fisher-set-fish-power-cell-task!
+  ((self fisher-game) (slot int) (value int))
+  (cond
+    ((= slot 0) (set! (-> self fish-power-cell-task-0) value))
+    ((= slot 1) (set! (-> self fish-power-cell-task-1) value))
+    ((= slot 2) (set! (-> self fish-power-cell-task-2) value))
+    ((= slot 3) (set! (-> self fish-power-cell-task-3) value))
+    ((= slot 4) (set! (-> self fish-power-cell-task-4) value))
+    ((= slot 5) (set! (-> self fish-power-cell-task-5) value))
+    ((= slot 6) (set! (-> self fish-power-cell-task-6) value))
+    ((= slot 7) (set! (-> self fish-power-cell-task-7) value))
+    ((= slot 8) (set! (-> self fish-power-cell-task-8) value))
+    ((= slot 9) (set! (-> self fish-power-cell-task-9) value))
+    ((= slot 10) (set! (-> self fish-power-cell-task-10) value))
+    ((= slot 11) (set! (-> self fish-power-cell-task-11) value))
+    ((= slot 12) (set! (-> self fish-power-cell-task-12) value))
+    ((= slot 13) (set! (-> self fish-power-cell-task-13) value))
+    ((= slot 14) (set! (-> self fish-power-cell-task-14) value))
+    ((= slot 15) (set! (-> self fish-power-cell-task-15) value))
+    ((= slot 16) (set! (-> self fish-power-cell-task-16) value))
+    ((= slot 17) (set! (-> self fish-power-cell-task-17) value))
+    ((= slot 18) (set! (-> self fish-power-cell-task-18) value))
+    ((= slot 19) (set! (-> self fish-power-cell-task-19) value))
+    ((= slot 20) (set! (-> self fish-power-cell-task-20) value))
+    (else (set! (-> self fish-power-cell-task-21) value)))
+  (none))
+
+
 (defun fisher-roll-fish-suffix ()
   (let ((roll
         (rand-vu-int-range 0 99999)))
@@ -1240,6 +1293,10 @@
 
     (set! (-> self fish-count) new-count)
 
+    ;; A newly configured session starts with no carried power-cell metadata.
+    (dotimes (slot 22)
+      (fisher-set-fish-power-cell-task! self slot 0))
+
     (while (< i new-count)
       (cond
         ((< i babak-slots) (fisher-set-fish-species! self i 2))
@@ -1285,6 +1342,101 @@
           (-> self fish-level-min)
           (-> self fish-level-max)))
       (fisher-set-fish-weight-tenths! self slot 260)))
+
+  (none))
+
+(defun fisher-power-cell-task-for-location-index
+  ((self fisher-game) (index int))
+  (cond
+    ;; Sentinel Pontoon / Sentinel Beach.
+    ((= (-> self location-id) 3)
+      (cond
+        ((= index 0) (game-task beach-ecorocks))
+        ((= index 1) (game-task beach-pelican))
+        ((= index 2) (game-task beach-gimmie))
+        (else (game-task beach-sentinel))))
+
+    ;; Jungle Pillar / Forbidden Jungle.
+    ((= (-> self location-id) 1)
+      (cond
+        ((= index 0) (game-task jungle-tower))
+        ((= index 1) (game-task jungle-plant))
+        ((= index 2) (game-task jungle-canyon-end))
+        (else (game-task jungle-temple-door))))
+
+    (else (game-task none))))
+
+(defun fisher-find-missing-power-cell-task ((self fisher-game))
+  (let ((start (rand-vu-int-range 0 3))
+      (step 0)
+      (task (game-task none)))
+
+    (while (< step 4)
+      (set! task
+        (fisher-power-cell-task-for-location-index
+          self
+          (mod (+ start step) 4)))
+
+      (when
+        (and
+          (> (the int task) 1)
+          (not (task-complete? *game-info* task)))
+        (return task))
+
+      (+! step 1))
+
+    (game-task none)))
+
+(defun fisher-has-power-cell-fish? ((self fisher-game))
+  (dotimes (slot (-> self fish-count))
+    (when (> (fisher-fish-power-cell-task self slot) 1)
+      (return #t)))
+  #f)
+
+(defun fisher-add-power-cell-fish-slot! ((self fisher-game))
+  ;; Only Jungle Pillar and Sentinel Pontoon can use this mechanic. Exactly one
+  ;; active fish may carry a cell, and only one of the four configured tasks
+  ;; that Jak has not completed can be selected.
+  (when
+    (and
+      (or (= (-> self location-id) 1) (= (-> self location-id) 3))
+      (> (-> self fish-count) 0)
+      (not (fisher-has-power-cell-fish? self))
+      (rand-vu-percent? *fisher-power-cell-fish-chance*))
+
+    (let ((task (fisher-find-missing-power-cell-task self)))
+      (when (> (the int task) 1)
+        (let ((start-slot (rand-vu-int-range 0 (- (-> self fish-count) 1)))
+            (step 0)
+            (slot -1)
+            (candidate 0))
+
+          ;; Scout Fly slots are excluded because their weight field stores the
+          ;; unique 0..6 fly index. Every real fish species, including the
+          ;; Lurker Shark, is eligible.
+          (while (and (< step (-> self fish-count)) (< slot 0))
+            (set! candidate (mod (+ start-slot step) (-> self fish-count)))
+            (when (!= (fisher-fish-species self candidate) 4)
+              (set! slot candidate))
+            (+! step 1))
+
+          (when (>= slot 0)
+            (fisher-set-fish-power-cell-task! self slot (the int task))
+
+            ;; The extra 70% weight affects reeling/fighting and the displayed
+            ;; pounds. Orb worth is calculated later from the recovered base
+            ;; weight, so the cell itself never increases the orb reward.
+            (fisher-set-fish-weight-tenths!
+              self
+              slot
+              (max
+                1
+                (the int
+                  (+
+                    (*
+                      (the float (fisher-fish-weight-tenths self slot))
+                      1.70)
+                    0.5)))))))))
 
   (none))
 
@@ -1350,6 +1502,7 @@
       (when (>= first-index 0)
         (let ((slot (- (-> self fish-count) 1)))
           (fisher-set-fish-species! self slot 4)
+          (fisher-set-fish-power-cell-task! self slot 0)
           (fisher-set-fish-suffix! self slot 2)
           (fisher-set-fish-level!
             self
@@ -1378,6 +1531,7 @@
         (when (>= second-index 0)
           (let ((slot (- (-> self fish-count) 2)))
             (fisher-set-fish-species! self slot 4)
+            (fisher-set-fish-power-cell-task! self slot 0)
             (fisher-set-fish-suffix! self slot 2)
             (fisher-set-fish-level!
               self
@@ -1533,6 +1687,7 @@
       (fisher-configure-sandover-table! self)))
 
   (fisher-add-buzzer-fish-slots! self)
+  (fisher-add-power-cell-fish-slot! self)
 
   (none))
 
@@ -1543,6 +1698,8 @@
         (fisher-fish-suffix self slot))
 
       (species (fisher-fish-species self slot))
+
+      (power-cell-task (fisher-fish-power-cell-task self slot))
 
       (base-scale
         (cond
@@ -1632,7 +1789,14 @@
     (set! (-> fish-proc draw color-mult r) r)
     (set! (-> fish-proc draw color-mult g) g)
     (set! (-> fish-proc draw color-mult b) b)
-    (set! (-> fish-proc draw color-mult a) 1.0))
+    (set! (-> fish-proc draw color-mult a) 1.0)
+
+    ;; The carried-cell glow is supplied by the cloned 3D fuel-cell
+    ;; starflash particle. Keep the fish material itself neutral.
+    (set! (-> fish-proc draw color-emissive r) 0.0)
+    (set! (-> fish-proc draw color-emissive g) 0.0)
+    (set! (-> fish-proc draw color-emissive b) 0.0)
+    (set! (-> fish-proc draw color-emissive a) 1.0))
 
   (none))
 
@@ -1734,7 +1898,21 @@
   ;; Do not overwrite that index when randomizing its movement.
   (when (!= (fisher-fish-species self slot) 4)
     (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
-    (fisher-randomize-fish-level-and-weight! self slot))
+    (fisher-randomize-fish-level-and-weight! self slot)
+
+    ;; Reapply the 70% carried-cell weight after rolling a fresh base weight.
+    (when (> (fisher-fish-power-cell-task self slot) 1)
+      (fisher-set-fish-weight-tenths!
+        self
+        slot
+        (max
+          1
+          (the int
+            (+
+              (*
+                (the float (fisher-fish-weight-tenths self slot))
+                1.70)
+              0.5))))))
 
   (none))
 
@@ -2310,91 +2488,94 @@
   (when (= (fisher-fish-species self slot) 4)
     (fisher-catch-buzzer-fish! self slot))
 
-  ;; Buzzer catches already set up the full fishing exit. Do not run the
-  ;; ordinary fish reward/menu cleanup path afterward.
+  ;; Scout Fly catches own their complete award/menu path.
   (unless (= (fisher-fish-species self slot) 4)
-    (let* ((species
-          (fisher-fish-species self slot))
+    (let* ((species (fisher-fish-species self slot))
+        (suffix (fisher-fish-suffix self slot))
+        (fish-level (fisher-fish-level self slot))
+        (jak-level (fisher-current-level))
+        (weight (fisher-fish-weight-tenths self slot))
+        (power-cell-task (fisher-fish-power-cell-task self slot))
 
-      (suffix
-        (fisher-fish-suffix self slot))
+        ;; Recover the normal pre-cell weight for orb calculation. The displayed
+        ;; weight and fight damage continue using the full 1.7x value.
+        (orb-weight
+          (if
+            (> power-cell-task 1)
+            (max
+              1
+              (the int
+                (+
+                  (/ (the float weight) 1.70)
+                  0.5)))
+            weight))
 
-      (fish-level
-        (fisher-fish-level self slot))
+        (value-mult (fisher-suffix-value-multiplier suffix))
+        (level-value-mult (fisher-level-worth-multiplier fish-level jak-level))
+        (base-value
+          (cond
+            ((= species 3) 3.0)
+            ((or (= species 1) (= species 2)) 2.0)
+            (else 1.0)))
+        (catch-xp
+          (the int
+            (+
+              (*
+                (the float (fisher-calculate-catch-xp fish-level suffix))
+                (if (= species 3) 1.75 1.0))
+              0.5)))
+        (raw-orb-value
+          (the int
+            (+
+              (*
+                (the float orb-weight)
+                0.1
+                base-value
+                value-mult
+                level-value-mult
+                0.5)
+              0.5)))
+        (levels-below (- jak-level fish-level)))
 
-      (jak-level
-        (fisher-current-level))
+      ;; If the same cell was completed from another source during fishing,
+      ;; safely downgrade this to an ordinary fish before any reward is queued.
+      (when
+        (and
+          (> power-cell-task 1)
+          (task-complete? *game-info* (the-as game-task power-cell-task)))
+        (set! power-cell-task 0)
+        (fisher-set-fish-power-cell-task! self slot 0))
 
-      (weight
-        (fisher-fish-weight-tenths self slot))
+      (set! (-> self caught-fish-species) species)
+      (set! (-> self caught-fish-suffix) suffix)
+      (set! (-> self caught-fish-level) fish-level)
+      (set! (-> self caught-weight-tenths) weight)
+      (set!
+        (-> self caught-orb-value)
+        (if
+          (>= levels-below 5)
+          (max 0 raw-orb-value)
+          (max 1 raw-orb-value)))
+      (set!
+        (-> self caught-fish-xp)
+        (fisher-accepted-xp-amount catch-xp))
+      (set! (-> self caught-power-cell-task) power-cell-task)
 
-      (value-mult
-        (fisher-suffix-value-multiplier suffix))
-
-      (level-value-mult
-        (fisher-level-worth-multiplier fish-level jak-level))
-
-      (base-value
-        (cond
-          ((= species 3) 3.0)
-          ((or (= species 1) (= species 2)) 2.0)
-          (else 1.0)))
-
-      ;; Shark catches give substantially more XP than same-level fish.
-      (catch-xp
-        (the int
-          (+
-            (*
-              (the float
-                (fisher-calculate-catch-xp fish-level suffix))
-              (if (= species 3) 1.75 1.0))
-            0.5)))
-
-      (raw-orb-value
-        (the int
-          (+
-            (*
-              (the float weight)
-              0.1
-              base-value
-              value-mult
-              level-value-mult
-              0.5)
-            0.5)))
-
-      (levels-below
-        (- jak-level fish-level)))
-
-    (set! (-> self caught-fish-species) species)
-    (set! (-> self caught-fish-suffix) suffix)
-    (set! (-> self caught-fish-level) fish-level)
-    (set! (-> self caught-weight-tenths) weight)
-
-    (set!
-      (-> self caught-orb-value)
-      (if
-        (>= levels-below 5)
-        (max 0 raw-orb-value)
-        (max 1 raw-orb-value)))
-
-    ;; Keep XP pending while the loot window is open. The accepted amount
-    ;; is committed only after the flying +XP number reaches the meter.
-    (set!
-      (-> self caught-fish-xp)
-      (fisher-accepted-xp-amount catch-xp)))
-
-  (set! (-> self fish-state) 'catch-return)
-  (set! (-> self cast-state) 'catch-transition)
-  (set! (-> self catch-transition-time) 0.0)
-  (set! (-> self catch-menu-offset) 150.0)
-  (set! (-> self camera-state) 'before-cast)
-  (set! (-> self casted?) #f)
-  (set! (-> self fish-fighting?) #f)
-  (set! (-> self fish-fight-time) 0.0)
-  (set! (-> self fish-fight-phase) 0.0)
-  (set! (-> self fish-fight-base-y) 0.0)
-  (stop-sound-file "water-waves.wav")
-  (fisher-remove-lure-snake! self))
+      ;; Every ordinary fish, including a power-cell carrier, returns through
+      ;; the standard fish-stat loot window. The carried cell is delayed until
+      ;; the loot menu, XP animation, and optional level-up window are finished.
+      (set! (-> self fish-state) 'catch-return)
+      (set! (-> self cast-state) 'catch-transition)
+      (set! (-> self catch-transition-time) 0.0)
+      (set! (-> self catch-menu-offset) 150.0)
+      (set! (-> self camera-state) 'before-cast)
+      (set! (-> self casted?) #f)
+      (set! (-> self fish-fighting?) #f)
+      (set! (-> self fish-fight-time) 0.0)
+      (set! (-> self fish-fight-phase) 0.0)
+      (set! (-> self fish-fight-base-y) 0.0)
+      (stop-sound-file "water-waves.wav")
+      (fisher-remove-lure-snake! self)))
 
   (none))
 

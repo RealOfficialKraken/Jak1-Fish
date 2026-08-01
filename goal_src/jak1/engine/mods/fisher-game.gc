@@ -56,6 +56,10 @@
 
     (set!
       (-> *part-id-table* 3574 init-specs 5 initial-valuef)
+      curtain-yaw)
+
+    (set!
+      (-> *part-id-table* 3575 init-specs 5 initial-valuef)
       curtain-yaw))
 
   (none))
@@ -64,6 +68,7 @@
 (define *fisher-level-up-window-state* 'hidden)
 (define *fisher-level-up-window-time* 0.0)
 (define *fisher-level-up-window-offset* 150.0)
+(define *fisher-power-cell-reward-active?* #f)
 
 (defun fisher-level-up-window-active? ()
   (!= *fisher-level-up-window-state* 'hidden))
@@ -370,7 +375,7 @@
             0.37)
 
           (draw-fisher-large-font-scaled
-            "FOR 2 SECONDS - ONCE PER CAST."
+            "FOR 5 SECONDS - 15 SECOND COOLDOWN."
             256
             (+ 181 menu-offset)
             0.35)
@@ -401,13 +406,13 @@
             0.34)
 
           (fisher-draw-reel-hint-text
-            " SINK LURE: 3X FASTER FOR 2 SECONDS."
+            " SINK LURE: 3X FASTER FOR 5 SECONDS."
             94
             (+ 176 menu-offset)
             0.34)
 
           (draw-fisher-large-font-scaled
-            "EACH SKILL MAY BE USED ONCE PER CAST."
+            "STOP IS ONCE PER CAST. SINK HAS A COOLDOWN."
             256
             (+ 193 menu-offset)
             0.31)))
@@ -594,6 +599,7 @@
   (set! (-> self lure-sink-active?) #f)
   (set! (-> self lure-sink-used?) #f)
   (set! (-> self lure-sink-time) 0.0)
+  (set! (-> self lure-sink-cooldown) 0.0)
 
   (set! (-> self lure-y-velocity) 0.0)
 
@@ -613,6 +619,8 @@
   (set! (-> self buzzer-victory-pending?) #f)
   (set! (-> self caught-buzzer-count) 0)
   (set! (-> self caught-buzzer-task) 0)
+  (set! (-> self power-cell-victory-pending?) #f)
+  (set! (-> self caught-power-cell-task) 0)
   (set! (-> self fish-count) 0)
   (set! (-> self fish-0) (the-as (pointer manipy) #f))
   (set! (-> self fish-1) (the-as (pointer manipy) #f))
@@ -2076,6 +2084,7 @@
   (set! (-> self fish-state) 'free)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
+  (set! (-> self reel-camera-blend) 0.0)
 
   (set! (-> self lure-x-velocity) 0.0)
   (set! (-> self lure-y-velocity) 0.0)
@@ -2094,8 +2103,9 @@
   (set! (-> self lure-stop-active?) #f)
   (set! (-> self lure-stop-used?) #f)
   (set! (-> self lure-stop-time) 0.0)
+  ;; Ending or resetting a cast cancels the active sink effect, but does not
+  ;; bypass its cooldown. lure-sink-used? is cleared by the cooldown updater.
   (set! (-> self lure-sink-active?) #f)
-  (set! (-> self lure-sink-used?) #f)
   (set! (-> self lure-sink-time) 0.0)
   (set! (-> self bubble-time) -2.0)
 
@@ -3491,6 +3501,7 @@
       (else
         (when (>= slot 0)
           (fisher-set-fish-species! self slot 0)
+          (fisher-set-fish-power-cell-task! self slot 0)
           (fisher-randomize-fish-slot! self slot))
 
         (let ((active-buzzer-count 0))
@@ -3519,76 +3530,95 @@
       (fisher-finish-buzzer-catch-menu! self))
 
     (else
-      (when *target*
-        (send-event
-          *target*
-          'get-pickup
-          (pickup-type money)
-          (the float (-> self caught-orb-value))))
+      (let ((carrier?
+            (> (-> self caught-power-cell-task) 1)))
 
-      (let ((slot
-            (-> self hooked-fish-slot))
+        (when *target*
+          (send-event
+            *target*
+            'get-pickup
+            (pickup-type money)
+            (the float (-> self caught-orb-value))))
 
-          (xp-start
-            (new 'stack-no-clear 'vector)))
+        (let ((slot
+              (-> self hooked-fish-slot))
 
-        (fisher-catch-display-fish-position! self xp-start)
+            (xp-start
+              (new 'stack-no-clear 'vector)))
 
-        (when (>= slot 0)
-          (let ((fish
-                (fisher-fish-pointer
-                  self
-                  slot)))
+          (fisher-catch-display-fish-position! self xp-start)
 
-            (when fish
-              (let ((fish-proc
-                    (the-as manipy
-                      (-> fish 0 self))))
+          (when (>= slot 0)
+            (let ((fish
+                  (fisher-fish-pointer
+                    self
+                    slot)))
 
-                (vector-copy!
-                  xp-start
-                  (-> fish-proc root trans))
+              (when fish
+                (let ((fish-proc
+                      (the-as manipy
+                        (-> fish 0 self))))
 
-                (set! (-> xp-start w) 1.0))
+                  (vector-copy!
+                    xp-start
+                    (-> fish-proc root trans))
 
-              (deactivate (-> fish 0)))
+                  (set! (-> xp-start w) 1.0))
 
-            (fisher-set-fish-pointer!
-              self
-              slot
-              (the-as (pointer manipy) #f))
+                (deactivate (-> fish 0)))
 
-            (fisher-randomize-fish-slot!
-              self
-              slot)))
+              (fisher-set-fish-pointer!
+                self
+                slot
+                (the-as (pointer manipy) #f))
 
-        (fisher-start-xp-gain-animation!
-          xp-start
-          (-> self caught-fish-xp))
+              ;; The cell task is preserved in caught-power-cell-task until the
+              ;; delayed reward movie is complete, but this recycled fish slot
+              ;; must become an ordinary slot immediately.
+              (fisher-set-fish-power-cell-task! self slot 0)
 
-        ;; Positive XP catches save after XP is committed by the XP animation.
-        ;; A zero-XP catch still needs its orb reward and catch state saved.
-        (when
-          (<= (-> self caught-fish-xp) 0)
+              (fisher-randomize-fish-slot!
+                self
+                slot)))
 
-          (auto-save-command
-            'auto-save
-            0
-            0
-            *default-pool*)))
+          ;; Do not roll another carrier while this one is still waiting to
+          ;; award its cell.
+          (unless carrier?
+            (fisher-add-power-cell-fish-slot! self))
 
-      (set! (-> self hooked-fish-slot) -1)
-      (set! (-> self fish-state) 'free)
-      (set! (-> self fish-message) "FISH SOLD")
-      (set! (-> self fish-message-time) 1.25)
-      (set! (-> self caught-weight-tenths) 0)
-      (set! (-> self caught-orb-value) 0)
-      (set! (-> self caught-fish-level) 1)
-      (set! (-> self caught-fish-xp) 0)
-      (set! (-> self catch-transition-time) 0.0)
-      (set! (-> self catch-menu-offset) 0.0)
+          (fisher-start-xp-gain-animation!
+            xp-start
+            (-> self caught-fish-xp))
 
-      (fisher-reset-cast! self)))
+          ;; A carrier's eventual cell movie performs the save. Ordinary
+          ;; zero-XP catches still need their orb reward saved here.
+          (when
+            (and
+              (not carrier?)
+              (<= (-> self caught-fish-xp) 0))
+
+            (auto-save-command
+              'auto-save
+              0
+              0
+              *default-pool*)))
+
+        (set! (-> self hooked-fish-slot) -1)
+        (set! (-> self fish-state) 'free)
+        (set! (-> self fish-message) (if carrier? #f "FISH SOLD"))
+        (set! (-> self fish-message-time) (if carrier? 0.0 1.25))
+        (set! (-> self caught-weight-tenths) 0)
+        (set! (-> self caught-orb-value) 0)
+        (set! (-> self caught-fish-level) 1)
+        (set! (-> self caught-fish-xp) 0)
+        (set! (-> self catch-transition-time) 0.0)
+        (set! (-> self catch-menu-offset) 0.0)
+
+        (fisher-reset-cast! self)
+
+        (when carrier?
+          (set! (-> self power-cell-victory-pending?) #t)
+          (set! (-> self cast-state) 'power-cell-ui-wait)))))
 
   (none))
 
@@ -3943,6 +3973,122 @@
 
   (none))
 
+(defun fisher-update-ability-cooldowns! ((self fisher-game))
+  (let ((dt (-> *display* seconds-per-frame)))
+    (when (> (-> self lure-sink-cooldown) 0.0)
+      (-! (-> self lure-sink-cooldown) dt)
+
+      (when (<= (-> self lure-sink-cooldown) 0.0)
+        (set! (-> self lure-sink-cooldown) 0.0)
+        (set! (-> self lure-sink-used?) #f))))
+
+  (none))
+
+(defun fisher-draw-cooldown-segment!
+  ((slot int) (skill-count int) (ready-ratio float))
+
+  (when
+    (and
+      (> skill-count 0)
+      (>= slot 0)
+      (< slot skill-count)
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let* ((total-width 276)
+        (segment-width
+          (max
+            1
+            (the int
+              (/
+                (the float total-width)
+                (the float skill-count)))))
+        (segment-x (+ 118 (* slot segment-width)))
+        (fill-width
+          (the int
+            (*
+              (the float segment-width)
+              (fmax 0.0 (fmin 1.0 ready-ratio))))))
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        ;; Each skill owns an equal-width section. With one cooldown this is
+        ;; 100% of the strip; two skills receive 50% each; three receive 33.33%.
+        (draw-sprite2d-xy
+          buf segment-x 200 segment-width 3
+          (new 'static 'rgba
+            :r #x10 :g #x18 :b #x20 :a #xd0))
+
+        (when (> fill-width 0)
+          (draw-sprite2d-xy
+            buf segment-x 200 fill-width 3
+            (new 'static 'rgba
+              :r #x28 :g #xb8 :b #xe8 :a #xe8)))
+
+        ;; A one-pixel divider keeps future cooldown segments distinct.
+        (when (> slot 0)
+          (draw-sprite2d-xy
+            buf (- segment-x 1) 200 1 3
+            (new 'static 'rgba
+              :r #x08 :g #x08 :b #x08 :a #xe0))))))
+
+  (none))
+
+(defun fisher-draw-skill-cooldowns! ((self fisher-game))
+  (when
+    (and
+      (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let ((ready-ratio
+          (if
+            (<= *fisher-sink-lure-cooldown-seconds* 0.0)
+            1.0
+            (-
+              1.0
+              (/
+                (-> self lure-sink-cooldown)
+                *fisher-sink-lure-cooldown-seconds*)))))
+
+      ;; Thin frame directly above the existing level/XP meter.
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        (draw-sprite2d-xy
+          buf 114 198 284 6
+          (new 'static 'rgba
+            :r #x08 :g #x08 :b #x08 :a #xb8))
+
+        (draw-sprite2d-xy
+          buf 116 199 280 4
+          (new 'static 'rgba
+            :r #x38 :g #x48 :b #x58 :a #xd0)))
+
+      ;; Sink Lure is cooldown slot zero. Add future abilities as additional
+      ;; numbered calls and raise *fisher-cooldown-skill-count* accordingly.
+      (fisher-draw-cooldown-segment!
+        0
+        *fisher-cooldown-skill-count*
+        ready-ratio)))
+
+  (none))
+
+(defun fisher-hooked-fish-camera-distance ((self fisher-game))
+  (let ((slot (-> self hooked-fish-slot)))
+    (cond
+      ((< slot 0) (meters 9.0))
+      ;; Lurker Shark needs substantially more room to remain fully visible.
+      ((= (fisher-fish-species self slot) 3) (meters 17.0))
+      ;; Scout Fly is tiny, so the camera may safely get closest.
+      ((= (fisher-fish-species self slot) 4) (meters 6.5))
+      ((= (fisher-fish-species self slot) 1) (meters 10.5))
+      ((= (fisher-fish-species self slot) 2) (meters 9.5))
+      (else (meters 8.5)))))
+
 (defun fisher-update-lure! ((self fisher-game))
   (let ((dt (-> *display* seconds-per-frame))
       (from-jak (new 'stack-no-clear 'vector))
@@ -3972,18 +4118,21 @@
       (set! (-> self lure-x-velocity) 0.0)
       (set! (-> self lure-y-velocity) 0.0))
 
-    ;; Fishing level 5 ability: sink at triple speed for two seconds, once per cast.
+    ;; Fishing level 5 ability: sink at triple speed for five seconds.
+    ;; It can be reused after its cooldown completes, even during the same cast.
     (when
       (and
         (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
-        (not (-> self lure-sink-used?))
+        (<= (-> self lure-sink-cooldown) 0.0)
+        (not (-> self lure-sink-active?))
         (not (-> self lure-stop-active?))
         (cpad-pressed? 0 r1))
 
       (cpad-clear! 0 r1)
       (set! (-> self lure-sink-active?) #t)
       (set! (-> self lure-sink-used?) #t)
-      (set! (-> self lure-sink-time) 2.0))
+      (set! (-> self lure-sink-time) *fisher-sink-lure-active-seconds*)
+      (set! (-> self lure-sink-cooldown) *fisher-sink-lure-cooldown-seconds*))
 
     ;; Any reeling cancels either lure ability early.
     (when
@@ -4263,6 +4412,23 @@
 
   (none))
 
+(defun fisher-submit-power-cell-fish-particle!
+  ((self fisher-game) (slot int) (fish-proc manipy))
+  (when
+    (and
+      (> (fisher-fish-power-cell-task self slot) 1)
+      (-> self camera-underwater?))
+    (let ((particle-pos (new 'stack-no-clear 'vector)))
+      (vector-copy! particle-pos (-> fish-proc root trans))
+      (+! (-> particle-pos y) (meters 0.18))
+      (set! (-> particle-pos w) 1.0)
+      (fisher-set-particle-fishbox-rotation! self)
+      (launch-particles
+        :system *sp-particle-system-3d*
+        (-> *part-id-table* 3575)
+        particle-pos)))
+  (none))
+
 (defun fisher-update-gameplay-fish-one!
   ((self fisher-game) (slot int) (fish (pointer manipy)))
 
@@ -4521,6 +4687,8 @@
                   'approaching))))
 
           (fisher-apply-slot-appearance! self slot fish-proc (= (-> self fish-state) 'catch-display))
+
+          (fisher-submit-power-cell-fish-particle! self slot fish-proc)
 
           (fisher-draw-manipy-fish-marker!
             fish)))))
@@ -5461,15 +5629,73 @@
     (let ((cam-slave (-> *camera* slave 0 0))
         (desired-camera (new 'stack-no-clear 'vector))
         (desired-look (new 'stack-no-clear 'vector))
+        (camera-offset (new 'stack-no-clear 'vector))
+        (reel-offset (new 'stack-no-clear 'vector))
         (forward (new 'stack-no-clear 'vector))
         (blend-value 0.0)
-        (blend-speed 2.5))
+        (reel-blend-value 0.0)
+        (blend-speed 2.5)
+        (reel-zoom-speed 1.8)
+        (reel-distance (meters 9.0)))
 
-      (vector+! desired-camera (-> self lure-pos) (-> self lure-camera-offset))
+      ;; Ease the close camera in only while a fish is hooked and reeling.
+      (cond
+        ((and
+            (= (-> self fish-state) 'reeling)
+            (>= (-> self hooked-fish-slot) 0))
+
+          (+!
+            (-> self reel-camera-blend)
+            (* reel-zoom-speed (-> *display* seconds-per-frame)))
+
+          (when (> (-> self reel-camera-blend) 1.0)
+            (set! (-> self reel-camera-blend) 1.0)))
+
+        (else
+          (-!
+            (-> self reel-camera-blend)
+            (* 2.6 (-> *display* seconds-per-frame)))
+
+          (when (< (-> self reel-camera-blend) 0.0)
+            (set! (-> self reel-camera-blend) 0.0))))
+
+      (set!
+        reel-distance
+        (fmin
+          (-> self camera-radius)
+          (fisher-hooked-fish-camera-distance self)))
+
+      ;; Normal lure-follow offset remains the far endpoint.
+      (vector-copy! camera-offset (-> self lure-camera-offset))
+
+      ;; The close endpoint remains on the configured camera axis, so every
+      ;; fishing location keeps its authored view direction.
+      (vector-float*! reel-offset (-> self camera-axis) (- reel-distance))
+      (set! (-> reel-offset y) 0.0)
+      (set! (-> reel-offset w) 0.0)
+
+      (set!
+        reel-blend-value
+        (parameter-ease-sin-clamp (-> self reel-camera-blend)))
+
+      (vector-lerp!
+        camera-offset
+        (-> self lure-camera-offset)
+        reel-offset
+        reel-blend-value)
+
+      (vector+! desired-camera (-> self lure-pos) camera-offset)
 
       (vector-copy! desired-look (-> self lure-pos))
 
-      (+! (-> desired-look y) (meters 0.5))
+      (+!
+        (-> desired-look y)
+        (if
+          (and
+            (>= (-> self hooked-fish-slot) 0)
+            (= (fisher-fish-species self (-> self hooked-fish-slot)) 3))
+          (meters 1.15)
+          (meters 0.5)))
 
       (when
         (< (-> self camera-blend) 1.0)
@@ -5481,8 +5707,7 @@
 
           (set!
             (-> self camera-blend)
-            1.0))
-      )
+            1.0)))
 
       (set! blend-value (parameter-ease-sin-clamp (-> self camera-blend)))
 
@@ -5523,17 +5748,13 @@
 
           (set!
             (-> forward w)
-            0.0))
-      )
+            0.0)))
 
       (vector-normalize! forward 1.0)
 
-      (forward-down->inv-matrix (-> cam-slave tracking inv-mat) forward (-> *camera* local-down))
-    )
-  )
+      (forward-down->inv-matrix (-> cam-slave tracking inv-mat) forward (-> *camera* local-down))))
 
-  (none)
-)
+  (none))
 
 (defun fisher-camera-before-cast! ((self fisher-game))
   (when (and *camera* (> (-> *camera* num-slaves) 0))
@@ -5804,19 +6025,25 @@
         (decimal-lbs
           (mod
             (-> self caught-weight-tenths)
-            10)))
+            10))
+
+        (carrier?
+          (> (-> self caught-power-cell-task) 1))
+
+        (panel-height
+          (if carrier? 126 104)))
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
 
-        (draw-sprite2d-xy buf 82 (+ 98 menu-offset) 348 104 (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xc8))
+        (draw-sprite2d-xy buf 82 (+ 98 menu-offset) 348 panel-height (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xc8))
 
         (draw-sprite2d-xy
           buf
           86
           (+ 102 menu-offset)
           340
-          96
+          (- panel-height 8)
           (new 'static 'rgba
             :r #x10
             :g #x38
@@ -5883,19 +6110,27 @@
             *fish-ui-str*
             256
             (+ 164 menu-offset)
-            0.48)))
+            0.48)
+
+          (when carrier?
+            (draw-fisher-large-font-scaled
+              "THE FISH HAD SWALLOWED A POWERCELL!"
+              256
+              (+ 184 menu-offset)
+              0.40))))
 
       (clear *fish-ui-str*)
       (format *fish-ui-str* "PRESS <PAD_X> TO CONTINUE")
       (draw-fisher-large-font-scaled
         *fish-ui-str*
         256
-        (+ 181 menu-offset)
+        (+ (if carrier? 205 181) menu-offset)
         0.52)))
 
   (none))
 
 (defun fisher-update-casting! ((self fisher-game))
+  (fisher-update-ability-cooldowns! self)
   (fisher-handle-fish-input! self)
   (fisher-draw-playfield-debug! self)
 
@@ -5996,6 +6231,19 @@
       (fisher-draw-line-hp-bar)
       (fisher-draw-line! self))
 
+    ((= (-> self cast-state) 'power-cell-ui-wait)
+      ;; The fish-stat window has closed. Keep fishing modal until the flying
+      ;; XP, XP-bar fill, and optional level-up window have all completed.
+      (fisher-restore-normal-background!)
+
+      (when
+        (and
+          (not *fisher-xp-fly-active?*)
+          (not *fisher-xp-bar-anim-active?*)
+          (not (fisher-level-up-blocking?)))
+
+        (set! (-> self cast-state) 'buzzer-exit)))
+
     ((= (-> self cast-state) 'buzzer-exit)
       ;; Leave through the normal exit state so every fishing/camera/particle
       ;; parameter is restored in one place.
@@ -6017,7 +6265,8 @@
       (not (= (-> self cast-state) 'catch-transition))
       (not (fisher-level-up-window-active?)))
 
-    (fisher-draw-xp-meter!))
+    (fisher-draw-xp-meter!)
+    (fisher-draw-skill-cooldowns! self))
 
   (fisher-draw-fish-status! self)
   (none))
@@ -6048,7 +6297,7 @@
 )
 
 
-;; Present the seventh Scout Fly reward through the same ordering used by
+;; Present fishing power-cell rewards through the same ordering used by
 ;; the retail fuel-cell pickup: initialize and clone, place the temporary cell
 ;; at Jak, award the exact area task, start othercam from joint 10, play the
 ;; randomized spool, then perform the standard camera/target cleanup.
@@ -6103,8 +6352,8 @@
 
     (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
 
-    ;; Award the actual area's Collect 7 Scout Flies task exactly once, at the
-    ;; same point where a normal fuel-cell pickup records its reward.
+    ;; Award the exact selected area task exactly once, at the same point where
+    ;; a normal fuel-cell pickup records its reward.
     (send-event
       *target*
       'get-pickup
@@ -6142,6 +6391,7 @@
     (suspend)
     (suspend))
 
+  (set! *fisher-power-cell-reward-active?* #f)
   (deactivate self)
   (none))
 
@@ -6240,7 +6490,6 @@
   :code
   (behavior ()
     (set! *camera-read-analog* (-> self saved-camera-read-analog))
-
     (set! *external-cam-mode* (-> self saved-external-cam-mode))
     (remove-setting! 'music-volume)
     (stop-main-music)
@@ -6253,24 +6502,68 @@
     (fisher-restore-normal-background!)
     (process-release? *target*)
 
-    ;; The seventh Scout Fly finishes its loot menu first. Only now, after
-    ;; fishing has been fully restored, award the area's buzzer power cell and
-    ;; play a normal randomized victory spool.
-    (when (-> self buzzer-victory-pending?)
-      (let ((reward-task (-> self caught-buzzer-task)))
+    ;; Reward movies must fully finish before fisher-game returns to idle.
+    ;; Otherwise the prompt can reappear while the temporary fuel-cell still
+    ;; owns Jak and othercam, leaving later fishing entries locked.
+    (when
+      (or
+        (-> self buzzer-victory-pending?)
+        (-> self power-cell-victory-pending?))
+
+      (let* ((carrier-reward?
+             (-> self power-cell-victory-pending?))
+
+          (reward-task
+            (if
+              carrier-reward?
+              (-> self caught-power-cell-task)
+              (-> self caught-buzzer-task))))
+
         (set! (-> self buzzer-victory-pending?) #f)
+        (set! (-> self power-cell-victory-pending?) #f)
         (set! (-> self caught-buzzer-count) 0)
         (set! (-> self caught-buzzer-task) 0)
+        (set! (-> self caught-power-cell-task) 0)
 
-        (when (> reward-task 1)
-          ;; The reward process uses this exact area task as its fuel-cell
-          ;; pickup amount and records it during the normal movie sequence.
-          (process-spawn
-            fuel-cell
-            :init fisher-buzzer-power-cell-reward
-            reward-task
-            :to *entity-pool*))))
+        (cond
+          ((and
+              (> reward-task 1)
+              (not
+                (task-complete?
+                  *game-info*
+                  (the-as game-task reward-task))))
 
+            ;; Set this before spawning so there is no one-frame race where
+            ;; fisher-game believes the reward process has already finished.
+            (set! *fisher-power-cell-reward-active?* #t)
+
+            (process-spawn
+              fuel-cell
+              :init fisher-buzzer-power-cell-reward
+              reward-task
+              :to *entity-pool*)
+
+            (while *fisher-power-cell-reward-active?*
+              (suspend)))
+
+          (else
+            (set! *fisher-power-cell-reward-active?* #f)))
+
+        ;; Reassert every control/camera release after the movie cleanup.
+        (process-release? *target*)
+        (send-event *target* 'end-mode)
+        (send-event *camera* 'no-intro)
+        (send-event *camera* 'clear-entity)
+        (send-event *camera* 'change-state *camera-base-mode* (seconds 0.25))
+        (set! *camera-read-analog* (-> self saved-camera-read-analog))
+        (set! *external-cam-mode* (-> self saved-external-cam-mode))
+
+        ;; The caught carrier slot is ordinary again. Only after its reward is
+        ;; complete may the area roll another missing-cell carrier.
+        (when carrier-reward?
+          (fisher-add-power-cell-fish-slot! self))))
+
+    (fisher-reset-cast! self)
     (go-virtual idle)
   )
 )
