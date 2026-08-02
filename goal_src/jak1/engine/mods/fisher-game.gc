@@ -3433,7 +3433,25 @@
 
     (singlefish-vector-add-scaled-safe! dst (-> self fisher-cam) camera-forward (meters 5.0))
 
-    (+! (-> dst y) (+ (meters 0.55) (* (meters -0.030) (-> self catch-menu-offset))))
+    (let ((fish-menu-offset
+          (if
+            (and
+              (fisher-rare-fish? (-> self caught-fish-suffix))
+              (or
+                (= (-> self fish-state) 'catch-exit)
+                (= (-> self fish-state) 'rare-enter)
+                (= (-> self fish-state) 'rare-display)))
+            0.0
+            (-> self catch-menu-offset))))
+
+      ;; Once the loot card begins leaving for a rare fish, keep the displayed
+      ;; fish and its attachments parked in view. Only the cards transition;
+      ;; the fish finally moves out with the rare-description exit.
+      (+!
+        (-> dst y)
+        (+
+          (meters 0.55)
+          (* (meters -0.030) fish-menu-offset))))
 
     (set! (-> dst w) 1.0))
 
@@ -3463,6 +3481,11 @@
             pos
             #f
             (cond
+              ((= (-> self caught-fish-suffix) 7) *catch-fishb-sgc*)
+              ((= (-> self caught-fish-suffix) 8) *catch-fishc-sgc*)
+              ((or (= (-> self caught-fish-suffix) 9)
+                   (= (-> self caught-fish-suffix) 10)) *catch-fisha-sgc*)
+
               ((= (-> self caught-fish-species) 1) *catch-fishb-sgc*)
 
               ((= (-> self caught-fish-species) 2) *fisher-junglefish-sg*)
@@ -3497,6 +3520,11 @@
             self
             slot
             fish-proc
+            #t)
+
+          (fisher-spawn-rare-fish-attachments!
+            fish-proc
+            (-> self caught-fish-suffix)
             #t)))))
 
   (none))
@@ -3734,6 +3762,7 @@
         (set! (-> self fish-message-time) (if carrier? 0.0 1.25))
         (set! (-> self caught-weight-tenths) 0)
         (set! (-> self caught-orb-value) 0)
+        (set! (-> self caught-fish-suffix) 2)
         (set! (-> self caught-fish-level) 1)
         (set! (-> self caught-fish-xp) 0)
         (set! (-> self catch-transition-time) 0.0)
@@ -3754,41 +3783,56 @@
     (+! (-> self catch-transition-time) dt)
 
     (cond
-      ((= (-> self fish-state) 'catch-enter)
-        (let* ((duration
-              0.65)
+      ((or
+          (= (-> self fish-state) 'catch-enter)
+          (= (-> self fish-state) 'rare-enter))
 
+        (let* ((duration 0.65)
             (progress (fmin 1.0 (/ (-> self catch-transition-time) duration)))
-
             (ease (fisher-smoothstep progress))
-
             (bounce
               (*
                 10.0
                 (sin (* (degrees 540.0) progress))
                 (- 1.0 progress))))
 
-          (set! (-> self catch-menu-offset) (+ (* 150.0 (- 1.0 ease)) bounce))
+          (set! (-> self catch-menu-offset)
+            (+ (* 150.0 (- 1.0 ease)) bounce))
 
           (when (>= progress 1.0)
             (set! (-> self catch-menu-offset) 0.0)
             (set! (-> self catch-transition-time) 0.0)
-            (set! (-> self fish-state) 'catch-display))))
+            (set!
+              (-> self fish-state)
+              (if
+                (= (-> self fish-state) 'rare-enter)
+                'rare-display
+                'catch-display)))))
 
-      ((= (-> self fish-state) 'catch-exit)
-        (let* ((duration
-              0.48)
+      ((or
+          (= (-> self fish-state) 'catch-exit)
+          (= (-> self fish-state) 'rare-exit))
 
+        (let* ((duration 0.48)
             (progress (fmin 1.0 (/ (-> self catch-transition-time) duration)))
-
-            (ease
-              (fisher-smoothstep progress)))
+            (ease (fisher-smoothstep progress)))
 
           (set! (-> self catch-menu-offset) (* 150.0 ease))
 
           (when (>= progress 1.0)
-            (fisher-sell-manipy-catch!
-              self))))))
+            (cond
+              ((and
+                  (= (-> self fish-state) 'catch-exit)
+                  (fisher-rare-fish? (-> self caught-fish-suffix)))
+
+                ;; Loot is fully gone before the description begins. Keep the
+                ;; fish and all child attachments alive for the second card.
+                (set! (-> self fish-state) 'rare-enter)
+                (set! (-> self catch-transition-time) 0.0)
+                (set! (-> self catch-menu-offset) 150.0))
+
+              (else
+                (fisher-sell-manipy-catch! self))))))))
 
   (none))
 
@@ -4824,19 +4868,16 @@
                 ((or
                     (= (-> self fish-state) 'catch-enter)
                     (= (-> self fish-state) 'catch-display)
-                    (= (-> self fish-state) 'catch-exit))
+                    (= (-> self fish-state) 'catch-exit)
+                    (= (-> self fish-state) 'rare-enter)
+                    (= (-> self fish-state) 'rare-display)
+                    (= (-> self fish-state) 'rare-exit))
                   (fisher-catch-display-fish-position! self hook-target)
 
                   (set! (-> fish-proc root trans quad) (-> hook-target quad))
 
                   (fisher-set-manipy-facing! self slot fish-proc)
-
-                  (set-vector!
-                    (-> fish-proc root scale)
-                    0.55
-                    0.55
-                    0.55
-                    1.0))))
+                  (fisher-apply-slot-appearance! self slot fish-proc #t))))
 
             (else
               (fisher-fish-position! self slot wanted-pos)
@@ -4941,7 +4982,17 @@
                   (-> self fish-state)
                   'approaching))))
 
-          (fisher-apply-slot-appearance! self slot fish-proc (= (-> self fish-state) 'catch-display))
+          (fisher-apply-slot-appearance!
+            self
+            slot
+            fish-proc
+            (or
+              (= (-> self fish-state) 'catch-enter)
+              (= (-> self fish-state) 'catch-display)
+              (= (-> self fish-state) 'catch-exit)
+              (= (-> self fish-state) 'rare-enter)
+              (= (-> self fish-state) 'rare-display)
+              (= (-> self fish-state) 'rare-exit)))
 
           (fisher-submit-power-cell-fish-particle! self slot fish-proc)
 
@@ -6186,6 +6237,14 @@
 
       (cpad-clear! 0 x)
       (set! (-> self fish-state) 'catch-exit)
+      (set! (-> self catch-transition-time) 0.0))
+
+    ((and
+        (= (-> self fish-state) 'rare-display)
+        (cpad-pressed? 0 x))
+
+      (cpad-clear! 0 x)
+      (set! (-> self fish-state) 'rare-exit)
       (set! (-> self catch-transition-time) 0.0)))
 
   (none))
@@ -6339,6 +6398,18 @@
   (clear *fish-ui-str*)
 
   (cond
+    ((= (-> self caught-fish-suffix) 7)
+      (format *fish-ui-str* "PRECURSOR FISH"))
+
+    ((= (-> self caught-fish-suffix) 8)
+      (format *fish-ui-str* "ORACLE'S GOLDFISH"))
+
+    ((= (-> self caught-fish-suffix) 9)
+      (format *fish-ui-str* "FRICKED UP FISH"))
+
+    ((= (-> self caught-fish-suffix) 10)
+      (format *fish-ui-str* "PRECURSOR ORB-EATER"))
+
     ((= (-> self caught-fish-species) 4)
       (format *fish-ui-str* "SCOUT FLY"))
 
@@ -6348,9 +6419,7 @@
         (fisher-suffix-name
           (-> self caught-fish-suffix)))
 
-      (format
-        *fish-ui-str*
-        " ")
+      (format *fish-ui-str* " ")
 
       (format
         *fish-ui-str*
@@ -6476,6 +6545,87 @@
         256
         (+ (if carrier? 205 181) menu-offset)
         0.52)))
+
+  (none))
+
+(defun fisher-draw-rare-fish-ui! ((self fisher-game))
+  (when
+    (or
+      (= (-> self fish-state) 'rare-enter)
+      (= (-> self fish-state) 'rare-display)
+      (= (-> self fish-state) 'rare-exit))
+
+    (let ((menu-offset (the int (-> self catch-menu-offset)))
+        (suffix (-> self caught-fish-suffix)))
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+         (bucket-id subtitle))
+
+        (draw-sprite2d-xy
+          buf 48 (+ 58 menu-offset) 416 172
+          (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
+
+        (draw-sprite2d-xy
+          buf 52 (+ 62 menu-offset) 408 164
+          (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
+
+      (draw-fisher-large-font-scaled
+        (fisher-format-catch-name! self)
+        256
+        (+ 76 menu-offset)
+        0.52)
+
+      (cond
+        ((= suffix 7)
+          (draw-fisher-small-text
+            "This bad boy can make a grown Fisherman cry."
+            256 (+ 104 menu-offset))
+          (draw-fisher-small-text
+            "Ye thought the precursors didn't work their magic"
+            256 (+ 120 menu-offset))
+          (draw-fisher-small-text
+            "across the fish, did ye? This here fish was once"
+            256 (+ 136 menu-offset))
+          (draw-fisher-small-text
+            "said to lead the precursors to the location of"
+            256 (+ 152 menu-offset))
+          (draw-fisher-small-text
+            "building an ancient precursor city that is lost"
+            256 (+ 168 menu-offset))
+          (draw-fisher-small-text
+            "to time itself! Good catch lad!"
+            256 (+ 184 menu-offset)))
+
+        ((= suffix 8)
+          (draw-fisher-small-text
+            "Avast! It's already askin' me for a hundred"
+            256 (+ 126 menu-offset))
+          (draw-fisher-small-text
+            "and twenty orbs."
+            256 (+ 144 menu-offset)))
+
+        ((= suffix 9)
+          (draw-fisher-small-text
+            "Avast! Ye---what? What the frick is this fish?"
+            256 (+ 126 menu-offset))
+          (draw-fisher-small-text
+            "Did Zed destroy my mod?"
+            256 (+ 144 menu-offset)))
+
+        ((= suffix 10)
+          (draw-fisher-small-text
+            "Ye best keep that fish safe from other fishermen.--"
+            256 (+ 126 menu-offset))
+          (draw-fisher-small-text
+            "I'll buy it from ye for 90 orbs."
+            256 (+ 144 menu-offset))))
+
+      (draw-fisher-large-font-scaled
+        "PRESS <PAD_X> TO CONTINUE"
+        256
+        (+ 210 menu-offset)
+        0.46)))
 
   (none))
 
@@ -6605,7 +6755,8 @@
       (fisher-restore-normal-background!)
       (fisher-camera-catch-display! self)
       (fisher-update-catch-menu-animation! self)
-      (fisher-draw-catch-ui! self)))
+      (fisher-draw-catch-ui! self)
+      (fisher-draw-rare-fish-ui! self)))
 
   ;; XP reward presentation continues after the loot window closes.
   (fisher-update-xp-gain-animation!)
@@ -6653,6 +6804,8 @@
 ;; at Jak, award the exact area task, start othercam from joint 10, play the
 ;; randomized spool, then perform the standard camera/target cleanup.
 (defbehavior fisher-buzzer-power-cell-reward fuel-cell ((task int))
+  (format #t "[FISH-REWARD] begin task=~D~%" task)
+
   (initialize self)
   (set! (-> self fact pickup-type) (pickup-type fuel-cell))
   (set! (-> self fact pickup-amount) (the float task))
@@ -6660,8 +6813,12 @@
   (logclear! (-> self mask) (process-mask actor-pause))
   (set! (-> self actor-pause) #f)
 
-  ;; Let fisher-game finish restoring its normal camera and controls.
+  (format #t "[FISH-REWARD] initialized~%")
+
   (suspend)
+
+  (format #t "[FISH-REWARD] after first suspend target=~A~%"
+    (not (not *target*)))
 
   (when *target*
     (sound-play "pu-powercell")
@@ -6672,20 +6829,31 @@
     (if (nonzero? (-> self sound))
       (stop! (-> self sound)))
 
-    ;; Do not begin while another movie camera still owns the view.
+    (format #t "[FISH-REWARD] waiting for othercam~%")
+
     (while (handle->process (-> *game-info* other-camera-handle))
-      (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
+      (spool-push
+        *art-control*
+        (-> self victory-anim name)
+        0
+        self
+        (the-as float -99.0))
       (suspend))
 
-    ;; This initializes Jak's clone-animation mode for this exact fuel-cell
-    ;; drawable, just like the retail pickup state.
+    (format #t "[FISH-REWARD] othercam clear~%")
+    (format #t "[FISH-REWARD] waiting for clone-anim~%")
+
     (while (not (send-event *target* 'clone-anim self))
-      (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
+      (spool-push
+        *art-control*
+        (-> self victory-anim name)
+        0
+        self
+        (the-as float -99.0))
       (suspend))
 
-    ;; We have no level-authored movie-pos, so use the retail fallback: place
-    ;; the cell at Jak, match Jak's yaw, and ground it before othercam reads
-    ;; camera joint 10 from the fuel-cell skeleton.
+    (format #t "[FISH-REWARD] clone-anim accepted~%")
+
     (move-to-point! (-> self root) (-> *target* control trans))
     (set-yaw-angle-clear-roll-pitch!
       (-> self root)
@@ -6701,32 +6869,51 @@
     (update-transforms! (-> self root))
     (ja-post)
 
-    (spool-push *art-control* (-> self victory-anim name) 0 self (the-as float -99.0))
+    (format #t "[FISH-REWARD] positioned cell~%")
 
-    ;; Award the exact selected area task exactly once, at the same point where
-    ;; a normal fuel-cell pickup records its reward.
+    (spool-push
+      *art-control*
+      (-> self victory-anim name)
+      0
+      self
+      (the-as float -99.0))
+
     (send-event
       *target*
       'get-pickup
       (pickup-type fuel-cell)
       (the float task))
 
+    (format #t "[FISH-REWARD] pickup awarded~%")
+
     (set! (-> self draw bounds w) 32768.0)
     (logior! (-> self skel status) (janim-status inited))
     (send-event *target* 'blend-shape #t)
 
-    (add-setting! 'music-volume 'rel (-> *setting-control* current music-volume-movie) 0)
-    (add-setting! 'sfx-volume 'rel (-> *setting-control* current sfx-volume-movie) 0)
-    (add-setting! 'ambient-volume 'rel (-> *setting-control* current ambient-volume-movie) 0)
+    (add-setting! 'music-volume 'rel
+      (-> *setting-control* current music-volume-movie) 0)
+    (add-setting! 'sfx-volume 'rel
+      (-> *setting-control* current sfx-volume-movie) 0)
+    (add-setting! 'ambient-volume 'rel
+      (-> *setting-control* current ambient-volume-movie) 0)
+
+    (format #t "[FISH-REWARD] before othercam spawn~%")
 
     (process-spawn othercam self 10 #f #t :to self)
+
+    (format #t "[FISH-REWARD] after othercam spawn~%")
+
     (auto-save-command 'auto-save 0 0 *default-pool*)
+
+    (format #t "[FISH-REWARD] before ja-play-spooled-anim~%")
 
     (ja-play-spooled-anim
       (-> self victory-anim)
       (the-as art-joint-anim fuel-cell-idle-ja)
       (the-as art-joint-anim #f)
       (the-as (function process-drawable symbol) false-func))
+
+    (format #t "[FISH-REWARD] after ja-play-spooled-anim~%")
 
     (remove-setting! 'music-volume)
     (remove-setting! 'sfx-volume)
@@ -6737,12 +6924,21 @@
     (send-event *camera* 'clear-entity)
     (ja-channel-set! 0)
 
-    ;; Match the retail pickup's two-frame settling period before the reward
-    ;; process is released.
+    (format #t "[FISH-REWARD] cleanup finished~%")
+
     (suspend)
     (suspend))
 
+  (format #t "[FISH-REWARD] clearing active flag~%")
+
   (set! *fisher-power-cell-reward-active?* #f)
+
+  (when *fisher-game*
+    (fisher-add-power-cell-fish-slot!
+      (the-as fisher-game (-> *fisher-game* 0))))
+
+  (format #t "[FISH-REWARD] complete~%")
+
   (deactivate self)
   (none))
 
@@ -6750,33 +6946,140 @@
   :virtual #t
   :code
   (behavior ()
-    (loop
-      (when
-        (<=
-          (vector-vector-distance
-            (target-pos 0)
-            (-> self pos))
-          (meters 5))
+    (let ((debug-frame 0))
+      (loop
+        (+! debug-frame 1)
 
-        (cond
-          ((cpad-pressed? 0 circle)
-            ;; Change state before drawing the idle prompt, so the prompt
-            ;; is not submitted on the frame fishing begins.
-            (cpad-clear! 0 circle)
-            (set! (-> self camera-state) 'before-cast)
-            (send-event *camera* 'change-state cam-fixed 0)
-            (go-virtual fishing))
+        ;; Reward movies are launched only after fisher-game has completely left
+        ;; its exit state. This prevents fuel-cell/othercam ownership from
+        ;; trapping the fishing process in exit.
+        (when
+          (and
+            (not *fisher-power-cell-reward-active?*)
+            (or
+              (-> self buzzer-victory-pending?)
+              (-> self power-cell-victory-pending?)))
 
-          (else
-            (draw-mod-menu-text-custom
-              "PRESS <PAD_CIRCLE> TO START FISHING"
-              256
-              160
-              #f
+          (let* ((carrier-reward?
+                  (-> self power-cell-victory-pending?))
+                 (reward-task
+                  (if
+                    carrier-reward?
+                    (-> self caught-power-cell-task)
+                    (-> self caught-buzzer-task))))
+
+            (format #t
+              "[FISH-IDLE] launching reward: carrier=~A task=~D~%"
+              carrier-reward?
+              reward-task)
+
+            (set! (-> self buzzer-victory-pending?) #f)
+            (set! (-> self power-cell-victory-pending?) #f)
+            (set! (-> self caught-buzzer-count) 0)
+            (set! (-> self caught-buzzer-task) 0)
+            (set! (-> self caught-power-cell-task) 0)
+
+            (when
+              (and
+                (> reward-task 1)
+                (not
+                  (task-complete?
+                    *game-info*
+                    (the-as game-task reward-task))))
+
+              (set! *fisher-power-cell-reward-active?* #t)
+
+              (process-spawn-function
+              fuel-cell
+              fisher-buzzer-power-cell-reward
+              reward-task
+              :name "fisher-power-cell-reward"
+              :to *entity-pool*))))
+
+        ;; Capture every gate once so the debug output and branch use the same
+        ;; values from this frame.
+        (let* ((reward-clear?
+                (not *fisher-power-cell-reward-active?*))
+               (othercam-proc
+                (handle->process (-> *game-info* other-camera-handle)))
+               (othercam-clear?
+                (not othercam-proc))
+               (movie-clear?
+                (not (movie?)))
+               (distance
+                (vector-vector-distance
+                  (target-pos 0)
+                  (-> self pos)))
+               (distance-clear?
+                (<= distance (meters 5)))
+               (circle-pressed?
+                (cpad-pressed? 0 circle))
+               (all-clear?
+                (and
+                  reward-clear?
+                  othercam-clear?
+                  movie-clear?
+                  distance-clear?)))
+
+          ;; Print about once per second. This proves idle is actually ticking
+          ;; and exposes any gate that changes after the console test.
+          (when (>= debug-frame 60)
+            (set! debug-frame 0)
+            (format
               #t
-              #f))))
+              "[FISH-IDLE] reward=~A othercam=~A movie=~A dist=~F/5m~%"
+              reward-clear?
+              othercam-clear?
+              movie-clear?
+              (/ distance (meters 1)))
 
-      (suspend))))
+            (format
+              #t
+              "[FISH-IDLE] all=~A circle=~A target=~A~%"
+              all-clear?
+              circle-pressed?
+              (not (not *target*))))
+
+          ;; Always report Circle, even if an outer gate is unexpectedly false.
+          (when circle-pressed?
+            (format #t
+              "[FISH-IDLE] CIRCLE seen reward=~A othercam=~A movie=~A dist-ok=~A dist=~F all=~A~%"
+              reward-clear?
+              othercam-clear?
+              movie-clear?
+              distance-clear?
+              (/ distance (meters 1))
+              all-clear?))
+
+          (when all-clear?
+            (cond
+              (circle-pressed?
+                (cpad-clear! 0 circle)
+
+                ;; Call process-grab? exactly once and print its result.
+                (let ((grabbed?
+                       (and *target* (process-grab? *target*))))
+                  (format #t
+                    "[FISH-IDLE] process-grab? result=~A target=~A~%"
+                    grabbed?
+                    (not (not *target*)))
+
+                  (when grabbed?
+                    (format #t "[FISH-IDLE] entering fishing now~%")
+                    (set! (-> self camera-state) 'before-cast)
+                    (send-event *camera* 'change-state cam-fixed 0)
+                    (go-virtual fishing))))
+
+              (else
+                (draw-mod-menu-text-custom
+                  "PRESS <PAD_CIRCLE> TO START FISHING"
+                  256
+                  160
+                  #f
+                  #t
+                  #f)))))
+
+        (suspend)))))
 
 (defun fisher-maintain-player-control! ((self fisher-game))
   ;; Fishing is modal. Keep Jak fixed at the authored fishing position every
@@ -6803,9 +7106,8 @@
 
   :enter
   (behavior ()
-    (while (not (process-grab? *target*))
-      (suspend))
-
+    ;; Jak was already grabbed by idle before this transition. Enter handlers
+    ;; run on a small temporary thread and must never suspend.
     (set! *fisher-session-active?* #t)
 
     (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
@@ -6881,99 +7183,17 @@
     (set! *fisher-background-cloud-session-active?* #f)
     (fisher-restore-normal-background!)
 
-    ;; fisher-game still owns Jak here. Finish this release before spawning a
-    ;; reward movie; never poll process-release? again after ownership changes.
+    ;; Request the release once, but never wait inside exit. A fuel-cell movie,
+    ;; death, save load, or another process may already own Jak; waiting for a
+    ;; successful release handshake in that case can strand this state forever.
     (when *target*
-      (while
-        (not (process-release? *target*))
-
-        (suspend)))
-
-    ;; Reward movies must fully finish before fisher-game returns to idle.
-    ;; Otherwise the prompt can reappear while the temporary fuel-cell still
-    ;; owns Jak and othercam, leaving later fishing entries locked.
-    (when
-      (or
-        (-> self buzzer-victory-pending?)
-        (-> self power-cell-victory-pending?))
-
-      (let* ((carrier-reward?
-             (-> self power-cell-victory-pending?))
-
-          (reward-task
-            (if
-              carrier-reward?
-              (-> self caught-power-cell-task)
-              (-> self caught-buzzer-task))))
-
-        (set! (-> self buzzer-victory-pending?) #f)
-        (set! (-> self power-cell-victory-pending?) #f)
-        (set! (-> self caught-buzzer-count) 0)
-        (set! (-> self caught-buzzer-task) 0)
-        (set! (-> self caught-power-cell-task) 0)
-
-        (cond
-          ((and
-              (> reward-task 1)
-              (not
-                (task-complete?
-                  *game-info*
-                  (the-as game-task reward-task))))
-
-            ;; Set this before spawning so there is no one-frame race where
-            ;; fisher-game believes the reward process has already finished.
-            (set! *fisher-power-cell-reward-active?* #t)
-
-            (process-spawn
-              fuel-cell
-              :init fisher-buzzer-power-cell-reward
-              reward-task
-              :to *entity-pool*)
-
-            (while *fisher-power-cell-reward-active?*
-              (suspend)))
-
-          (else
-            (set! *fisher-power-cell-reward-active?* #f)))
-
-        ;; The reward process has finished. Detach its movie mode and camera,
-        ;; but do not call process-release? here: fisher-game already released
-        ;; Jak before the reward and no longer owns that grab.
-        (when *target*
-          (send-event *target* 'end-mode))
-
-        (when *camera*
-          (send-event *camera* 'no-intro)
-          (send-event *camera* 'clear-entity))
-
-        ;; Do not return fisher-game to idle while othercam still exists.
-        (while
-          (handle->process (-> *game-info* other-camera-handle))
-
-          (suspend))
-
-        ;; Now restore the normal gameplay camera and saved fishing settings.
-        (send-event
-          *camera*
-          'change-state
-          *camera-base-mode*
-          (seconds 0.25))
-
-        (set!
-          *camera-read-analog*
-          (-> self saved-camera-read-analog))
-
-        (set!
-          *external-cam-mode*
-          (-> self saved-external-cam-mode))
-
-        ;; The caught carrier slot is ordinary again. Only after its reward is
-        ;; complete may the area roll another missing-cell carrier.
-        (when carrier-reward?
-          (fisher-add-power-cell-fish-slot! self))))
+      (process-release? *target*))
 
     (fisher-reset-cast! self)
     (set! *fisher-session-active?* #f)
+
+    ;; Keep the pending reward fields intact. idle launches the independent
+    ;; reward process on its next update, after this state transition is done.
     (go-virtual idle)
   )
 )

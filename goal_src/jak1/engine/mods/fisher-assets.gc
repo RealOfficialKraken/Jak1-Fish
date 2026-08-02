@@ -179,6 +179,34 @@
   ((catch-fishc-lod0-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 4))
 
+;; Rare-fish attachment clones. These use unique skeleton-group symbols so the
+;; fishing mod can tune and spawn them without changing the retail groups.
+(defskelgroup *towertop-sgc*
+  towertop
+  towertop-lod0-jg
+  towertop-idle-ja
+  ((towertop-lod0-mg (meters 20))
+   (towertop-lod1-mg (meters 40))
+   (towertop-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 30))
+
+(defskelgroup *oracle-sgc*
+  oracle
+  oracle-lod0-jg
+  oracle-idle-ja
+  ((oracle-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 4))
+
+(defskelgroup *money-sgc*
+  money
+  money-lod0-jg
+  money-idle-ja
+  ((money-lod0-mg (meters 20))
+   (money-lod1-mg (meters 40))
+   (money-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 0.6)
+  :texture-level 2)
+
 (defskelgroup *fisher-junglefish-sg*
   junglefish
   junglefish-lod0-jg

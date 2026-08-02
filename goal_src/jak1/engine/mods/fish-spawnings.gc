@@ -1175,7 +1175,7 @@
   (none))
 
 
-(defun fisher-roll-fish-suffix ()
+(defun fisher-roll-standard-fish-suffix ()
   (let ((roll
         (rand-vu-int-range 0 99999)))
 
@@ -1210,6 +1210,42 @@
           ((< roll 99990) 5)
           (else 6))))))
 
+
+(defun fisher-roll-fish-suffix ()
+  ;; Normal play: each custom rare is a 1-in-2000 roll per ordinary fish.
+  ;; fisher-debug: each rare becomes a 10% roll, for a 40% total rare chance.
+  ;; This is intentionally extreme so every custom catch can be tested quickly.
+  (let ((rare-roll (rand-vu-int-range 0 99999)))
+    (cond
+      (*fisher-in-debug?*
+        (cond
+          ((< rare-roll 10000) 7)   ;; Precursor Fish
+          ((< rare-roll 20000) 8)   ;; Oracle's Goldfish
+          ((< rare-roll 30000) 9)   ;; Fricked Up Fish
+          ((< rare-roll 40000) 10)  ;; Precursor Orb-Eater
+          (else (fisher-roll-standard-fish-suffix))))
+      (else
+        (cond
+          ((< rare-roll 50) 7)
+          ((< rare-roll 100) 8)
+          ((< rare-roll 150) 9)
+          ((< rare-roll 200) 10)
+          (else (fisher-roll-standard-fish-suffix)))))))
+
+(defun fisher-rare-fish? ((suffix int))
+  (and (>= suffix 7) (<= suffix 10)))
+
+(defun fisher-apply-rare-slot-type! ((self fisher-game) (slot int))
+  ;; Rare identity is stored in the suffix field. Force a safe ordinary species
+  ;; underneath each rare so it never inherits Scout Fly, shark, or poisonous
+  ;; EelFish mechanics merely because of the slot it replaced.
+  (let ((suffix (fisher-fish-suffix self slot)))
+    (cond
+      ((= suffix 7) (fisher-set-fish-species! self slot 1))
+      ((or (= suffix 8) (= suffix 9) (= suffix 10))
+        (fisher-set-fish-species! self slot 0))))
+  (none))
+
 (defun fisher-suffix-name ((suffix int))
   (cond
     ((= suffix 0) "MALNUTRITIONED")
@@ -1218,7 +1254,11 @@
     ((= suffix 3) "MUTANT")
     ((= suffix 4) "RARE")
     ((= suffix 5) "MEGA")
-    (else "GOLDEN")))
+    ((= suffix 6) "GOLDEN")
+    ((= suffix 7) "PRECURSOR")
+    ((= suffix 8) "ORACLE")
+    ((= suffix 9) "FRICKED UP")
+    (else "ORB-EATER")))
 
 (defun fisher-species-name
   ((self fisher-game) (species int))
@@ -1250,7 +1290,10 @@
     ((= suffix 3) 1.50)
     ((= suffix 4) 2.00)
     ((= suffix 5) 3.00)
-    (else 5.00)))
+    ((= suffix 6) 5.00)
+    ;; Custom rares receive their authored bonus below; do not also apply the
+    ;; Golden 5x multiplier merely because their IDs are greater than six.
+    (else 1.00)))
 
 (defun fisher-roll-fish-weight-tenths
   ((self fisher-game) (slot int))
@@ -1271,6 +1314,12 @@
           (else (rand-vu-int-range 10 20)))))
 
     (cond
+      ;; Authored custom-rare ranges, in tenths of a pound.
+      ((= suffix 7) (rand-vu-int-range 100 151))
+      ((= suffix 8) (rand-vu-int-range 30 61))
+      ((= suffix 9) (rand-vu-int-range 1 7))
+      ((= suffix 10) (rand-vu-int-range 140 241))
+
       ;; Lurker Sharks and Poisonous EelFish retain their authored weight
       ;; ranges regardless of prefix. Prefix still affects orb value/color.
       ((= species 3) 260)
@@ -1298,6 +1347,8 @@
 
 (defun fisher-randomize-fish-level-and-weight!
   ((self fisher-game) (slot int))
+
+  (fisher-apply-rare-slot-type! self slot)
 
   (fisher-set-fish-level!
     self
@@ -1371,7 +1422,7 @@
           (- (-> self fish-count) 1)))
 
       (fisher-set-fish-species! self slot 3)
-      (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+      (fisher-set-fish-suffix! self slot (fisher-roll-standard-fish-suffix))
       (fisher-set-fish-level!
         self
         slot
@@ -1462,7 +1513,8 @@
         (= (-> self location-id) 4))
       (> (-> self fish-count) 0)
       (not (fisher-has-power-cell-fish? self))
-      (rand-vu-percent? *fisher-power-cell-fish-chance*))
+      (rand-vu-percent?
+        (if *fisher-in-debug?* 0.90 *fisher-power-cell-fish-chance*)))
 
     (let ((task (fisher-find-missing-power-cell-task self)))
       (when (> (the int task) 1)
@@ -1543,7 +1595,7 @@
       (and
         (> remaining 0)
         (> (-> self fish-count) 0)
-        (rand-vu-percent? 0.50))
+        (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.50)))
 
       (set! spawn-count 1)
 
@@ -1553,7 +1605,7 @@
         (and
           (> remaining 1)
           (> (-> self fish-count) 1)
-          (rand-vu-percent? 0.35))
+          (rand-vu-percent? (if *fisher-in-debug?* 0.75 0.35)))
 
         (set! spawn-count 2))
 
@@ -1823,6 +1875,183 @@
 
   (none))
 
+(define *fisher-precursor-attachment-offset-game*
+  (new 'static 'vector :y (meters 0.22) :w 0.0))
+
+(define *fisher-precursor-attachment-offset-catch*
+  (new 'static 'vector :y (meters 0.40) :w 0.0))
+
+(define *fisher-oracle-attachment-offset-game*
+  (new 'static 'vector :y (meters 0.20) :w 0.0))
+
+(define *fisher-oracle-attachment-offset-catch*
+  (new 'static 'vector :y (meters 0.38) :w 0.0))
+
+(define *fisher-orb-attachment-offset-a-game*
+  (new 'static 'vector :x (meters -0.15) :y (meters 0.02) :z (meters 0.10) :w 0.0))
+
+(define *fisher-orb-attachment-offset-b-game*
+  (new 'static 'vector :x (meters 0.00) :y (meters 0.16) :z (meters -0.04) :w 0.0))
+
+(define *fisher-orb-attachment-offset-c-game*
+  (new 'static 'vector :x (meters 0.15) :y (meters -0.02) :z (meters 0.08) :w 0.0))
+
+(define *fisher-orb-attachment-offset-a-catch*
+  (new 'static 'vector :x (meters -0.27) :y (meters 0.04) :z (meters 0.16) :w 0.0))
+
+(define *fisher-orb-attachment-offset-b-catch*
+  (new 'static 'vector :x (meters 0.00) :y (meters 0.28) :z (meters -0.07) :w 0.0))
+
+(define *fisher-orb-attachment-offset-c-catch*
+  (new 'static 'vector :x (meters 0.27) :y (meters -0.04) :z (meters 0.13) :w 0.0))
+
+(defun fisher-update-rare-attachment-transform! ((self manipy))
+  (let ((parent-proc (ppointer->process (-> self parent)))
+      (offset (-> self root transv)))
+
+    (when
+      (and
+        parent-proc
+        offset
+        (type-type? (-> parent-proc type) process-drawable))
+
+      (let ((parent-drawable (the-as process-drawable parent-proc))
+          (rotation (new 'stack-no-clear 'matrix))
+          (rotated-offset (new 'stack-no-clear 'vector)))
+
+        ;; Keep each attachment in the fish's local space. This is important
+        ;; for the three precursor orbs: they should turn with the fish rather
+        ;; than remaining at fixed world-space offsets.
+        (quaternion->matrix rotation (-> parent-drawable root quat))
+        (vector-rotate*! rotated-offset offset rotation)
+        (set! (-> rotated-offset w) 0.0)
+
+        (vector+!
+          (-> self root trans)
+          (-> parent-drawable root trans)
+          rotated-offset)
+
+        (set! (-> self root trans w) 1.0)
+
+        (quaternion-copy!
+          (-> self root quat)
+          (-> parent-drawable root quat)))))
+
+  (none))
+
+(defbehavior fisher-rare-attachment-trans manipy ()
+  (fisher-update-rare-attachment-transform! self)
+  (none))
+
+(defbehavior fisher-precursor-towertop-trans manipy ()
+  (fisher-update-rare-attachment-transform! self)
+
+  ;; The retail towertop state advances towertop-idle-ja with a 0.4 seek rate.
+  ;; Keep the miniature tower on Precursor Fish spinning at that same rate.
+  (ja :group! towertop-idle-ja :num! (loop! 0.4))
+
+  (none))
+
+(defun fisher-spawn-rare-attachment!
+  ((fish-proc manipy)
+   (skel skeleton-group)
+   (offset vector)
+   (scale float)
+   (attachment-name string))
+
+  (let ((attachment
+        (manipy-spawn
+          (-> fish-proc root trans)
+          #f
+          skel
+          #f
+          :from *default-dead-pool*
+          :to fish-proc
+          :name attachment-name)))
+
+    (when attachment
+      (let ((attachment-proc
+            (the-as manipy (ppointer->process attachment))))
+
+        (when attachment-proc
+          (set! (-> attachment-proc root transv quad) (-> offset quad))
+          (set! (-> attachment-proc root transv w) 0.0)
+          (send-event attachment-proc 'max-vis-dist (meters 999999.0))
+
+          (set-vector!
+            (-> attachment-proc root scale)
+            scale scale scale 1.0)
+
+          (cond
+            ((= skel *towertop-sgc*)
+              ;; The custom trans hook advances the animation at the retail
+              ;; tower's exact 0.4 rate, so the normal manipy loop must stay off.
+              (send-event attachment-proc 'anim-mode 'still)
+              (send-event
+                attachment-proc
+                'trans-hook
+                fisher-precursor-towertop-trans))
+
+            (else
+              (send-event attachment-proc 'anim-mode 'loop)
+              (send-event
+                attachment-proc
+                'trans-hook
+                fisher-rare-attachment-trans)))))))
+
+  (none))
+
+(defun fisher-spawn-rare-fish-attachments!
+  ((fish-proc manipy) (suffix int) (catch-display? symbol))
+
+  (cond
+    ((= suffix 7)
+      (fisher-spawn-rare-attachment!
+        fish-proc
+        *towertop-sgc*
+        (if catch-display?
+          *fisher-precursor-attachment-offset-catch*
+          *fisher-precursor-attachment-offset-game*)
+        (if catch-display? 0.025 0.015)
+        "fisher-precursor-towertop"))
+
+    ((= suffix 8)
+      (fisher-spawn-rare-attachment!
+        fish-proc
+        *oracle-sgc*
+        (if catch-display?
+          *fisher-oracle-attachment-offset-catch*
+          *fisher-oracle-attachment-offset-game*)
+        (if catch-display? 0.16 0.10)
+        "fisher-oracle-statue"))
+
+    ((= suffix 10)
+      (fisher-spawn-rare-attachment!
+        fish-proc *money-sgc*
+        (if catch-display?
+          *fisher-orb-attachment-offset-a-catch*
+          *fisher-orb-attachment-offset-a-game*)
+        (if catch-display? 0.65 0.42)
+        "fisher-orb-eater-orb-a")
+
+      (fisher-spawn-rare-attachment!
+        fish-proc *money-sgc*
+        (if catch-display?
+          *fisher-orb-attachment-offset-b-catch*
+          *fisher-orb-attachment-offset-b-game*)
+        (if catch-display? 0.58 0.38)
+        "fisher-orb-eater-orb-b")
+
+      (fisher-spawn-rare-attachment!
+        fish-proc *money-sgc*
+        (if catch-display?
+          *fisher-orb-attachment-offset-c-catch*
+          *fisher-orb-attachment-offset-c-game*)
+        (if catch-display? 0.62 0.40)
+        "fisher-orb-eater-orb-c")))
+
+  (none))
+
 (defun fisher-apply-slot-appearance!
   ((self fisher-game) (slot int) (fish-proc manipy) (catch-display? symbol))
 
@@ -1868,21 +2097,59 @@
           ((= species 2) 1.00)
           (else 1.00))))
 
+    ;; Custom rares own their body shape and color. They intentionally skip the
+    ;; ordinary prefix deformation/color rules below.
+    (cond
+      ((= suffix 7)
+        ;; Precursor Fish: bronze fishb body.
+        (set! r 0.62)
+        (set! g 0.36)
+        (set! b 0.12)
+        (set! base-scale (if catch-display? 0.62 0.34)))
+
+      ((= suffix 8)
+        ;; Oracle's Goldfish: rich gold/orange body.
+        (set! r 1.00)
+        (set! g 0.56)
+        (set! b 0.06)
+        (set! base-scale (if catch-display? 0.62 0.34)))
+
+      ((= suffix 9)
+        ;; Fricked Up Fish: unnaturally thin, stretched, and sickly.
+        (set! r 0.56)
+        (set! g 0.82)
+        (set! b 0.62)
+        (set! base-scale (if catch-display? 0.68 0.38))
+        (set! x-scale 0.13)
+        (set! y-scale 0.20)
+        (set! z-scale 2.35))
+
+      ((= suffix 10)
+        ;; Precursor Orb-Eater: swollen warm-colored body around the orbs.
+        (set! r 0.82)
+        (set! g 0.48)
+        (set! b 0.16)
+        (set! base-scale (if catch-display? 0.68 0.38))
+        (set! x-scale 1.18)
+        (set! y-scale 1.12)
+        (set! z-scale 1.18)))
+
     ;; Prefix shape/size effects remain available. The shark preserves its
     ;; authored color except for Mutant and Golden.
     (when
-      (= suffix 0)
+      (and (not (fisher-rare-fish? suffix)) (= suffix 0))
       (set! x-scale 0.84)
       (set! z-scale 1.10))
 
     (when
-      (= suffix 5)
+      (and (not (fisher-rare-fish? suffix)) (= suffix 5))
       (*! x-scale 2.0)
       (*! y-scale 2.0)
       (*! z-scale 2.0))
 
     (when
       (and
+        (not (fisher-rare-fish? suffix))
         (!= species 4)
         (or
           (!= species 3)
@@ -2170,6 +2437,11 @@
           pos
           #f
           (cond
+            ((= (fisher-fish-suffix owner slot) 7) *catch-fishb-sgc*)
+            ((= (fisher-fish-suffix owner slot) 8) *catch-fishc-sgc*)
+            ((or (= (fisher-fish-suffix owner slot) 9)
+                 (= (fisher-fish-suffix owner slot) 10)) *catch-fisha-sgc*)
+
             ((= (fisher-fish-species owner slot) 1) *catch-fishb-sgc*)
 
             ((= (fisher-fish-species owner slot) 2) *fisher-junglefish-sg*)
@@ -2202,7 +2474,12 @@
           (fisher-set-manipy-facing!
             owner
             slot
-            (the-as manipy fish-proc)))))
+            (the-as manipy fish-proc))
+
+          (fisher-spawn-rare-fish-attachments!
+            (the-as manipy fish-proc)
+            (fisher-fish-suffix owner slot)
+            #f))))
 
     fish))
 
@@ -2704,10 +2981,17 @@
                   ;; This does not change its weight, XP, or fight strength.
                   (the int (+ (/ (the float raw-orb-value) 3.0) 0.5))
                   raw-orb-value)))
-          (if
-            (>= levels-below 5)
-            (max 0 final-orb-value)
-            (max 1 final-orb-value))))
+          (cond
+            ;; The Orb-Eater's dialogue promises an exact 90-orb purchase.
+            ((= suffix 10) 90)
+
+            ;; Precursor Fish and Oracle's Goldfish add their rare bonus on top
+            ;; of the otherwise-normal calculated value.
+            ((= suffix 7) (+ (max 1 final-orb-value) 35))
+            ((= suffix 8) (+ (max 1 final-orb-value) 50))
+
+            ((>= levels-below 5) (max 0 final-orb-value))
+            (else (max 1 final-orb-value)))))
       (set!
         (-> self caught-fish-xp)
         (fisher-accepted-xp-amount catch-xp))

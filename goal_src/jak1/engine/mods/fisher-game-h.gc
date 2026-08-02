@@ -801,6 +801,8 @@
 (defun-extern fisher-species-name fisher-game int string)
 (defun-extern fisher-start-manipy-turn! fisher-game int float none)
 (defun-extern fisher-suffix-name int string)
+(defun-extern fisher-rare-fish? int symbol)
+(defun-extern fisher-spawn-rare-fish-attachments! manipy int symbol none)
 (defun-extern launch-main-mmenu none)
 (defun-extern main-menu-abort-for-blackout! none)
 (defun-extern main-menu-build-camera-basis! none)
