@@ -885,7 +885,7 @@
           *fisher-level-encoded-text*
           buf
           256
-          190
+          180
           (font-color orange)
           (font-flags large middle shadow kerning)
           level-scale)

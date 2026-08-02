@@ -290,11 +290,6 @@
             (set! *camera-read-analog* #t)
             (set! *external-cam-mode* #f)
 
-            ;; Recreate the shoreline process only after Jak/camera cleanup.
-            (when *fisher-game*
-              (fisher-despawn-current-area!))
-            (maintain-fisher-game!)
-
             (set! *fisher-cell-repair-pending?* #f)
             (set! *fisher-cell-repair-clear-frames* 0)))))
   )

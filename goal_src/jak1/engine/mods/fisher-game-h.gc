@@ -48,6 +48,11 @@
 (define *fisher-approach-speed-min* 4.35)
 (define *fisher-approach-speed-max* 8.40)
 
+;; Once a fish commits to the lure, it continuously accelerates until contact.
+;; This intentionally has no maximum so a retreating lure cannot permanently
+;; outrun a fish that has already begun its approach.
+(define *fisher-approach-acceleration* 3.50)
+
 (define *fisher-line-hp* 100.0)
 
 (define *fisher-line-broken?* #f)

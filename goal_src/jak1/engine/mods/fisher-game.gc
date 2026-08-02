@@ -4700,6 +4700,12 @@
                 ((= (-> self fish-state) 'approaching)
                   (fisher-hook-target! self hook-target)
 
+                  ;; Keep accelerating for as long as this fish is chasing the
+                  ;; lure. There is deliberately no upper clamp.
+                  (+!
+                    (-> self fish-approach-speed)
+                    (* *fisher-approach-acceleration* dt))
+
                   (let ((remaining
                         (fisher-move-manipy-toward!
                           fish-proc
@@ -5034,6 +5040,15 @@
         (singlefish-vector-sub-safe! move-dir target-root (-> self root trans))
 
         (set! distance (singlefish-vector-length-safe move-dir))
+
+        ;; This process-based fish follows the same uncapped chase rule as the
+        ;; slot-based fish: accelerate every frame until its nose reaches the
+        ;; lure, then stop ramping when it enters the hook window.
+        (+!
+          (-> self approach-speed)
+          (*
+            *fisher-approach-acceleration*
+            (-> *display* seconds-per-frame)))
 
         (cond
           ((<= distance (meters 0.12))
