@@ -2941,7 +2941,7 @@
       (+!
         (-> dst y)
         (+
-          (meters 1.43)
+          (meters 1.28)
           (* (meters -0.030) fish-menu-offset))))
 
     (set! (-> dst w) 1.0))
