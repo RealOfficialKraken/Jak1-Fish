@@ -2,14 +2,7 @@
 (in-package goal)
 (bundles "JUN.DGO")
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Fishing levels and XP
-;;
-;; Persistent storage currently used by this mod:
-;;   Fishing level: (-> *game-info* auto-save-count)
-;;   Current XP:    (-> *game-info* total-deaths)
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; name: fisher-xp-meter.gc
 
 (define *fisher-xp-text*
   (new 'global 'string 64 (the string #f)))

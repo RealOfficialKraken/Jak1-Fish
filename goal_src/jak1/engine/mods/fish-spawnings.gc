@@ -2,8 +2,7 @@
 (in-package goal)
 (bundles "JUN.DGO")
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;name: fish-spawnings.gc
 
 (defskelgroup *swimmer-pontoonfive-sg*
   pontoonfive
@@ -24,6 +23,148 @@
     (pontoonten-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 7)
   :longest-edge (meters 4))
+
+
+(defun fisher-set-zone-species-range!
+  ((zone fisher-zone-info)
+   (index int)
+   (species fisher-species)
+   (normal-min int)
+   (normal-max int)
+   (golden-min int)
+   (golden-max int))
+
+  (set! (-> zone species index) (the-as int species))
+  (set! (-> zone normal-min index) normal-min)
+  (set! (-> zone normal-max index) normal-max)
+  (set! (-> zone golden-min index) golden-min)
+  (set! (-> zone golden-max index) golden-max)
+  (none))
+
+;;macro'd because its more than 13 parameters (my first macro whaaat)
+
+(defmacro fisher-set-species-info!
+  (info
+   name
+   skeleton
+   min-weight-tenths
+   max-weight-tenths
+   orb-value-multiplier
+   catch-scale
+   game-scale
+   color-r
+   color-g
+   color-b
+   depth-min
+   depth-max)
+
+  `(begin
+    (set! (-> ,info name) ,name)
+    (set! (-> ,info skeleton) ,skeleton)
+    (set! (-> ,info min-weight-tenths) ,min-weight-tenths)
+    (set! (-> ,info max-weight-tenths) ,max-weight-tenths)
+    (set! (-> ,info orb-value-multiplier) ,orb-value-multiplier)
+    (set! (-> ,info catch-scale) ,catch-scale)
+    (set! (-> ,info game-scale) ,game-scale)
+    (set! (-> ,info color-r) ,color-r)
+    (set! (-> ,info color-g) ,color-g)
+    (set! (-> ,info color-b) ,color-b)
+    (set! (-> ,info depth-min) ,depth-min)
+    (set! (-> ,info depth-max) ,depth-max)
+    (none)))
+
+(defun fisher-set-zone-info!
+  ((info fisher-zone-info)
+   (level-min int)
+   (level-max int)
+   (normal-fish-count-min int)
+   (normal-fish-count-max int)
+   (golden-fish-count-min int)
+   (golden-fish-count-max int)
+   (shark-chance float))
+
+  (set! (-> info level-min) level-min)
+  (set! (-> info level-max) level-max)
+  (set! (-> info normal-fish-count-min) normal-fish-count-min)
+  (set! (-> info normal-fish-count-max) normal-fish-count-max)
+  (set! (-> info golden-fish-count-min) golden-fish-count-min)
+  (set! (-> info golden-fish-count-max) golden-fish-count-max)
+  (set! (-> info shark-chance) shark-chance)
+  (none))
+
+(defun fisher-initialize-definition-tables! ()
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species eco-drum))
+    "ECO DRUM"
+    *catch-fisha-sgc*
+    10 20 1.0 0.55 0.30 0.25 0.88 1.00
+    (meters 10.0) (meters 13.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species largemouth-ecofish))
+    "LARGEMOUTH ECOFISH"
+    *catch-fishb-sgc*
+    20 50 2.0 0.55 0.30 0.32 0.78 0.25
+    (meters 18.0) (meters 21.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species babak-ecofish))
+    "BABAK ECOFISH"
+    *fisher-junglefish-sg*
+    20 41 2.0 0.95 0.75 1.00 1.00 1.00
+    (meters 26.0) (meters 29.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species lurker-shark))
+    "LURKER SHARK"
+    *sharkey-sgc*
+    260 260 3.0 0.78 0.56 1.00 1.00 1.00
+    (meters 30.0) (meters 33.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species scout-fly))
+    "SCOUT FLY"
+    *buzzer-sgc*
+    500 500 0.0 0.72 0.48 1.00 1.00 1.00
+    (meters 17.0) (meters 22.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species poisonous-eelfish))
+    "POISONOUS EELFISH"
+    *catch-fishc-sgc*
+    30 40 1.4 0.88 0.66 0.38 1.00 0.30
+    (meters 21.0) (meters 26.0))
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone sandover-dock))
+    1 3 3 6 8 14 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sandover-dock)) 0 (fisher-species eco-drum) 2 3 6 8)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sandover-dock)) 1 (fisher-species largemouth-ecofish) 1 3 2 6)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone jungle-pillar))
+    5 8 8 15 16 23 1.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone jungle-pillar)) 0 (fisher-species babak-ecofish) 1 4 4 7)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone training-lagoon))
+    1 1 6 8 6 8 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone training-lagoon)) 0 (fisher-species eco-drum) 2 3 2 3)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone training-lagoon)) 1 (fisher-species largemouth-ecofish) 4 5 4 5)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone sentinel-pontoon))
+    2 4 5 8 12 14 1.0)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone misty-island))
+    8 13 7 11 10 17 0.38)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 0 (fisher-species largemouth-ecofish) 1 3 3 4)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 1 (fisher-species babak-ecofish) 1 1 1 2)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 2 (fisher-species poisonous-eelfish) 5 6 6 10)
+  (none))
+
+(fisher-initialize-definition-tables!)
 
 (defun swimmer-pontoonfive-initialize-collision!
   ((self swimmer-pontoonfive))
@@ -592,24 +733,7 @@
 (defun fisher-species-name
   ((self fisher-game) (species int))
 
-  (cond
-    ((= species 1)
-      "LARGEMOUTH ECOFISH")
-
-    ((= species 2)
-      "BABAK ECOFISH")
-
-    ((= species 3)
-      "LURKER SHARK")
-
-    ((= species 4)
-      "SCOUT FLY")
-
-    ((= species 5)
-      "POISONOUS EELFISH")
-
-    (else
-      "ECO DRUM")))
+  (-> (fisher-species-info-for species) name))
 
 (defun fisher-suffix-value-multiplier ((suffix int))
   (cond
@@ -631,13 +755,13 @@
       (suffix
         (fisher-fish-suffix self slot))
 
+      (info
+        (fisher-species-info-for species))
+
       (base-weight
-        (cond
-          ((= species 3) 260)
-          ((= species 5) (rand-vu-int-range 30 40))
-          ((= species 1) (rand-vu-int-range 20 50))
-          ((= species 2) (rand-vu-int-range 20 41))
-          (else (rand-vu-int-range 10 20)))))
+        (rand-vu-int-range
+          (-> info min-weight-tenths)
+          (-> info max-weight-tenths))))
 
     (cond
       ((= suffix 7) (rand-vu-int-range 100 151))
@@ -973,18 +1097,21 @@
     (none)))
 
 (defun fisher-configure-sandover-table! ((self fisher-game))
-  (set! (-> self fish-level-min) 1)
-  (set! (-> self fish-level-max) 3)
+  (let ((zone (fisher-zone-info-for (fisher-zone sandover-dock))))
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
 
   (let ((eco-count 0)
       (largemouth-count 0))
 
     (cond
-      ((fisher-golden-hour?) (set! eco-count (rand-vu-int-range 6 8)) (set! largemouth-count (rand-vu-int-range 2 6)))
+      ((fisher-golden-hour?)
+        (set! eco-count (rand-vu-int-range (-> zone golden-min 0) (-> zone golden-max 0)))
+        (set! largemouth-count (rand-vu-int-range (-> zone golden-min 1) (-> zone golden-max 1))))
 
       (else
-        (set! eco-count (rand-vu-int-range 2 3))
-        (set! largemouth-count (rand-vu-int-range 1 3))))
+        (set! eco-count (rand-vu-int-range (-> zone normal-min 0) (-> zone normal-max 0)))
+        (set! largemouth-count (rand-vu-int-range (-> zone normal-min 1) (-> zone normal-max 1)))))
 
     (set! (-> self sandover-eco-count) eco-count)
     (set! (-> self sandover-largemouth-count) largemouth-count)
@@ -995,20 +1122,16 @@
       largemouth-count
       0))
 
-  (none))
+  (none)))
 
 (defun fisher-configure-training-lagoon-table! ((self fisher-game))
-  (set! (-> self fish-level-min) 1)
-  (set! (-> self fish-level-max) 1)
+  (let* ((zone (fisher-zone-info-for (fisher-zone training-lagoon)))
+      (eco-count (rand-vu-int-range (-> zone normal-min 0) (-> zone normal-max 0)))
+      (largemouth-count (rand-vu-int-range (-> zone normal-min 1) (-> zone normal-max 1))))
 
-  (let ((eco-count
-        (rand-vu-int-range 2 3))
-
-      (largemouth-count
-        (rand-vu-int-range 4 5)))
-
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
     (set! (-> self sandover-eco-count) eco-count)
-
     (set! (-> self sandover-largemouth-count) largemouth-count)
 
     (fisher-assign-table-slots!
@@ -1020,125 +1143,99 @@
   (none))
 
 (defun fisher-configure-jungle-pillar-table! ((self fisher-game))
-  (set! (-> self fish-level-min) 5)
-  (set! (-> self fish-level-max) 8)
+  (let* ((zone (fisher-zone-info-for (fisher-zone jungle-pillar)))
+      (golden? (fisher-golden-hour?))
+      (total-count
+        (if golden?
+          (rand-vu-int-range (-> zone golden-fish-count-min) (-> zone golden-fish-count-max))
+          (rand-vu-int-range (-> zone normal-fish-count-min) (-> zone normal-fish-count-max))))
+      (babak-count
+        (if golden?
+          (rand-vu-int-range (-> zone golden-min 0) (-> zone golden-max 0))
+          (rand-vu-int-range (-> zone normal-min 0) (-> zone normal-max 0))))
+      (remaining-count (- total-count babak-count))
+      (largemouth-count (rand-vu-int-range 1 remaining-count))
+      (eco-count (- remaining-count largemouth-count)))
 
-  (let ((total-count 0)
-      (eco-count 0)
-      (largemouth-count 0)
-      (babak-count 0)
-      (remaining-count 0))
-
-    (cond
-      ((fisher-golden-hour?) (set! total-count (rand-vu-int-range 16 23)) (set! babak-count (rand-vu-int-range 4 7)))
-
-      (else
-        (set! total-count (rand-vu-int-range 8 15))
-        (set! babak-count (rand-vu-int-range 1 4))))
-
-    (set! remaining-count (- total-count babak-count))
-
-    (set! largemouth-count (rand-vu-int-range 1 remaining-count))
-
-    (set! eco-count (- remaining-count largemouth-count))
-
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
     (set! (-> self sandover-eco-count) eco-count)
     (set! (-> self sandover-largemouth-count) largemouth-count)
 
-    (fisher-assign-table-slots!
-      self
-      eco-count
-      largemouth-count
-      babak-count)
+    (fisher-assign-table-slots! self eco-count largemouth-count babak-count)
 
-    (fisher-add-lurker-shark-slot! self))
+    (when (> (-> zone shark-chance) 0.0)
+      (fisher-add-lurker-shark-slot! self)))
 
   (none))
 
 (defun fisher-configure-sentinel-pontoon-table! ((self fisher-game))
-  (set! (-> self fish-level-min) 2)
-  (set! (-> self fish-level-max) 4)
+  (let* ((zone (fisher-zone-info-for (fisher-zone sentinel-pontoon)))
+      (golden? (fisher-golden-hour?))
+      (total-count
+        (if golden?
+          (rand-vu-int-range (-> zone golden-fish-count-min) (-> zone golden-fish-count-max))
+          (rand-vu-int-range (-> zone normal-fish-count-min) (-> zone normal-fish-count-max))))
+      (babak-count (rand-vu-int-range 1 (- total-count 2)))
+      (remaining-count (- total-count babak-count))
+      (largemouth-count (rand-vu-int-range 1 (- remaining-count 1)))
+      (eco-count (- remaining-count largemouth-count)))
 
-  (let ((total-count 0)
-      (eco-count 0)
-      (largemouth-count 0)
-      (babak-count 0)
-      (remaining-count 0))
-
-    (if
-      (fisher-golden-hour?)
-      (set! total-count (rand-vu-int-range 12 14))
-      (set! total-count (rand-vu-int-range 5 8)))
-
-    (set! babak-count (rand-vu-int-range 1 (- total-count 2)))
-    (set! remaining-count (- total-count babak-count))
-    (set! largemouth-count (rand-vu-int-range 1 (- remaining-count 1)))
-    (set! eco-count (- remaining-count largemouth-count))
-
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
     (set! (-> self sandover-eco-count) eco-count)
     (set! (-> self sandover-largemouth-count) largemouth-count)
 
-    (fisher-assign-table-slots!
-      self
-      eco-count
-      largemouth-count
-      babak-count)
+    (fisher-assign-table-slots! self eco-count largemouth-count babak-count)
 
-    (fisher-add-lurker-shark-slot! self))
+    (when (> (-> zone shark-chance) 0.0)
+      (fisher-add-lurker-shark-slot! self)))
 
   (none))
 
 (defun fisher-configure-misty-table! ((self fisher-game))
-  (set! (-> self fish-level-min) 8)
-  (set! (-> self fish-level-max) 13)
-
-  (let ((largemouth-count 0)
-      (babak-count 0)
-      (eel-count 0)
-      (shark-count 0)
+  (let* ((zone (fisher-zone-info-for (fisher-zone misty-island)))
+      (golden? (fisher-golden-hour?))
+      (largemouth-count
+        (if golden?
+          (rand-vu-int-range (-> zone golden-min 0) (-> zone golden-max 0))
+          (rand-vu-int-range (-> zone normal-min 0) (-> zone normal-max 0))))
+      (babak-count
+        (if golden?
+          (rand-vu-int-range (-> zone golden-min 1) (-> zone golden-max 1))
+          (rand-vu-int-range (-> zone normal-min 1) (-> zone normal-max 1))))
+      (eel-count
+        (if golden?
+          (rand-vu-int-range (-> zone golden-min 2) (-> zone golden-max 2))
+          (rand-vu-int-range (-> zone normal-min 2) (-> zone normal-max 2))))
+      (shark-count (if (rand-vu-percent? (-> zone shark-chance)) 1 0))
       (slot 0))
 
-    (cond
-      ((fisher-golden-hour?)
-        (set! largemouth-count (rand-vu-int-range 3 4))
-        (set! babak-count (rand-vu-int-range 1 2))
-        (set! eel-count (rand-vu-int-range 6 10)))
-
-      (else
-        (set! largemouth-count (rand-vu-int-range 1 3))
-        (set! babak-count 1)
-        (set! eel-count (rand-vu-int-range 5 6))))
-
-    (when (rand-vu-percent? 0.38)
-      (set! shark-count 1))
-
-    (set!
-      (-> self fish-count)
-      (min
-        *fisher-max-fish-slots*
-        (+ largemouth-count babak-count eel-count shark-count)))
-
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min *fisher-max-fish-slots* (+ largemouth-count babak-count eel-count shark-count)))
     (set! (-> self sandover-eco-count) eel-count)
     (set! (-> self sandover-largemouth-count) largemouth-count)
 
     (fisher-clear-power-cell-tasks! self)
 
     (when (> shark-count 0)
-      (fisher-configure-random-fish-slot! self slot 3)
+      (fisher-configure-random-fish-slot! self slot (the-as int (fisher-species lurker-shark)))
       (+! slot 1))
 
     (dotimes (i babak-count)
       (when (< slot (-> self fish-count))
-        (fisher-configure-random-fish-slot! self slot 2)
+        (fisher-configure-random-fish-slot! self slot (the-as int (fisher-species babak-ecofish)))
         (+! slot 1)))
 
     (dotimes (i largemouth-count)
       (when (< slot (-> self fish-count))
-        (fisher-configure-random-fish-slot! self slot 1)
+        (fisher-configure-random-fish-slot! self slot (the-as int (fisher-species largemouth-ecofish)))
         (+! slot 1)))
 
     (while (< slot (-> self fish-count))
-      (fisher-configure-random-fish-slot! self slot 5)
+      (fisher-configure-random-fish-slot! self slot (the-as int (fisher-species poisonous-eelfish)))
       (+! slot 1)))
 
   (none))
@@ -1345,20 +1442,14 @@
 
       (power-cell-task (fisher-fish-power-cell-task self slot))
 
+      (info
+        (fisher-species-info-for species))
+
       (base-scale
-        (cond
-          ((= species 3) (if catch-display? 0.78 0.56))
-
-          ((= species 4) (if catch-display? 0.72 0.48))
-
-          ((= species 5) (if catch-display? 0.88 0.66))
-
-          ((= species 2) (if catch-display? 0.95 0.75))
-
-          (catch-display? 0.55)
-
-          (else
-            0.30)))
+        (if
+          catch-display?
+          (-> info catch-scale)
+          (-> info game-scale)))
 
       (x-scale 1.0)
 
@@ -1366,18 +1457,11 @@
 
       (z-scale 1.0)
 
-      (r (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 5) 0.38) ((= species 1) 0.32) ((= species 2) 1.00) (else 0.25)))
+      (r (-> info color-r))
 
-      (g (cond ((= species 4) 1.00) ((= species 3) 1.00) ((= species 5) 1.00) ((= species 1) 0.78) ((= species 2) 1.00) (else 0.88)))
+      (g (-> info color-g))
 
-      (b
-        (cond
-          ((= species 4) 1.00)
-          ((= species 3) 1.00)
-          ((= species 5) 0.30)
-          ((= species 1) 0.25)
-          ((= species 2) 1.00)
-          (else 1.00))))
+      (b (-> info color-b)))
 
     (cond
       ((= suffix 7)
@@ -1488,27 +1572,16 @@
 
   (fisher-set-fish-lane! self slot (rand-vu-float-range (meters -1.35) (meters 1.35)))
 
-  (fisher-set-fish-depth!
-    self
-    slot
-    (cond
-      ((= (fisher-fish-species self slot) 1) (rand-vu-float-range (meters 18.0) (meters 21.0)))
+  (let ((info
+        (fisher-species-info-for
+          (fisher-fish-species self slot))))
 
-      ((= (fisher-fish-species self slot) 2) (rand-vu-float-range (meters 26.0) (meters 29.0)))
-
-      ((= (fisher-fish-species self slot) 3)
-        (rand-vu-float-range (meters 30.0) (meters 33.0)))
-
-      ((= (fisher-fish-species self slot) 4)
-        (rand-vu-float-range (meters 17.0) (meters 22.0)))
-
-      ((= (fisher-fish-species self slot) 5)
-        (rand-vu-float-range (meters 21.0) (meters 26.0)))
-
-      (else
-        (rand-vu-float-range
-          (meters 10.0)
-          (meters 13.0)))))
+    (fisher-set-fish-depth!
+      self
+      slot
+      (rand-vu-float-range
+        (-> info depth-min)
+        (-> info depth-max))))
 
   (fisher-set-fish-direction! self slot (if (rand-vu-percent? 0.5) 1.0 -1.0))
 
@@ -1658,19 +1731,12 @@
             ((= (fisher-fish-suffix owner slot) 8) *catch-fishc-sgc*)
             ((or (= (fisher-fish-suffix owner slot) 9)
                 (= (fisher-fish-suffix owner slot) 10)) *catch-fisha-sgc*)
-
-            ((= (fisher-fish-species owner slot) 1) *catch-fishb-sgc*)
-
-            ((= (fisher-fish-species owner slot) 2) *fisher-junglefish-sg*)
-
-            ((= (fisher-fish-species owner slot) 3) *sharkey-sgc*)
-
-            ((= (fisher-fish-species owner slot) 4) *buzzer-sgc*)
-
-            ((= (fisher-fish-species owner slot) 5) *catch-fishc-sgc*)
-
             (else
-              *catch-fisha-sgc*))
+              (the-as skeleton-group
+                (->
+                  (fisher-species-info-for
+                    (fisher-fish-species owner slot))
+                  skeleton))))
           #f
           :from *default-dead-pool*
           :to *default-pool*
@@ -2138,11 +2204,9 @@
         (value-mult (fisher-suffix-value-multiplier suffix))
         (level-value-mult (fisher-level-worth-multiplier fish-level jak-level))
         (base-value
-          (cond
-            ((= species 3) 3.0)
-            ((= species 5) 1.4)
-            ((or (= species 1) (= species 2)) 2.0)
-            (else 1.0)))
+          (->
+            (fisher-species-info-for species)
+            orb-value-multiplier))
         (catch-xp
           (the int
             (+

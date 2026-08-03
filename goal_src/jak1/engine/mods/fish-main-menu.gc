@@ -2,6 +2,8 @@
 (in-package goal)
 (bundles "JUN.DGO")
 
+;;name: fish-main-menu.gc
+
 (define *main-menu-camera-prepare-time* 0.0)
 
 (define *main-menu-setting-owner* (the-as (pointer process) #f))

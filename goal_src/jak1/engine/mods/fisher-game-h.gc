@@ -210,6 +210,68 @@
 
 (define *fisher-max-fish-slots* 22)
 
+(defenum fisher-species
+  (eco-drum 0)
+  (largemouth-ecofish 1)
+  (babak-ecofish 2)
+  (lurker-shark 3)
+  (scout-fly 4)
+  (poisonous-eelfish 5))
+
+(defenum fisher-zone
+  (sandover-dock 0)
+  (jungle-pillar 1)
+  (training-lagoon 2)
+  (sentinel-pontoon 3)
+  (misty-island 4))
+
+(deftype fisher-species-info (basic)
+  ((name                 string)
+    (skeleton             basic)
+    (min-weight-tenths    int32)
+    (max-weight-tenths    int32)
+    (orb-value-multiplier float)
+    (catch-scale          float)
+    (game-scale           float)
+    (color-r              float)
+    (color-g              float)
+    (color-b              float)
+    (depth-min            float)
+    (depth-max            float)))
+
+(deftype fisher-zone-info (basic)
+  ((level-min               int32)
+    (level-max               int32)
+    (normal-fish-count-min  int32)
+    (normal-fish-count-max  int32)
+    (golden-fish-count-min  int32)
+    (golden-fish-count-max  int32)
+    (species                int32 4)
+    (normal-min             int32 4)
+    (normal-max             int32 4)
+    (golden-min             int32 4)
+    (golden-max             int32 4)
+    (shark-chance           float)))
+
+(define *fisher-species-count* 6)
+(define *fisher-zone-count* 5)
+
+(deftype fisher-species-table (basic)
+  ((entry fisher-species-info 6 :inline)))
+
+(deftype fisher-zone-table (basic)
+  ((entry fisher-zone-info 5 :inline)))
+
+(define *fisher-species-table* (new 'global 'fisher-species-table))
+(define *fisher-zone-table* (new 'global 'fisher-zone-table))
+
+(defmacro fisher-species-info-for (species)
+  `(-> *fisher-species-table* entry (the-as int ,species)))
+
+(defmacro fisher-zone-info-for (zone)
+  `(-> *fisher-zone-table* entry (the-as int ,zone)))
+
+
 (deftype fisher-fish-slot (structure)
   ((visual             (pointer manipy))
     (species            int)
@@ -463,6 +525,7 @@
 (defun-extern fisher-add-power-cell-fish-slot! fisher-game none)
 (defun-extern fisher-fish-position! fisher-game int vector vector)
 (defun-extern fisher-fish-scared-off! fisher-game int none)
+(defun-extern fisher-initialize-definition-tables! none)
 (defun-extern fisher-fish-species fisher-game int int)
 (defun-extern fisher-fish-speed fisher-game int float)
 (defun-extern fisher-fish-turn-time fisher-game int float)
