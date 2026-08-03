@@ -36,6 +36,10 @@
 (define *fisher-xp-bar-flash-time* 0.0)
 (define *fisher-xp-level-bounce-time* 0.0)
 
+;; Slides the persistent level/XP meter down while a foreground window needs
+;; the same screen space.  It returns automatically when the window closes.
+(define *fisher-xp-meter-drop-offset* 0.0)
+
 (define *fisher-level-up-window-pending?* #f)
 (define *fisher-level-up-window-request?* #f)
 (define *fisher-level-up-window-old-level* 1)
@@ -557,7 +561,12 @@
       (when (< *fisher-xp-level-bounce-time* 0.0)
         (set! *fisher-xp-level-bounce-time* 0.0)))
 
-    (when *fisher-xp-fly-active?*
+    ;; Do not start moving XP until the persistent level bar has completed
+    ;; its return transition after the loot/lore card closes.
+    (when
+      (and
+        *fisher-xp-fly-active?*
+        (<= *fisher-xp-meter-drop-offset* 2.0))
       (+! *fisher-xp-fly-time* dt)
 
       (cond
@@ -645,7 +654,37 @@
 
   (none))
 
+(defun fisher-update-xp-meter-drop! ()
+  (let* ((dt (-> *display* seconds-per-frame))
+      (window-open?
+        (or
+          *fisher-level-up-window-pending?*
+          *fisher-level-up-window-request?*
+          (!= *fisher-level-up-window-state* 'hidden)
+          (and
+            *fisher-game*
+            (let ((game (the-as fisher-game (-> *fisher-game* 0))))
+              (or
+                (= (-> game fish-state) 'catch-enter)
+                (= (-> game fish-state) 'catch-display)
+                (= (-> game fish-state) 'catch-exit)
+                (= (-> game fish-state) 'rare-enter)
+                (= (-> game fish-state) 'rare-display)
+                (= (-> game fish-state) 'rare-exit))))))
+      (target (if window-open? 82.0 0.0))
+      (step (* 420.0 dt)))
+
+    (cond
+      ((< *fisher-xp-meter-drop-offset* target)
+        (set! *fisher-xp-meter-drop-offset*
+          (fmin target (+ *fisher-xp-meter-drop-offset* step))))
+      ((> *fisher-xp-meter-drop-offset* target)
+        (set! *fisher-xp-meter-drop-offset*
+          (fmax target (- *fisher-xp-meter-drop-offset* step))))))
+  (none))
+
 (defun fisher-draw-xp-meter! ()
+  (fisher-update-xp-meter-drop!)
   (when
     (and
       *game-info*
@@ -714,7 +753,10 @@
             :a #xc0))
 
         (level-scale
-          1.0))
+          1.0)
+
+        (meter-y
+          (the int *fisher-xp-meter-drop-offset*)))
 
       (when (> *fisher-xp-level-bounce-time* 0.0)
         (let ((bounce-progress
@@ -815,34 +857,34 @@
           (bucket-id subtitle))
 
         (draw-sprite2d-xy
-          buf 114 204 284 20
+          buf 114 (+ 204 meter-y) 284 20
           (new 'static 'rgba
             :r #x08 :g #x08 :b #x08 :a #xb8))
 
         (draw-sprite2d-xy
-          buf 116 206 280 16
+          buf 116 (+ 206 meter-y) 280 16
           (new 'static 'rgba
             :r #x48 :g #x28 :b #x10 :a #xe0))
 
         (draw-sprite2d-xy
-          buf 118 208 276 12
+          buf 118 (+ 208 meter-y) 276 12
           (new 'static 'rgba
             :r #x24 :g #x18 :b #x10 :a #xd0))
 
         (when (> fill-width 0)
           (draw-sprite2d-xy
-            buf 118 208 fill-width 12
+            buf 118 (+ 208 meter-y) fill-width 12
             fill-color)
 
           (draw-sprite2d-xy
-            buf 118 208 fill-width 2
+            buf 118 (+ 208 meter-y) fill-width 2
             fill-shine-color))
 
         (draw-string-xy-scaled
           *fisher-level-encoded-text*
           buf
           256
-          180
+          (+ 180 meter-y)
           (font-color orange)
           (font-flags large middle shadow kerning)
           level-scale)
@@ -852,7 +894,7 @@
                 'font-context
                 *font-default-matrix*
                 256
-                207
+                (+ 207 meter-y)
                 0.0
                 (font-color white)
                 (font-flags middle shadow kerning))))

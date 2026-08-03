@@ -97,6 +97,91 @@
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
 
+(defpart 3576
+  :init-specs
+  ((:texture (starflash effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 1.70))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:scale-y (meters 1.50))
+    (:r 255.0)
+    (:g 82.0)
+    (:b 18.0)
+    (:a 126.0)
+    (:vel-x 0.0)
+    (:vel-y 0.0)
+    (:vel-z 0.0)
+    (:scalevel-x 0.0)
+    (:rotvel-z (degrees -0.40))
+    (:scalevel-y 0.0)
+    (:timer (seconds 0.02))
+    (:flags (bit2 bit3))))
+
+(defpart 3577
+  :init-specs
+  ((:texture (starflash effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.38))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:scale-y (meters 0.34))
+    (:r 225.0)
+    (:g 244.0)
+    (:b 255.0)
+    (:a 72.0)
+    (:vel-x 0.0)
+    (:vel-y 0.0)
+    (:vel-z 0.0)
+    (:scalevel-x 0.0)
+    (:scalevel-y 0.0)
+    (:timer (seconds 0.02))
+    (:flags (bit2 bit3))))
+
+(defpart 3578
+  :init-specs
+  ((:texture (hotdot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 14.0)
+    (:scale-x (meters 0.035) (meters 0.065))
+    (:scale-y :copy scale-x)
+    (:r 255.0)
+    (:g 244.0)
+    (:b 190.0)
+    (:a 126.0)
+    (:vel-x (meters -0.008) (meters 0.016))
+    (:vel-y (meters -0.008) (meters 0.016))
+    (:vel-z (meters -0.003) (meters 0.006))
+    (:scalevel-x (meters -0.0005))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.80)
+    (:timer (seconds 0.45))
+    (:flags (bit2 bit3))))
+
+(defpart 3579
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 8.0)
+    (:scale-x (meters 0.030) (meters 0.055))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:scale-y :copy scale-x)
+    (:r 190.0)
+    (:g 230.0)
+    (:b 255.0)
+    (:a 110.0)
+    (:vel-x (meters -0.004) (meters 0.008))
+    (:vel-y (meters 0.004) (meters 0.012))
+    (:vel-z (meters -0.002) (meters 0.004))
+    (:scalevel-x (meters 0.00003))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.30)
+    (:timer (seconds 0.85))
+    (:flags (bit2 bit3))))
+
 (defpart 3574
   :init-specs
   ((:texture (lakedrop effects))
@@ -278,6 +363,32 @@
         *pc-encoded-matt-str*
         buf
         font-ctx)))
+
+  (none))
+
+
+(defun draw-fisher-small-font-scaled
+  ((text string) (text-x-pos int) (text-y-pos int) (text-scale float))
+
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id subtitle))
+
+    ;; Use the normal Latin glyph page.  The `large` flag selects a different
+    ;; atlas and produces Japanese glyphs when scaled down for lore text.
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      text-x-pos
+      text-y-pos
+      (font-color white)
+      (font-flags middle shadow kerning)
+      text-scale))
 
   (none))
 

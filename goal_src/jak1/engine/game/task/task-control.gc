@@ -240,6 +240,26 @@
           ((arg0 task-control))
           #t)))))
 
+
+(define *fisher-button-fight-hint-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+
+      (new 'static
+        'task-cstage
+        :game-task (game-task fisher-button-fight-hint)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
 ;; tasks for assistant (note: keira)
 (define *assistant-tasks*
   (new 'static
@@ -5005,7 +5025,9 @@
                ;; Task 116
                '*fisher-man-tasks*
                ;; Task 117
-               '*fisher-man-orb-tasks*)))
+               '*fisher-man-orb-tasks*
+               ;; Task 118
+               '*fisher-button-fight-hint-tasks*)))
 
 (defun task-control-reset ((arg0 symbol))
   "Reset all task controls and set their current stage"

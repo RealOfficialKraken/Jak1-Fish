@@ -126,4 +126,5 @@
   (assistant-village3 115)
   (fisher-game-tutorial 116)
   (fisher-game-tutorial-orbs 117)
-  (max 118))
+  (fisher-button-fight-hint 118)
+  (max 119))

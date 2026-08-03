@@ -216,7 +216,8 @@
   (babak-ecofish 2)
   (lurker-shark 3)
   (scout-fly 4)
-  (poisonous-eelfish 5))
+  (poisonous-eelfish 5)
+  (fire-canyon-cellfish 6))
 
 (defenum fisher-zone
   (sandover-dock 0)
@@ -237,7 +238,19 @@
     (color-g              float)
     (color-b              float)
     (depth-min            float)
-    (depth-max            float)))
+    (depth-max            float)
+    (fight-mode           int32)
+    (fight-pull-speed     float)
+    (fight-recover-min    float)
+    (fight-recover-max    float)
+    (button-count-min     int32)
+    (button-count-max     int32)
+    (button-launch-min    float)
+    (button-launch-max    float)
+    (button-rise-speed    float)
+    (button-gravity       float)
+    (button-damage-scale  float)
+    (button-miss-scale    float)))
 
 (deftype fisher-zone-info (basic)
   ((level-min               int32)
@@ -251,13 +264,14 @@
     (normal-max             int32 4)
     (golden-min             int32 4)
     (golden-max             int32 4)
-    (shark-chance           float)))
+    (shark-chance           float)
+    (fire-canyon-cellfish?  symbol)))
 
-(define *fisher-species-count* 6)
+(define *fisher-species-count* 7)
 (define *fisher-zone-count* 5)
 
 (deftype fisher-species-table (basic)
-  ((entry fisher-species-info 6 :inline)))
+  ((entry fisher-species-info 7 :inline)))
 
 (deftype fisher-zone-table (basic)
   ((entry fisher-zone-info 5 :inline)))
@@ -299,6 +313,30 @@
 
 (define *fisher-fish-runtime* (new 'global 'fisher-fish-runtime))
 
+
+(define *fisher-max-button-fight-slots* 5)
+
+(deftype fisher-button-fight-slot (structure)
+  ((state       int32)
+    (button      int32)
+    (x           float)
+    (y           float)
+    (vel-x       float)
+    (vel-y       float)
+    (launch-time float)))
+
+(deftype fisher-button-fight-runtime (basic)
+  ((active?       symbol)
+    (total         int32)
+    (remaining     int32)
+    (elapsed       float)
+    (wrong-mask    int32)
+    (hint-visible? symbol)
+    (slot fisher-button-fight-slot 5 :inline)))
+
+(define *fisher-button-fight-runtime*
+  (new 'global 'fisher-button-fight-runtime))
+
 ;;the master type for the minigame
 
 (deftype fisher-game (process)
@@ -313,6 +351,9 @@
     (saved-external-cam-mode      symbol)
     (water-level                  float)
     (camera-underwater?           symbol)
+    (pool-configured?             symbol)
+    (pool-rendered?               symbol)
+    (pool-golden?                 symbol)
     (cast-state                   symbol)
     (cast-charge                  float)
     (cast-charge-direction        float)
@@ -370,6 +411,7 @@
     (caught-power-cell-task       int)
     (fish-count                   int)
     (fish-data                    fisher-fish-runtime)
+    (button-fight-data            fisher-button-fight-runtime)
     (hooked-fish-slot             int)
     (fish-hook-time               float)
     (fish-reel-progress           float)
@@ -471,6 +513,14 @@
 ;; These are external definitions for literally every function in case I move stuff around
 ;; and plus compiler errors suck ofc and I don't want to deal with those.
 
+;; Cross-file fishing state.
+(define-extern *fisher-background-cloud-session-active?* symbol)
+(define-extern *fisher-power-cell-reward-active?* symbol)
+(define-extern *fisher-session-active?* symbol)
+
+
+(defun-extern runs-on-fly-pickup none)
+(defun-extern draw-fisher-small-font-scaled string int int float none)
 (defun-extern draw-fisher-large-font-scaled string int int float none)
 (defun-extern fisher-smoothstep float float)
 (defun-extern fisher-draw-reel-hint-text string int int float none)
@@ -497,11 +547,15 @@
 (define-extern *fisher-level-up-window-skill-mask* int)
 (define-extern *fisher-xp-fly-active?* symbol)
 (define-extern *fisher-xp-bar-anim-active?* symbol)
+(define-extern *fisher-level-up-window-state* symbol)
+(define-extern *fisher-xp-meter-drop-offset* float)
+(defun-extern fisher-update-xp-meter-drop! none)
 (defun-extern draw-fisher-small-text string int int none)
 (defun-extern draw-mod-menu-text-custom string int int symbol symbol symbol none)
 (defun-extern fisher-apply-slot-appearance! fisher-game int manipy symbol none)
 (defun-extern fisher-debug-draw-fish-cone! fisher-game int manipy none)
 (defun-extern fisher-debug-draw-logical-fish-marker! fisher-game int none)
+(defun-extern fisher-draw-playfield-debug! fisher-game none)
 (defun-extern fisher-debug-line! vector vector rgba none)
 (defun-extern fisher-set-background-curtain-color! rgba vector float none)
 (defun-extern fisher-update-background-curtain-colors! none)
@@ -517,6 +571,12 @@
 (defun-extern fisher-fish-level fisher-game int int)
 (defun-extern fisher-fish-weight-tenths fisher-game int int)
 (defun-extern fisher-fight-damage-per-second fisher-game int float)
+(defun-extern fisher-clear-button-fight! fisher-game none)
+(defun-extern fisher-start-button-fight! fisher-game none)
+(defun-extern fisher-update-button-fight! fisher-game symbol)
+(defun-extern fisher-draw-button-fight! fisher-game none)
+(defun-extern fisher-add-fire-canyon-cellfish-slot! fisher-game none)
+(defun-extern fisher-default-species-for-location fisher-game int)
 (defun-extern fisher-fish-weight-damage-multiplier fisher-game int float)
 (defun-extern fisher-fish-distance fisher-game int float)
 (defun-extern fisher-fish-pointer fisher-game int (pointer manipy))
@@ -537,6 +597,13 @@
 (defun-extern fisher-randomize-fish-level-and-weight! fisher-game int none)
 (defun-extern fisher-roll-fish-weight-tenths fisher-game int int)
 (defun-extern fisher-refill-missing-fish! fisher-game none)
+(defun-extern fisher-destroy-manipy! (pointer manipy) none)
+(defun-extern fisher-destroy-whole-pool! fisher-game none)
+(defun-extern fisher-despawn-rendered-fish! fisher-game none)
+(defun-extern fisher-desired-population-count fisher-game symbol int)
+(defun-extern fisher-apply-hidden-population-count! fisher-game symbol none)
+(defun-extern fisher-maintain-pool-rendering! fisher-game none)
+(defun-extern fisher-pool-fish-invisible? fisher-game symbol)
 (defun-extern fisher-remove-lure-snake! fisher-game none)
 (defun-extern fisher-set-fish-cooldown! fisher-game int float none)
 (defun-extern fisher-set-fish-direction! fisher-game int float none)

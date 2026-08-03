@@ -8,12 +8,43 @@
 
 (define *fisher-cell-repair-pending?* #f)
 (define *fisher-cell-repair-clear-frames* 0)
+(define *fisher-blackout-cleaned?* #f)
+(define *fisher-blackout-cleanup-pending?* #f)
+(define *fisher-blackout-cleanup-frames* 0)
+
+
+(define *fisher-pool-center-village1* (new 'static 'vector :x (meters -31.6360) :y (meters 2.3620) :z (meters 91.6117) :w 1.0))
+(define *fisher-pool-center-jungle* (new 'static 'vector :x (meters 473.7614) :y (meters 1.6762) :z (meters -224.9244) :w 1.0))
+(define *fisher-pool-center-training* (new 'static 'vector :x (meters -1332.0715) :y (meters 1.1072) :z (meters 922.7199) :w 1.0))
+(define *fisher-pool-center-beach* (new 'static 'vector :x (meters -293.0688) :y (meters 1.7276) :z (meters -272.6693) :w 1.0))
+(define *fisher-pool-center-misty* (new 'static 'vector :x (meters 103.0522) :y (meters 1.7121) :z (meters 992.6285) :w 1.0))
+
+(defun fisher-pool-center-for-location ((location-id int))
+  (cond
+    ((= location-id 0) *fisher-pool-center-village1*)
+    ((= location-id 1) *fisher-pool-center-jungle*)
+    ((= location-id 2) *fisher-pool-center-training*)
+    ((= location-id 3) *fisher-pool-center-beach*)
+    ((= location-id 4) *fisher-pool-center-misty*)
+    (else (the-as vector #f))))
+
+(defun fisher-player-near-location? ((location-id int) (max-distance meters))
+  (when (and *target* (>= location-id 0))
+    (let ((center (fisher-pool-center-for-location location-id)))
+      (when center
+        (return
+          (<=
+            (vector-vector-distance (target-pos 0) center)
+            max-distance)))))
+  #f)
 
 (defun fisher-despawn-current-area! ()
+  ;; Distance teardown must not walk the resident table or call
+  ;; cleanup-for-death on each stored manipy.  A stale child pointer can make
+  ;; that cleanup path loop forever.  Remove the named fish processes directly
+  ;; from their pool, then discard the owner/table as one object.
   (when *fisher-game*
     (when *fisher-session-active?*
-      (set! *singlefish-session-active?* #f)
-      (+! *singlefish-session-id* 1)
       (set! *fisher-background-cloud-visible?* #f)
       (set! *fisher-background-cloud-session-active?* #f)
       (set! *fisher-underwater-haze-override?* #f)
@@ -32,10 +63,15 @@
         (send-event *camera* 'change-state *camera-base-mode* (seconds 0.25))))
 
     (set! *fisher-session-active?* #f)
+    (set! *singlefish-session-active?* #f)
+    (+! *singlefish-session-id* 1)
 
-    (kill-by-name
-      "fisher-game"
-      *active-pool*)
+    ;; All resident fish/manipys use this exact process name and live in the
+    ;; default pool.  Killing by name avoids dereferencing the logical table.
+    (kill-by-name "fisher-gameplay-fish" *default-pool*)
+
+    ;; Killing the owner discards the logical fish table without traversing it.
+    (kill-by-name "fisher-game" *active-pool*)
 
     (set!
       *fisher-game*
@@ -170,47 +206,50 @@
   (none))
 
 (defun maintain-fisher-game! ()
-  (let ((inside
-        (when *level*
-          (level-get-target-inside *level*)))
-
-      (wanted-location-id
-        -1))
+  (let ((inside (when *level* (level-get-target-inside *level*)))
+      (wanted-location-id -1))
 
     (when inside
       (cond
-        ((= (-> inside name) 'village1)
-          (set! wanted-location-id 0))
+        ((= (-> inside name) 'village1) (set! wanted-location-id 0))
+        ((= (-> inside name) 'jungle) (set! wanted-location-id 1))
+        ((= (-> inside name) 'training) (set! wanted-location-id 2))
+        ((= (-> inside name) 'beach) (set! wanted-location-id 3))
+        ((= (-> inside name) 'misty) (set! wanted-location-id 4))))
 
-        ((= (-> inside name) 'jungle)
-          (set! wanted-location-id 1))
-
-        ((= (-> inside name) 'training)
-          (set! wanted-location-id 2))
-
-        ((= (-> inside name) 'beach)
-          (set! wanted-location-id 3))
-
-        ((= (-> inside name) 'misty)
-          (set! wanted-location-id 4))))
-
+    ;; Hysteresis prevents repeated spawning right on the boundary.
     (when
       (and
         *fisher-game*
-        (!=
-          *fisher-active-location-id*
-          wanted-location-id))
-
+        (or
+          (!= *fisher-active-location-id* wanted-location-id)
+          (not
+            (fisher-player-near-location?
+              *fisher-active-location-id*
+              (meters 50.0)))))
       (fisher-despawn-current-area!))
 
     (when
       (and
         (not *fisher-game*)
         inside
-        (>= wanted-location-id 0))
+        (>= wanted-location-id 0)
+        (fisher-player-near-location? wanted-location-id (meters 50.0)))
+      (fisher-spawn-area-for-level! (-> inside name)))
 
-      (fisher-spawn-area-for-level!
-        (-> inside name))))
+    (when *fisher-game*
+      (let ((game (the-as fisher-game (-> *fisher-game* 0))))
+        (fisher-update-camera-water! game)
+        (fisher-maintain-pool-rendering! game)
+
+        ;; The normal fishing state submits these debug lines itself.  Submit
+        ;; them here as well while outside fishing so in-debug remains useful
+        ;; around a persistent nearby fishbox.
+        (when
+          (and *fisher-in-debug?* (not *fisher-session-active?*))
+          (fisher-draw-playfield-debug! game)
+          (dotimes (slot *fisher-max-fish-slots*)
+            (fisher-debug-draw-logical-fish-marker! game slot))))))
 
   (none))
 
@@ -363,19 +402,67 @@
   (none))
 
 (defun runs-on-jak-spawn ()
-  (when
-    (and *fisher-game* *fisher-session-active?*)
-    (fisher-despawn-current-area!))
-  (maintain-fisher-game!)
+  ;; This callback can occur while level/art loading is still settling.
+  ;; Queue cleanup instead of destroying process or art objects here.
+  (when *fisher-game*
+    (set! *fisher-blackout-cleanup-pending?* #t)
+    (set! *fisher-blackout-cleanup-frames* 0))
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
-  (when *fisher-session-active?*
+  ;; Do not walk or kill the fish/manipy process tree from a death or blackout
+  ;; callback.  These callbacks may overlap the loader's art-record iteration.
+  ;; Queue one delayed teardown instead.
+  (when *fisher-game*
     (case death-event
       (('dying)
-        (fisher-despawn-current-area!))
+        (set! *fisher-blackout-cleanup-pending?* #t)
+        (set! *fisher-blackout-cleanup-frames* 0))
       (('blackout)
-        (fisher-despawn-current-area!))))
+        (let ((blackout?
+          (and
+            *game-info*
+            (< (current-time) (-> *game-info* blackout-time)))))
+    (cond
+      (blackout?
+        (when (not *fisher-blackout-cleaned?*)
+          (set! *fisher-blackout-cleaned?* #t)
+          (set! *fisher-blackout-cleanup-pending?* #t)
+          (set! *fisher-blackout-cleanup-frames* 0)
+          (set! *fisher-session-active?* #f)
+          (set! *fisher-background-cloud-visible?* #f)
+          (set! *fisher-background-cloud-session-active?* #f)
+          (set! *fisher-underwater-haze-override?* #f)))
+
+      (else
+        (set! *fisher-blackout-cleaned?* #f)
+        (when *fisher-blackout-cleanup-pending?*
+          (cond
+            ((and
+               *level*
+               *target*
+               (= (pause-allowed?) #t)
+               (= (paused?) #f))
+              (+! *fisher-blackout-cleanup-frames* 1)
+              (when (>= *fisher-blackout-cleanup-frames* 8)
+                (set! *fisher-blackout-cleanup-pending?* #f)
+                (set! *fisher-blackout-cleanup-frames* 0)
+                (set! *singlefish-session-active?* #f)
+                (+! *singlefish-session-id* 1)
+                (kill-by-name "fisher-gameplay-fish" *default-pool*)
+                (kill-by-name "fisher-game" *active-pool*)
+                (set!
+                  *fisher-game*
+                  (the-as (pointer fisher-game) #f))
+                (set! *fisher-session-active?* #f)
+                (set! *fisher-active-location-id* -1)))
+            (else
+              (set! *fisher-blackout-cleanup-frames* 0))))
+            )
+          )
+        )
+        (set! *fisher-blackout-cleanup-pending?* #t)
+        (set! *fisher-blackout-cleanup-frames* 0))))
   (none))
 
 (defun in-dialogue! ((log int) (sec int))

@@ -73,6 +73,50 @@
     (set! (-> ,info depth-max) ,depth-max)
     (none)))
 
+(defun fisher-set-normal-fight-info! ((info fisher-species-info))
+  (set! (-> info fight-mode) 0)
+  (set! (-> info fight-pull-speed) (meters 1.35))
+  (set! (-> info fight-recover-min) 0.75)
+  (set! (-> info fight-recover-max) 1.50)
+  (set! (-> info button-count-min) 0)
+  (set! (-> info button-count-max) 0)
+  (set! (-> info button-launch-min) 0.0)
+  (set! (-> info button-launch-max) 0.0)
+  (set! (-> info button-rise-speed) 0.0)
+  (set! (-> info button-gravity) 0.0)
+  (set! (-> info button-damage-scale) 1.0)
+  (set! (-> info button-miss-scale) 1.0)
+  (none))
+
+(defmacro fisher-set-button-fight-info!
+  (info
+   pull-speed
+   recover-min
+   recover-max
+   button-count-min
+   button-count-max
+   button-launch-min
+   button-launch-max
+   button-rise-speed
+   button-gravity
+   button-damage-scale
+   button-miss-scale)
+
+  `(begin
+    (set! (-> ,info fight-mode) 1)
+    (set! (-> ,info fight-pull-speed) ,pull-speed)
+    (set! (-> ,info fight-recover-min) ,recover-min)
+    (set! (-> ,info fight-recover-max) ,recover-max)
+    (set! (-> ,info button-count-min) ,button-count-min)
+    (set! (-> ,info button-count-max) ,button-count-max)
+    (set! (-> ,info button-launch-min) ,button-launch-min)
+    (set! (-> ,info button-launch-max) ,button-launch-max)
+    (set! (-> ,info button-rise-speed) ,button-rise-speed)
+    (set! (-> ,info button-gravity) ,button-gravity)
+    (set! (-> ,info button-damage-scale) ,button-damage-scale)
+    (set! (-> ,info button-miss-scale) ,button-miss-scale)
+    (none)))
+
 (defun fisher-set-zone-info!
   ((info fisher-zone-info)
    (level-min int)
@@ -135,6 +179,47 @@
     30 40 1.4 0.88 0.66 0.38 1.00 0.30
     (meters 21.0) (meters 26.0))
 
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species fire-canyon-cellfish))
+    "FIRE CANYON CELL SHARK"
+    *sharkey-sgc*
+    100 140 3.0 0.195 0.14 1.00 0.24 0.06
+    (meters 30.0) (meters 33.0))
+
+  (dotimes (species *fisher-species-count*)
+    (fisher-set-normal-fight-info!
+      (fisher-species-info-for species)))
+
+  ;; Lurker Sharks use the reusable button fight with a short 1-3 prompt wave.
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species lurker-shark))
+    (meters 1.15)
+    0.90
+    1.35
+    1
+    3
+    0.24
+    0.38
+    145.0
+    155.0
+    0.33333334
+    1.0)
+
+  ;; The Fire Canyon Cell Shark is the harder version: always 4-5 prompts.
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species fire-canyon-cellfish))
+    (meters 1.15)
+    0.90
+    1.35
+    4
+    5
+    0.24
+    0.38
+    145.0
+    155.0
+    0.083333336
+    1.0)
+
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone sandover-dock))
     1 3 3 6 8 14 0.0)
@@ -162,6 +247,13 @@
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 0 (fisher-species largemouth-ecofish) 1 3 3 4)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 1 (fisher-species babak-ecofish) 1 1 1 2)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 2 (fisher-species poisonous-eelfish) 5 6 6 10)
+
+  (set! (-> (fisher-zone-info-for (fisher-zone sandover-dock)) fire-canyon-cellfish?) #t)
+  (set! (-> (fisher-zone-info-for (fisher-zone jungle-pillar)) fire-canyon-cellfish?) #t)
+  (set! (-> (fisher-zone-info-for (fisher-zone training-lagoon)) fire-canyon-cellfish?) #t)
+  (set! (-> (fisher-zone-info-for (fisher-zone sentinel-pontoon)) fire-canyon-cellfish?) #t)
+  (set! (-> (fisher-zone-info-for (fisher-zone misty-island)) fire-canyon-cellfish?) #t)
+
   (none))
 
 (fisher-initialize-definition-tables!)
@@ -698,11 +790,13 @@
           ((< rare-roll 40000) 10)  ;; Precursor Orb-Eater
           (else (fisher-roll-standard-fish-suffix))))
       (else
+        ;; Each special rare is 0.01% (1 in 10,000).  Combined, any
+        ;; special rare is 0.04% (1 in 2,500).
         (cond
-          ((< rare-roll 50) 7)
-          ((< rare-roll 100) 8)
-          ((< rare-roll 150) 9)
-          ((< rare-roll 200) 10)
+          ((< rare-roll 10) 7)
+          ((< rare-roll 20) 8)
+          ((< rare-roll 30) 9)
+          ((< rare-roll 40) 10)
           (else (fisher-roll-standard-fish-suffix)))))))
 
 (defun fisher-rare-fish? ((suffix int))
@@ -728,7 +822,7 @@
     ((= suffix 7) "PRECURSOR")
     ((= suffix 8) "ORACLE")
     ((= suffix 9) "FRICKED UP")
-    (else "ORB-EATER")))
+    (else "ORB-HUNTER")))
 
 (defun fisher-species-name
   ((self fisher-game) (species int))
@@ -992,6 +1086,144 @@
 
   (none))
 
+(defun fisher-existing-zone? ((self fisher-game))
+  (and
+    (>= (-> self location-id) 0)
+    (< (-> self location-id) *fisher-zone-count*)
+    (->
+      (fisher-zone-info-for (-> self location-id))
+      fire-canyon-cellfish?)))
+
+(defun fisher-default-species-for-location ((self fisher-game))
+  (cond
+    ((= (-> self location-id) (the-as int (fisher-zone jungle-pillar)))
+      (the-as int (fisher-species babak-ecofish)))
+
+    ((= (-> self location-id) (the-as int (fisher-zone misty-island)))
+      (the-as int (fisher-species poisonous-eelfish)))
+
+    (else
+      (the-as int (fisher-species eco-drum)))))
+
+(defun fisher-has-species? ((self fisher-game) (species int))
+  (dotimes (slot (-> self fish-count))
+    (when (= (fisher-fish-species self slot) species)
+      (return #t)))
+  #f)
+
+(defun fisher-daytime? ()
+  (let ((hour
+        (if
+          *time-of-day-context*
+          (-> *time-of-day-context* time)
+          12.0)))
+
+    (and
+      (>= hour 6.0)
+      (< hour 18.0))))
+
+(defun fisher-fire-canyon-cellfish-eligible? ((self fisher-game))
+  ;; Debug deliberately bypasses every normal eligibility restriction so the
+  ;; special fish can be tested regardless of cells, time, zone, or task state.
+  (or
+    *fisher-in-debug?*
+    (and
+      *target*
+      (fisher-existing-zone? self)
+      (fisher-daytime?)
+      (>=
+        (the int
+          (the float
+            (send-event
+              *target*
+              'query
+              'pickup
+              (pickup-type fuel-cell))))
+        20)
+      (not
+        (task-complete?
+          *game-info*
+          (game-task firecanyon-end))))))
+
+(defun fisher-add-fire-canyon-cellfish-slot! ((self fisher-game))
+  (when
+    (and
+      (> (-> self fish-count) 0)
+      (fisher-fire-canyon-cellfish-eligible? self)
+      (not
+        (fisher-has-species?
+          self
+          (the-as int (fisher-species fire-canyon-cellfish))))
+      (rand-vu-percent?
+        (if *fisher-in-debug?* 1.0 *fisher-power-cell-fish-chance*)))
+
+    (let ((start-slot (rand-vu-int-range 0 (- (-> self fish-count) 1)))
+        (step 0)
+        (slot -1)
+        (candidate 0))
+
+      ;; A successful Fire Canyon Cell Fish roll takes priority over a Lurker
+      ;; Shark.  Reusing the shark slot removes the shark without changing the
+      ;; zone's configured fish count.
+      (dotimes (i (-> self fish-count))
+        (when
+          (and
+            (< slot 0)
+            (=
+              (fisher-fish-species self i)
+              (the-as int (fisher-species lurker-shark))))
+          (set! slot i)))
+
+      ;; If there is no shark, replace a normal non-cell/non-scout resident.
+      (while
+        (and
+          (< step (-> self fish-count))
+          (< slot 0))
+
+        (set! candidate
+          (mod (+ start-slot step) (-> self fish-count)))
+
+        (when
+          (and
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species scout-fly)))
+            (<= (fisher-fish-power-cell-task self candidate) 1))
+
+          (set! slot candidate))
+
+        (+! step 1))
+
+      (when (>= slot 0)
+        (fisher-set-fish-species!
+          self
+          slot
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-in-range
+            (-> self fish-level-min)
+            (-> self fish-level-max)))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (rand-vu-int-range 100 140))
+        (fisher-set-fish-power-cell-task!
+          self
+          slot
+          (the-as int (game-task firecanyon-end)))
+
+        (let ((old-fish (fisher-fish-pointer self slot)))
+          (when old-fish
+            (fisher-destroy-manipy! old-fish)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (the-as (pointer manipy) #f)))))))
+
+  (none))
+
 (defun fisher-buzzer-task-for-location ((self fisher-game))
   (cond
     ((= (-> self location-id) 1) (game-task jungle-buzzer))
@@ -1063,7 +1295,7 @@
 
           (let ((old-fish (fisher-fish-pointer self slot)))
             (when old-fish
-              (deactivate (-> old-fish 0))
+              (fisher-destroy-manipy! old-fish)
               (fisher-set-fish-pointer!
                 self
                 slot
@@ -1088,7 +1320,7 @@
 
             (let ((old-fish (fisher-fish-pointer self slot)))
               (when old-fish
-                (deactivate (-> old-fish 0))
+                (fisher-destroy-manipy! old-fish)
                 (fisher-set-fish-pointer!
                   self
                   slot
@@ -1259,8 +1491,11 @@
 
   (fisher-add-buzzer-fish-slots! self)
   (fisher-add-power-cell-fish-slot! self)
+  (fisher-add-fire-canyon-cellfish-slot! self)
 
   (none))
+
+(define *fisher-resident-fish-visible?* #f)
 
 (define *fisher-precursor-attachment-offset-game*
   (new 'static 'vector :y (meters 0.22) :w 0.0))
@@ -1295,6 +1530,16 @@
 (defun fisher-update-rare-attachment-transform! ((self manipy))
   (let ((parent-proc (ppointer->process (-> self parent)))
       (offset (-> self root transv)))
+
+    ;; Rare attachments are independent drawable manipys.  Hiding the parent
+    ;; fish does not automatically hide these children, so synchronize their
+    ;; draw distance every frame with the persistent fishbox visibility.
+    (send-event
+      self
+      'max-vis-dist
+      (if *fisher-resident-fish-visible?*
+        (meters 999999.0)
+        (meters 0.0)))
 
     (when
       (and
@@ -1544,6 +1789,12 @@
           (set! g 0.72)
           (set! b 0.06))))
 
+    ;; Catch/loot display fish are presentation models, not gameplay scale.
+    ;; Keep them compact so the full fish and any rare attachment fit above
+    ;; the loot window.
+    (when catch-display?
+      (*! base-scale 0.50))
+
     (set-vector! (-> fish-proc root scale) (* base-scale x-scale) (* base-scale y-scale) (* base-scale z-scale) 1.0)
 
     (set! (-> fish-proc draw color-mult r) r)
@@ -1594,8 +1845,24 @@
   (fisher-set-fish-turn-old-direction! self slot (fisher-fish-direction self slot))
 
   (when (!= (fisher-fish-species self slot) 4)
-    (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
-    (fisher-randomize-fish-level-and-weight! self slot)
+    (cond
+      ((= (fisher-fish-species self slot)
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-in-range
+            (-> self fish-level-min)
+            (-> self fish-level-max)))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (rand-vu-int-range 100 140)))
+
+      (else
+        (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+        (fisher-randomize-fish-level-and-weight! self slot)))
 
     (when (> (fisher-fish-power-cell-task self slot) 1)
       (fisher-set-fish-weight-tenths!
@@ -1766,6 +2033,233 @@
 
     fish))
 
+(defun fisher-destroy-manipy! ((fish (pointer manipy)))
+  ;; Never call cleanup-for-death on these temporary fishing manipys.  Their
+  ;; drawable skeleton can already have been released by the animation/art
+  ;; system by the time the catch transition removes them.  cleanup-for-death
+  ;; then follows that stale skel pointer through ja-channel-set! and crashes.
+  ;;
+  ;; Hiding and deactivating the owning process is sufficient.  The slot is
+  ;; cleared immediately by the caller, so no later code can reuse the ppointer.
+  (when fish
+    (let ((proc (-> fish 0 self)))
+      (when proc
+        (set-vector!
+          (-> (the-as manipy proc) root scale)
+          0.0
+          0.0
+          0.0
+          1.0)
+        (send-event proc 'max-vis-dist (meters 0.0))
+        (deactivate proc))))
+  (none))
+
+(defun fisher-despawn-rendered-fish! ((self fisher-game))
+  (dotimes (i *fisher-max-fish-slots*)
+    (let ((fish (fisher-fish-pointer self i)))
+      (when fish
+        (when (-> fish 0 self)
+          (fisher-destroy-manipy! fish))
+        (fisher-set-fish-pointer!
+          self
+          i
+          (the-as (pointer manipy) #f)))))
+  (set! (-> self pool-rendered?) #f)
+  (none))
+
+(defun fisher-destroy-whole-pool! ((self fisher-game))
+  ;; Blackout/distance teardown owns both layers: all resident manipy
+  ;; processes and the logical table describing them.
+  (fisher-despawn-rendered-fish! self)
+  (dotimes (i *fisher-max-fish-slots*)
+    (fisher-set-fish-pointer!
+      self
+      i
+      (the-as (pointer manipy) #f)))
+  (set! (-> self fish-count) 0)
+  (set! (-> self pool-configured?) #f)
+  (set! (-> self pool-rendered?) #f)
+  (set! (-> self pool-golden?) #f)
+  (set! (-> self hooked-fish) #f)
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self fish-state) 'free)
+  (set! (-> self fish-fighting?) #f)
+  (fisher-clear-button-fight! self)
+  (none))
+
+(defun fisher-spawn-rendered-fish! ((self fisher-game))
+  ;; The fish processes validate this flag as soon as they begin running, so
+  ;; activate the persistent fishbox before spawning any resident fish.
+  (set! *singlefish-session-active?* #t)
+
+  (dotimes (i *fisher-max-fish-slots*)
+    (when
+      (and
+        (< i (-> self fish-count))
+        (not (fisher-fish-pointer self i)))
+      (fisher-set-fish-pointer!
+        self
+        i
+        (fisher-spawn-gameplay-fish self i))))
+
+  (set! (-> self pool-rendered?) #t)
+  (none))
+
+(defun fisher-rebuild-logical-pool! ((self fisher-game) (golden? symbol))
+  (fisher-despawn-rendered-fish! self)
+  (+! *singlefish-session-id* 1)
+  (fisher-configure-location-table! self)
+  (dotimes (i *fisher-max-fish-slots*)
+    (fisher-randomize-fish-slot! self i))
+  (set! (-> self pool-configured?) #t)
+  (set! (-> self pool-golden?) golden?)
+  (none))
+
+(defun fisher-pool-visuals-needed? ((self fisher-game))
+  (and
+    *fisher-session-active?*
+    (or
+      (-> self camera-underwater?)
+      (= (-> self fish-state) 'catch-enter)
+      (= (-> self fish-state) 'catch-display)
+      (= (-> self fish-state) 'catch-exit)
+      (= (-> self fish-state) 'rare-enter)
+      (= (-> self fish-state) 'rare-display)
+      (= (-> self fish-state) 'rare-exit))))
+
+(defun fisher-pool-fish-invisible? ((self fisher-game))
+  ;; A cast and every catch/rare transition are absolute population locks.
+  ;; Reeling the lure completely in clears casted? before the hooked fish has
+  ;; finished returning and releasing its slot.  Using casted? alone therefore
+  ;; allowed a pending normal/golden-hour rebuild to destroy that fish from
+  ;; inside its own update, producing an infinite execute loop.
+  ;;
+  ;; Outside fishing the resident pool is hidden and safe to reconcile.  While
+  ;; fishing, reconciliation is legal only in the fully idle pre-cast state.
+  (or
+    (not *fisher-session-active?*)
+    (and
+      (not (-> self casted?))
+      (= (-> self fish-state) 'free)
+      (= (-> self cast-state) 'ready)
+      (not (-> self hooked-fish))
+      (< (-> self hooked-fish-slot) 0))))
+
+(defun fisher-set-resident-fish-visible!
+  ((self fisher-game) (visible? symbol))
+
+  ;; Child attachment manipys read this from their transform behavior.
+  (set! *fisher-resident-fish-visible?* visible?)
+
+  ;; The persistent fishbox must keep every resident process alive so fish
+  ;; retain their exact positions and continue swimming between fishing
+  ;; sessions.  Visibility is therefore controlled only through draw distance;
+  ;; never clear a slot, despawn a manipy, or rebuild the table here.
+  (dotimes (i *fisher-max-fish-slots*)
+    (let ((fish (fisher-fish-pointer self i)))
+      (when fish
+        (let ((fish-proc (-> fish 0 self)))
+          (when fish-proc
+            (send-event
+              fish-proc
+              'max-vis-dist
+              (if (and visible? (< i (-> self fish-count)))
+                (meters 999999.0)
+                (meters 0.0))))))))
+
+  (none))
+
+(defun fisher-desired-population-count
+  ((self fisher-game) (golden? symbol))
+
+  (let* ((zone (fisher-zone-info-for (the-as fisher-zone (-> self location-id))))
+      (count
+        (if golden?
+          (rand-vu-int-range
+            (-> zone golden-fish-count-min)
+            (-> zone golden-fish-count-max))
+          (rand-vu-int-range
+            (-> zone normal-fish-count-min)
+            (-> zone normal-fish-count-max)))))
+
+    (min *fisher-max-fish-slots* count)))
+
+(defun fisher-apply-hidden-population-count!
+  ((self fisher-game) (golden? symbol))
+
+  ;; Golden-hour transitions must never rebuild or destroy the resident table.
+  ;; A full rebuild can invalidate the fish currently completing a reel/catch
+  ;; transition and trap that process in an execute loop.  Keep all resident
+  ;; processes alive and change only how many slots are active/visible.
+  (let ((old-count (-> self fish-count))
+      (new-count (fisher-desired-population-count self golden?)))
+
+    (set! (-> self fish-count) new-count)
+    (set! (-> self pool-golden?) golden?)
+
+    ;; When the table grows, reveal existing hidden residents or create only
+    ;; the newly required slots.  Never touch slots below old-count.
+    (when (> new-count old-count)
+      (dotimes (offset (- new-count old-count))
+        (let ((slot (+ old-count offset)))
+          (when (not (fisher-fish-pointer self slot))
+            (fisher-randomize-fish-slot! self slot)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (fisher-spawn-gameplay-fish self slot)))))))
+
+  (none))
+
+(defun fisher-maintain-pool-rendering! ((self fisher-game))
+  ;; A nearby fisher-game owns one persistent fishbox.  The resident processes
+  ;; continue swimming while their drawables are hidden.  Creation, refill, and
+  ;; normal/golden table reconciliation happen only while those fish are
+  ;; invisible, never while the underwater pool is on screen.
+  (set! *singlefish-session-active?* #t)
+
+  (unless (-> self pool-configured?)
+    (fisher-rebuild-logical-pool! self (fisher-golden-hour?)))
+
+  (unless (-> self pool-rendered?)
+    (fisher-spawn-rendered-fish! self))
+
+  (when (fisher-pool-fish-invisible? self)
+    ;; Debug mode must guarantee that the Fire Canyon Cell Fish exists even
+    ;; when the persistent fishbox was created before debug was enabled or was
+    ;; carried through a blackout/load transition.  The insertion replaces an
+    ;; existing resident slot, so it never exceeds the configured fish cap.
+    (when
+      (and
+        *fisher-in-debug?*
+        (not
+          (fisher-has-species?
+            self
+            (the-as int (fisher-species fire-canyon-cellfish)))))
+      (fisher-add-fire-canyon-cellfish-slot! self))
+
+    (let ((golden? (fisher-golden-hour?)))
+      (cond
+        ((!= golden? (-> self pool-golden?))
+          ;; Change only the active population count.  Resident fish beyond a
+          ;; reduced count remain alive but hidden, and are reused if the table
+          ;; grows again.  No table walk, despawn, or cleanup occurs here.
+          (fisher-apply-hidden-population-count! self golden?))
+
+        (else
+          ;; Replace caught/missing residents only while the pool is hidden.
+          (fisher-refill-missing-fish! self)))))
+
+  ;; Keep the resident processes and logical table alive at all times, but do
+  ;; not draw them while Jak is outside fishing or while the fishing camera is
+  ;; above water.  Re-entering fishing reveals these exact same fish at their
+  ;; continuously updated positions.
+  (fisher-set-resident-fish-visible!
+    self
+    (fisher-pool-visuals-needed? self))
+
+  (none))
+
 (defun fisher-refill-missing-fish! ((self fisher-game))
   (dotimes (i *fisher-max-fish-slots*)
     (when
@@ -1783,41 +2277,27 @@
   (none))
 
 (defun singlefish-start-session! ((self fisher-game))
-  (dotimes (i *fisher-max-fish-slots*)
-    (let ((old-fish
-          (fisher-fish-pointer self i)))
-
-      (when old-fish (deactivate (-> old-fish 0)))
-
-      (fisher-set-fish-pointer!
-        self
-        i
-        (the-as (pointer manipy) #f))))
-
-  (+! *singlefish-session-id* 1)
+  ;; Entering fishing reuses the existing fishbox exactly as it is.  Do not
+  ;; rebuild, randomize, or respawn the resident fish here.
   (set! *singlefish-session-active?* #t)
+
+  (unless (-> self pool-configured?)
+    (fisher-rebuild-logical-pool! self (fisher-golden-hour?)))
+
+  (unless (-> self pool-rendered?)
+    (fisher-spawn-rendered-fish! self))
+
   (set! (-> self hooked-fish) #f)
   (set! (-> self hooked-fish-slot) -1)
   (set! (-> self fish-state) 'free)
-
-  (fisher-configure-location-table! self)
-
   (set! (-> self fish-hook-time) 0.0)
   (set! (-> self fish-reel-progress) 0.0)
   (set! (-> self fish-fight-time) 0.0)
   (set! (-> self fish-fighting?) #f)
+  (fisher-clear-button-fight! self)
 
-  (dotimes (i *fisher-max-fish-slots*)
-    (fisher-randomize-fish-slot! self i)
-
-    (fisher-set-fish-pointer!
-      self
-      i
-      (if
-        (< i (-> self fish-count))
-        (fisher-spawn-gameplay-fish self i)
-        (the-as (pointer manipy) #f))))
-
+  ;; The camera begins above water, so leave the logical fish hidden until
+  ;; fisher-maintain-pool-rendering! decides they are needed.
   (none))
 
 (defun fisher-manipy-distance-to-lure
@@ -2078,6 +2558,7 @@
   (set! (-> self fish-hook-time) 0.0)
   (set! (-> self fish-reel-progress) 0.0)
   (set! (-> self fish-fighting?) #f)
+  (fisher-clear-button-fight! self)
   (set! (-> self hooked-fish-poison-dps) 0.0)
   (set! (-> self fish-fight-time) 0.0)
   (set! (-> self fish-fight-phase) 0.0)
@@ -2191,15 +2672,19 @@
         (power-cell-task (fisher-fish-power-cell-task self slot))
 
         (orb-weight
-          (if
-            (> power-cell-task 1)
-            (max
-              1
-              (the int
-                (+
-                  (/ (the float weight) 1.70)
-                  0.5)))
-            weight))
+          (cond
+            ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+              130)
+
+            ((> power-cell-task 1)
+              (max
+                1
+                (the int
+                  (+
+                    (/ (the float weight) 1.70)
+                    0.5))))
+
+            (else weight)))
 
         (value-mult (fisher-suffix-value-multiplier suffix))
         (level-value-mult (fisher-level-worth-multiplier fish-level jak-level))
@@ -2241,10 +2726,12 @@
       (set!
         (-> self caught-orb-value)
         (let ((final-orb-value
-              (if
-                (= species 3)
-                (the int (+ (/ (the float raw-orb-value) 3.0) 0.5))
-                raw-orb-value)))
+              (cond
+                ((= species 3)
+                  (the int (+ (/ (the float raw-orb-value) 3.0) 0.5)))
+                ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+                  (the int (+ (/ (the float raw-orb-value) 3.0) 0.5)))
+                (else raw-orb-value))))
           (cond
             ((= suffix 10) 90)
 
@@ -2265,6 +2752,7 @@
       (set! (-> self camera-state) 'before-cast)
       (set! (-> self casted?) #f)
       (set! (-> self fish-fighting?) #f)
+      (fisher-clear-button-fight! self)
       (set! (-> self fish-fight-time) 0.0)
       (set! (-> self fish-fight-phase) 0.0)
       (set! (-> self fish-fight-base-y) 0.0)

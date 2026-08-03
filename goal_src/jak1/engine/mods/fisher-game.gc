@@ -40,6 +40,15 @@
       curtain-yaw)
     (set!
       (-> *part-id-table* 3575 init-specs 5 initial-valuef)
+      curtain-yaw)
+    (set!
+      (-> *part-id-table* 3576 init-specs 5 initial-valuef)
+      curtain-yaw)
+    (set!
+      (-> *part-id-table* 3577 init-specs 5 initial-valuef)
+      curtain-yaw)
+    (set!
+      (-> *part-id-table* 3579 init-specs 5 initial-valuef)
       curtain-yaw))
   (none))
 
@@ -48,6 +57,8 @@
 (define *fisher-level-up-window-offset* 150.0)
 (define *fisher-power-cell-reward-active?* #f)
 (define *fisher-session-active?* #f)
+(define *fisher-button-world-down*
+  (new 'static 'vector :x 0.0 :y -1.0 :z 0.0 :w 0.0))
 
 (define *fisher-stop-lure-cooldown-color*
   (new 'static 'rgba :r #xe8 :g #xb8 :b #x38 :a #xe8)
@@ -204,7 +215,7 @@
       (-> (current-frame) global-buf))
 
     (let ((menu-offset
-          (the int *fisher-level-up-window-offset*))
+          (- (the int *fisher-level-up-window-offset*) 10))
 
         (skill-mask
           *fisher-level-up-window-skill-mask*)
@@ -330,7 +341,7 @@
           (draw-fisher-large-font-scaled
             "PRESS <PAD_SQUARE> TO FREEZE THE LURE"
             256
-            (+ 164 menu-offset)
+            (+ 150 menu-offset)
             0.36)
 
           (draw-fisher-large-font-scaled
@@ -411,7 +422,7 @@
           (draw-fisher-large-font-scaled
             "THE CURRENT TIME IS NOW ALWAYS SHOWN"
             256
-            (+ 164 menu-offset)
+            (+ 150 menu-offset)
             0.34)
 
           (draw-fisher-large-font-scaled
@@ -540,6 +551,7 @@
 (defbehavior fisher-game-init-by-other fisher-game ((location-id int) (vec vector) (camera-vec vector) (water-height float) (angles vector))
   (set! (-> self location-id) location-id)
   (set! (-> self fish-data) *fisher-fish-runtime*)
+  (set! (-> self button-fight-data) *fisher-button-fight-runtime*)
   (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
   (vector-copy! (-> self pos) vec)
   (vector-copy!
@@ -632,6 +644,8 @@
     (set! (-> self fish-data slot slot-index turn-time) 0.0)
     (set! (-> self fish-data slot slot-index turn-old-direction) 1.0)
     (set! (-> self fish-data slot slot-index turn-side) 1.0))
+
+  (fisher-clear-button-fight! self)
 
   (vector-reset! (-> self lure-pos))
 
@@ -1691,6 +1705,7 @@
   (set! (-> self fish-message-time) 0.0)
   (set! (-> self reel-camera-blend) 0.0)
   (set! (-> self hooked-fish-poison-dps) 0.0)
+  (fisher-clear-button-fight! self)
 
   (set! (-> self lure-x-velocity) 0.0)
   (set! (-> self lure-y-velocity) 0.0)
@@ -2409,7 +2424,9 @@
   (let ((owner (the-as fisher-game (-> self owner)))
 
       (lurker-shark?
-        (string= (-> self species-name) "Lurker Shark")))
+        (or
+          (string= (-> self species-name) "Lurker Shark")
+          (string= (-> self species-name) "FIRE CANYON CELL SHARK"))))
 
     (when (= (-> owner hooked-fish) self) (set! (-> owner hooked-fish) #f) (set! (-> owner fish-state) 'free))
 
@@ -2924,7 +2941,7 @@
       (+!
         (-> dst y)
         (+
-          (meters 0.55)
+          (meters 1.43)
           (* (meters -0.030) fish-menu-offset))))
 
     (set! (-> dst w) 1.0))
@@ -2969,6 +2986,8 @@
               ((= (-> self caught-fish-species) 4) *buzzer-sgc*)
 
               ((= (-> self caught-fish-species) 5) *catch-fishc-sgc*)
+
+              ((= (-> self caught-fish-species) 6) *sharkey-sgc*)
 
               (else
                 *catch-fisha-sgc*))
@@ -3075,7 +3094,7 @@
         (when
           (or (<= distance (meters 0.30)) (>= (-> self catch-transition-time) 2.0))
 
-          (deactivate (-> fish 0))
+          (fisher-destroy-manipy! fish)
 
           (fisher-set-fish-pointer! self slot (the-as (pointer manipy) #f))
 
@@ -3097,7 +3116,7 @@
           (the-as (pointer manipy) #f))))
 
     (when fish
-      (deactivate (-> fish 0)))
+      (fisher-destroy-manipy! fish))
 
     (when (>= slot 0)
       (fisher-set-fish-pointer!
@@ -3183,7 +3202,7 @@
 
                   (set! (-> xp-start w) 1.0))
 
-                (deactivate (-> fish 0)))
+                (fisher-destroy-manipy! fish))
 
               (fisher-set-fish-pointer!
                 self
@@ -3192,12 +3211,23 @@
 
               (fisher-set-fish-power-cell-task! self slot 0)
 
+              (when
+                (= (-> self caught-fish-species)
+                  (the-as int (fisher-species fire-canyon-cellfish)))
+
+                (fisher-set-fish-species!
+                  self
+                  slot
+                  (fisher-default-species-for-location self))
+                (fisher-set-fish-suffix! self slot 2))
+
               (fisher-randomize-fish-slot!
                 self
                 slot)))
 
           (unless carrier?
-            (fisher-add-power-cell-fish-slot! self))
+            (fisher-add-power-cell-fish-slot! self)
+            (fisher-add-fire-canyon-cellfish-slot! self))
 
           (fisher-start-xp-gain-animation!
             xp-start
@@ -4011,6 +4041,7 @@
       (reference-weight
         (cond
           ((= species 3) 260.0)
+          ((= species (the-as int (fisher-species fire-canyon-cellfish))) 204.0)
           ((= species 5) 35.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
@@ -4030,7 +4061,10 @@
 
       (base-damage
         (cond
-          ((= species 3) 105.0)
+          ((or
+              (= species (the-as int (fisher-species lurker-shark)))
+              (= species (the-as int (fisher-species fire-canyon-cellfish))))
+            105.0)
           ((= species 1) 52.0)
           ((= species 5) 38.0)
           (else 34.0)))
@@ -4048,9 +4082,343 @@
       base-damage
       (fisher-fish-weight-damage-multiplier self slot)
       (if
-        (= species 3)
+        (or
+          (= species (the-as int (fisher-species lurker-shark)))
+          (= species (the-as int (fisher-species fire-canyon-cellfish))))
         (fmax 1.15 level-mult)
         level-mult))))
+
+(defun fisher-clear-button-fight! ((self fisher-game))
+  (let ((data (-> self button-fight-data)))
+    (set! (-> data active?) #f)
+    (set! (-> data total) 0)
+    (set! (-> data remaining) 0)
+    (set! (-> data elapsed) 0.0)
+    (set! (-> data wrong-mask) 0)
+    (set! (-> data hint-visible?) #f)
+
+    (dotimes (i *fisher-max-button-fight-slots*)
+      (set! (-> data slot i state) 0)
+      (set! (-> data slot i button) 0)
+      (set! (-> data slot i x) 256.0)
+      (set! (-> data slot i y) 250.0)
+      (set! (-> data slot i vel-x) 0.0)
+      (set! (-> data slot i vel-y) 0.0)
+      (set! (-> data slot i launch-time) 0.0)))
+
+  (none))
+
+(defun fisher-button-held? ((button int))
+  (cond
+    ((= button 0) (cpad-hold? 0 triangle))
+    ((= button 1) (cpad-hold? 0 circle))
+    ((= button 2) (cpad-hold? 0 x))
+    (else (cpad-hold? 0 square))))
+
+(defun fisher-button-label ((button int))
+  (cond
+    ((= button 0) "<PAD_TRIANGLE>")
+    ((= button 1) "<PAD_CIRCLE>")
+    ((= button 2) "<PAD_X>")
+    (else "<PAD_SQUARE>")))
+
+(defun fisher-button-world-position!
+  ((self fisher-game) (screen-x float) (screen-y float) (dst vector))
+
+  (let ((camera-pos (new 'stack-no-clear 'vector))
+      (origin (new 'stack-no-clear 'vector))
+      (forward (new 'stack-no-clear 'vector))
+      (right (new 'stack-no-clear 'vector))
+      (up (new 'stack-no-clear 'vector))
+      (anchored? #f))
+
+    (cond
+      ((and *camera* (> (-> *camera* num-slaves) 0))
+        (vector-copy! camera-pos (-> *camera* slave 0 0 trans)))
+
+      (else
+        (vector-copy! camera-pos (-> self fisher-cam))))
+
+    ;; Anchor the prompt plane to the hooked fish itself.  The x/y values are
+    ;; still used for the matching font glyph, but the 3D flash originates at
+    ;; the fish and sprays across a camera-facing plane from there.
+    (when (>= (-> self hooked-fish-slot) 0)
+      (let ((fish (fisher-fish-pointer self (-> self hooked-fish-slot))))
+        (when (and fish (-> fish 0 self))
+          (vector-copy! origin (-> (the-as manipy (-> fish 0 self)) root trans))
+          (set! anchored? #t))))
+
+    (unless anchored?
+      (singlefish-vector-add-scaled-safe!
+        origin
+        camera-pos
+        (-> self playfield-axis)
+        (meters 2.40)))
+
+    (vector-! forward origin camera-pos)
+    (singlefish-vector-normalize-safe! forward 1.0)
+
+    (singlefish-vector-cross-safe!
+      right
+      forward
+      *fisher-button-world-down*)
+    (singlefish-vector-normalize-safe! right 1.0)
+
+    (singlefish-vector-cross-safe! up right forward)
+    (singlefish-vector-normalize-safe! up 1.0)
+
+    (vector-copy! dst origin)
+
+    (singlefish-vector-add-scaled-safe!
+      dst
+      dst
+      right
+      (* (- screen-x 256.0) (meters 0.0062)))
+
+    (singlefish-vector-add-scaled-safe!
+      dst
+      dst
+      up
+      (* (- 204.0 screen-y) (meters 0.0062)))
+
+    ;; Pull the prompts slightly toward the camera so they render over the fish
+    ;; and curtain while remaining attached to the fish's apparent position.
+    (singlefish-vector-add-scaled-safe!
+      dst
+      dst
+      forward
+      (meters -0.10))
+
+    (set! (-> dst w) 1.0))
+
+  dst)
+
+(defun fisher-launch-button-hit-effects!
+  ((self fisher-game) (screen-x float) (screen-y float))
+
+  (let ((particle-pos (new 'stack-no-clear 'vector)))
+    (fisher-button-world-position! self screen-x screen-y particle-pos)
+    (fisher-set-particle-fishbox-rotation! self)
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3578)
+      particle-pos)
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3579)
+      particle-pos))
+
+  (none))
+
+(defun fisher-record-button-fight-hint! ((self fisher-game))
+  (let* ((task (game-task fisher-button-fight-hint))
+      (control (get-task-control task))
+      (hint-count (get-reminder control 0)))
+
+    (set! (-> self button-fight-data hint-visible?) #f)
+
+    (when
+      (and
+        (not (task-closed? task (task-status need-hint)))
+        (< hint-count 2))
+
+      (set! (-> self button-fight-data hint-visible?) #t)
+      (+! hint-count 1)
+      (save-reminder control hint-count 0)
+
+      (when (>= hint-count 2)
+        (close-specific-task! task (task-status need-hint)))))
+
+  (none))
+
+(defun fisher-start-button-fight! ((self fisher-game))
+  (let* ((slot (-> self hooked-fish-slot))
+      (species (fisher-fish-species self slot))
+      (info (fisher-species-info-for species))
+      (data (-> self button-fight-data))
+      (count
+        (rand-vu-int-range
+          (-> info button-count-min)
+          (-> info button-count-max)))
+      (launch-time 0.0))
+
+    (fisher-clear-button-fight! self)
+    (set! (-> data active?) #t)
+    (set! (-> data total) count)
+    (set! (-> data remaining) count)
+    (set! (-> data elapsed) 0.0)
+    (set! (-> data wrong-mask) 0)
+
+    (dotimes (i count)
+      (set! (-> data slot i state) 0)
+      (set! (-> data slot i button) (rand-vu-int-range 0 3))
+      (set! (-> data slot i x) (rand-vu-float-range 248.0 264.0))
+      (set! (-> data slot i y) (rand-vu-float-range 202.0 214.0))
+      (set! (-> data slot i vel-x) (rand-vu-float-range -82.0 82.0))
+      (set! (-> data slot i vel-y)
+        (-
+          (*
+            (-> info button-rise-speed)
+            (rand-vu-float-range 0.88 1.12))))
+      (set! (-> data slot i launch-time) launch-time)
+      (+! launch-time
+        (rand-vu-float-range
+          (-> info button-launch-min)
+          (-> info button-launch-max))))
+
+    (fisher-record-button-fight-hint! self))
+
+  (none))
+
+(defun fisher-hit-button! ((self fisher-game) (button int))
+  (let ((data (-> self button-fight-data))
+      (found-slot -1))
+
+    (dotimes (i (-> data total))
+      (when
+        (and
+          (< found-slot 0)
+          (= (-> data slot i state) 1)
+          (= (-> data slot i button) button))
+
+        (set! found-slot i)))
+
+    (cond
+      ((>= found-slot 0)
+        (fisher-launch-button-hit-effects!
+          self
+          (-> data slot found-slot x)
+          (-> data slot found-slot y))
+        (set! (-> data slot found-slot state) 2)
+        (-! (-> data remaining) 1))
+
+      (else
+        (logior! (-> data wrong-mask) (ash 1 button)))))
+
+  (none))
+
+(defun fisher-update-button-fight-input! ((self fisher-game))
+  (let ((data (-> self button-fight-data)))
+    (dotimes (button 4)
+      (when
+        (and
+          (logtest? (-> data wrong-mask) (ash 1 button))
+          (not (fisher-button-held? button)))
+
+        (logclear! (-> data wrong-mask) (ash 1 button))))
+
+    (when (cpad-pressed? 0 triangle)
+      (fisher-hit-button! self 0)
+      (cpad-clear! 0 triangle))
+
+    (when (cpad-pressed? 0 circle)
+      (fisher-hit-button! self 1)
+      (cpad-clear! 0 circle))
+
+    (when (cpad-pressed? 0 x)
+      (fisher-hit-button! self 2)
+      (cpad-clear! 0 x))
+
+    (when (cpad-pressed? 0 square)
+      (fisher-hit-button! self 3)
+      (cpad-clear! 0 square)))
+
+  (none))
+
+(defun fisher-finish-button-fight! ((self fisher-game))
+  (let* ((slot (-> self hooked-fish-slot))
+      (species (fisher-fish-species self slot))
+      (info (fisher-species-info-for species)))
+
+    (set! (-> self fish-fighting?) #f)
+    (set! (-> self fish-fight-time) 0.0)
+    (set! (-> self fish-hook-time)
+      (rand-vu-float-range
+        (-> info fight-recover-min)
+        (-> info fight-recover-max)))
+    (set! (-> self fish-fight-phase) (degrees 180.0))
+    (fisher-clear-button-fight! self))
+
+  (none))
+
+(defun fisher-update-button-fight! ((self fisher-game))
+  (let* ((data (-> self button-fight-data))
+      (dt (-> *display* seconds-per-frame))
+      (slot (-> self hooked-fish-slot))
+      (species (fisher-fish-species self slot))
+      (info (fisher-species-info-for species)))
+
+    (+! (-> data elapsed) dt)
+    (fisher-update-button-fight-input! self)
+
+    (dotimes (i (-> data total))
+      (when
+        (and
+          (= (-> data slot i state) 0)
+          (>= (-> data elapsed) (-> data slot i launch-time)))
+
+        (set! (-> data slot i state) 1))
+
+      (when (= (-> data slot i state) 1)
+        (+! (-> data slot i vel-y) (* (-> info button-gravity) dt))
+        (*! (-> data slot i vel-x) (fmax 0.0 (- 1.0 (* 1.75 dt))))
+        (+! (-> data slot i x) (* (-> data slot i vel-x) dt))
+        (+! (-> data slot i y) (* (-> data slot i vel-y) dt))
+
+        (when (< (-> data slot i x) 72.0)
+          (set! (-> data slot i x) 72.0)
+          (set! (-> data slot i vel-x) (fabs (-> data slot i vel-x))))
+
+        (when (> (-> data slot i x) 440.0)
+          (set! (-> data slot i x) 440.0)
+          (set! (-> data slot i vel-x) (- (fabs (-> data slot i vel-x)))))
+
+        (when (>= (-> data slot i y) 448.0)
+          (fisher-clear-button-fight! self)
+          (fisher-fish-scared-off! self slot)
+          (fisher-reset-cast! self)
+          (set! (-> self fish-message) "LURE STOLEN")
+          (set! (-> self fish-message-time) 1.75)
+          (return #t))))
+
+    (when (<= (-> data remaining) 0)
+      (fisher-finish-button-fight! self))
+
+  #f))
+
+(defun fisher-draw-button-fight! ((self fisher-game))
+  (let ((data (-> self button-fight-data)))
+    (when (-> data active?)
+      (dotimes (i (-> data total))
+        (when (= (-> data slot i state) 1)
+          (let ((particle-pos (new 'stack-no-clear 'vector)))
+            (fisher-button-world-position!
+              self
+              (-> data slot i x)
+              (-> data slot i y)
+              particle-pos)
+            (fisher-set-particle-fishbox-rotation! self)
+            (launch-particles
+              :system *sp-particle-system-3d*
+              (-> *part-id-table* 3577)
+              particle-pos))
+
+          (draw-fisher-large-font-scaled
+            (fisher-button-label (-> data slot i button))
+            (the int (-> data slot i x))
+            (the int (-> data slot i y))
+            0.62)))
+
+      (when (-> data hint-visible?)
+        (draw-fisher-large-font-scaled
+          "HIT THE BUTTONS!"
+          256
+          151
+          0.44))))
+
+  (none))
 
 (defun fisher-update-manipy-reeling!
   ((self fisher-game))
@@ -4089,36 +4457,51 @@
             (fisher-fish-scared-off! self slot))))
 
       ((-> self fish-fighting?)
-        (+! (-> self fish-fight-phase) (* (degrees 420.0) dt))
+        (let* ((slot (-> self hooked-fish-slot))
+            (species (fisher-fish-species self slot))
+            (info (fisher-species-info-for species))
+            (button-fight? (= (-> info fight-mode) 1)))
 
-        (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (* (meters 1.35) dt))
+          (+! (-> self fish-fight-phase) (* (degrees 420.0) dt))
 
-        (set! (-> self lure-pos y) (+ (-> self fish-fight-base-y) (* (meters 0.055) (sin (-> self fish-fight-phase)))))
+          (vector+float*!
+            (-> self lure-pos)
+            (-> self lure-pos)
+            (-> self lure-cast-axis)
+            (* (-> info fight-pull-speed) dt))
 
-        (when
-          (and
-            (cpad-hold? 0 x)
-            (>= (-> self hooked-fish-slot) 0))
+          (set! (-> self lure-pos y)
+            (+
+              (-> self fish-fight-base-y)
+              (* (meters 0.055) (sin (-> self fish-fight-phase)))))
 
-          (fisher-damage-line!
-            (*
-              (fisher-fight-damage-per-second
-                self
-                (-> self hooked-fish-slot))
-              dt)))
+          (cond
+            (button-fight?
+              (unless (fisher-update-button-fight! self)
+                (when (-> self fish-fighting?)
+                  (fisher-damage-line!
+                    (*
+                      (fisher-fight-damage-per-second self slot)
+                      (if
+                        (nonzero? (-> self button-fight-data wrong-mask))
+                        (-> info button-miss-scale)
+                        (-> info button-damage-scale))
+                      dt)))))
 
-        (when *fisher-line-broken?*
-          (let ((slot
-                (-> self hooked-fish-slot)))
+            ((cpad-hold? 0 x)
+              (fisher-damage-line!
+                (*
+                  (fisher-fight-damage-per-second self slot)
+                  dt))))
 
+          (when *fisher-line-broken?*
+            (fisher-clear-button-fight! self)
             (fisher-reset-cast! self)
             (set! (-> self fish-message) "LINE BROKEN")
             (set! (-> self fish-message-time) 1.75)
 
             (when (>= slot 0)
-              (fisher-fish-scared-off!
-                self
-                slot)))))
+              (fisher-fish-scared-off! self slot)))))
 
       (else
         (fisher-update-lure! self)
@@ -4149,7 +4532,12 @@
       (fisher-set-particle-fishbox-rotation! self)
       (launch-particles
         :system *sp-particle-system-3d*
-        (-> *part-id-table* 3575)
+        (-> *part-id-table*
+          (if
+            (= (fisher-fish-species self slot)
+              (the-as int (fisher-species fire-canyon-cellfish)))
+            3576
+            3575))
         particle-pos)))
   (none))
 
@@ -4208,7 +4596,10 @@
                           (set!
                             (-> self fish-hook-time)
                             (if
-                              (= (fisher-fish-species self slot) 3)
+                              (or
+                                (= (fisher-fish-species self slot) 3)
+                                (= (fisher-fish-species self slot)
+                                  (the-as int (fisher-species fire-canyon-cellfish))))
                               0.45
                               1.15))
 
@@ -4232,8 +4623,11 @@
                     (<= (-> self fish-hook-time) 0.0)
 
                     (cond
-                      ((= (fisher-fish-species self slot) 3)
-                        ;; The shark takes the lure and immediately returns the
+                      ((or
+                          (= (fisher-fish-species self slot) 3)
+                          (= (fisher-fish-species self slot)
+                            (the-as int (fisher-species fire-canyon-cellfish))))
+                        ;; Aggressive sharks take the lure when the hook window expires.
                         (fisher-fish-scared-off! self slot)
                         (fisher-reset-cast! self)
                         (set! (-> self fish-message) "LURE STOLEN")
@@ -4255,47 +4649,56 @@
                     (when (< (-> self fish-hook-time) 0.0)
                       (set! (-> self fish-hook-time) 0.0)))
 
-                  (when (> (-> self fish-fight-time) 0.0)
-                    (-! (-> self fish-fight-time) dt)
-
-                    (set! (-> self fish-fighting?) #t)
+                  (let* ((species (fisher-fish-species self slot))
+                      (info (fisher-species-info-for species))
+                      (button-fight? (= (-> info fight-mode) 1)))
 
                     (when
-                      (<= (-> self fish-fight-time) 0.0)
+                      (and
+                        (not button-fight?)
+                        (> (-> self fish-fight-time) 0.0))
 
-                      (set! (-> self fish-fight-time) 0.0)
-                      (set! (-> self fish-fighting?) #f)
-                      (set! (-> self fish-hook-time) (rand-vu-float-range 0.75 1.50))
+                      (-! (-> self fish-fight-time) dt)
+                      (set! (-> self fish-fighting?) #t)
 
-                      (set!
-                        (-> self fish-fight-phase)
-                        (degrees 180.0))))
+                      (when
+                        (<= (-> self fish-fight-time) 0.0)
 
-                  ;; Each expired fight cooldown is only a 25% chance to
-                  (when
-                    (and
-                      (<= (-> self fish-hook-time) 0.0)
-                      (<= (-> self fish-fight-time) 0.0)
-                      (not (-> self fish-fighting?)))
+                        (set! (-> self fish-fight-time) 0.0)
+                        (set! (-> self fish-fighting?) #f)
+                        (set! (-> self fish-hook-time)
+                          (rand-vu-float-range
+                            (-> info fight-recover-min)
+                            (-> info fight-recover-max)))
+                        (set! (-> self fish-fight-phase) (degrees 180.0))))
 
-                    (cond
-                      ((rand-vu-percent? 0.25)
-                        (set! (-> self fish-fight-time) (rand-vu-float-range 1.0 2.1))
+                    (when
+                      (and
+                        (<= (-> self fish-hook-time) 0.0)
+                        (<= (-> self fish-fight-time) 0.0)
+                        (not (-> self fish-fighting?)))
 
-                        (fisher-play-random-fight-sound!)
+                      (cond
+                        ((rand-vu-percent? 0.25)
+                          (fisher-play-random-fight-sound!)
+                          (set! (-> self fish-fighting?) #t)
+                          (set! (-> self fish-fight-phase) 0.0)
+                          (set! (-> self fish-fight-base-y) (-> self lure-pos y))
 
-                        (set! (-> self fish-fighting?) #t)
+                          (cond
+                            (button-fight?
+                              (set! (-> self fish-fight-time) 0.0)
+                              (fisher-start-button-fight! self))
 
-                        (set! (-> self fish-fight-phase) 0.0)
+                            (else
+                              (set! (-> self fish-fight-time)
+                                (rand-vu-float-range 1.0 2.1)))))
 
-                        (set!
-                          (-> self fish-fight-base-y)
-                          (-> self lure-pos y)))
-
-                      (else
-                        (set!
-                          (-> self fish-hook-time)
-                          (rand-vu-float-range 0.75 1.50))))))
+                        (else
+                          (set! (-> self fish-hook-time)
+                            (rand-vu-float-range
+                              (-> info fight-recover-min)
+                              (-> info fight-recover-max))))))))
 
                 ((or
                     (= (-> self fish-state) 'catch-enter)
@@ -4439,187 +4842,16 @@
   (none))
 
 (defun singlefish-end-session! ((self fisher-game))
-  (set! *singlefish-session-active?* #f)
-  (+! *singlefish-session-id* 1)
+  ;; Leaving fishing only hides presentation.  Keep the persistent fishbox
+  ;; active so every resident continues swimming from its current position.
+  ;; Full distance/blackout cleanup is responsible for invalidating the box.
+  (set! *singlefish-session-active?* #t)
   (set! (-> self hooked-fish) #f)
   (set! (-> self hooked-fish-slot) -1)
   (set! (-> self fish-state) 'free)
-
-  (dotimes (i 22)
-    (let ((fish
-          (fisher-fish-pointer self i)))
-
-      (when fish (deactivate (-> fish 0)))
-
-      (fisher-set-fish-pointer!
-        self
-        i
-        (the-as (pointer manipy) #f))))
-
-  (set! (-> self fish-count) 0)
-
+  (set! (-> self fish-fighting?) #f)
+  (fisher-clear-button-fight! self)
   (none))
-
-(defstate singlefish-patrol (singlefish-base)
-  :virtual #t
-  :code
-  (behavior ()
-    (ja-no-eval :num! (loop!) :frame-num 0.0)
-
-    (loop
-      (when (not (singlefish-session-valid? self)) (process-deactivate))
-
-      (singlefish-patrol-step! self 1.0)
-
-      (when (singlefish-can-see-lure? self) (singlefish-begin-approach! self))
-
-      (suspend)
-
-      (ja
-        :num! (loop! 1.0))))
-  :post singlefish-post)
-
-(defstate singlefish-approach (singlefish-base)
-  :virtual #t
-  :code
-  (behavior ()
-    (loop
-      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
-
-      (when (not (singlefish-owner-still-hooked? self)) (go-virtual singlefish-patrol))
-
-      (let* ((owner
-            (the-as fisher-game (-> self owner)))
-
-          (dt (-> *display* seconds-per-frame))
-
-          (to-lure (new 'stack-no-clear 'vector))
-
-          (target-root (new 'stack-no-clear 'vector))
-
-          (move-dir (new 'stack-no-clear 'vector))
-
-          (distance 0.0)
-
-          (step
-            0.0))
-
-        (singlefish-set-visible! self #t)
-
-        (singlefish-vector-sub-safe! to-lure (-> owner lure-pos) (-> self root trans))
-
-        (set! (-> to-lure w) 0.0)
-        (singlefish-face-vector! self to-lure)
-
-        (singlefish-vector-add-scaled-safe! target-root (-> owner lure-pos) (-> self forward) (- (-> self nose-offset)))
-
-        (singlefish-vector-sub-safe! move-dir target-root (-> self root trans))
-
-        (set! distance (singlefish-vector-length-safe move-dir))
-
-        (+!
-          (-> self approach-speed)
-          (*
-            *fisher-approach-acceleration*
-            (-> *display* seconds-per-frame)))
-
-        (cond
-          ((<= distance (meters 0.12))
-            (set! (-> self root trans quad) (-> target-root quad))
-
-            (set!
-              (-> self hook-time)
-              (if
-                (string= (-> self species-name) "Lurker Shark")
-                0.40
-                1.0))
-            (fisher-play-fish-bite-sound!)
-            (set! (-> owner lure-sink-active?) #f)
-            (set! (-> owner lure-sink-time) 0.0)
-            (set! (-> owner fish-state) 'hook-window)
-            (go-virtual singlefish-hook-window))
-
-          (else
-            (singlefish-vector-normalize-safe! move-dir 1.0)
-
-            (set!
-              step
-              (fmin
-                distance
-                (*
-                  (meters (-> self approach-speed))
-                  dt)))
-
-            (singlefish-vector-add-scaled-safe!
-              (-> self root trans)
-              (-> self root trans)
-              move-dir
-              step)))
-
-        (set! (-> self root trans w) 1.0))
-
-      (suspend)))
-  :post singlefish-post)
-
-(defstate singlefish-hook-window (singlefish-base)
-  :virtual #t
-  :code
-  (behavior ()
-    (loop
-      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
-
-      (when (not (singlefish-owner-still-hooked? self)) (go-virtual singlefish-patrol))
-
-      (singlefish-set-visible! self #t)
-      (singlefish-pin-nose-to-lure! self)
-
-      (-! (-> self hook-time) (-> *display* seconds-per-frame))
-
-      (when (<= (-> self hook-time) 0.0) (singlefish-fail-hook! self))
-
-      (suspend)))
-  :post singlefish-post)
-
-(defstate singlefish-scared (singlefish-base)
-  :virtual #t
-  :code
-  (behavior ()
-    (loop
-      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
-
-      (singlefish-patrol-step! self (if (> (-> self scared-time) 4.6) 1.35 1.0))
-
-      (-! (-> self scared-time) (-> *display* seconds-per-frame))
-
-      (when (<= (-> self scared-time) 0.0) (set! (-> self scared-time) 0.0) (go-virtual singlefish-patrol))
-
-      (suspend)))
-  :post singlefish-post)
-
-(defstate singlefish-reeling (singlefish-base)
-  :virtual #t
-  :code
-  (behavior ()
-    (loop
-      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
-
-      (singlefish-set-visible! self #t)
-      (singlefish-update-reeling! self)
-      (suspend)))
-  :post singlefish-post)
-
-(defstate singlefish-catch-display (singlefish-base)
-  :virtual #t
-  :code
-  (behavior ()
-    (loop
-      (when (not (singlefish-session-valid? self)) (singlefish-remove-visual! self) (process-deactivate))
-
-      (singlefish-position-catch-model! self)
-      (suspend)))
-  :post singlefish-post)
-
-(defstate singlefish-dead (singlefish-base) :virtual #t :code (behavior () (process-deactivate)) :post singlefish-post)
 
 (defun fisher-launch-camera-bubble! ((self fisher-game))
   (when
@@ -4728,8 +4960,8 @@
 )
 
 (defun fisher-start-cast! ((self fisher-game))
-  (fisher-refill-missing-fish! self)
-
+  ;; Missing residents are reconciled by fisher-maintain-pool-rendering! while
+  ;; the pool is invisible.  Never create fish as the cast begins.
   (set! *fisher-line-hp-max* (+ 15.0 (* 85.0 (-> self cast-charge))))
 
   (fisher-reset-line-hp!)
@@ -5393,7 +5625,10 @@
         (if
           (and
             (>= (-> self hooked-fish-slot) 0)
-            (= (fisher-fish-species self (-> self hooked-fish-slot)) 3))
+            (or
+              (= (fisher-fish-species self (-> self hooked-fish-slot)) 3)
+              (= (fisher-fish-species self (-> self hooked-fish-slot))
+                (the-as int (fisher-species fire-canyon-cellfish)))))
           (meters 1.15)
           (meters 0.5)))
 
@@ -5610,7 +5845,8 @@
 
       (set! (-> self fish-hook-time) 0.65)
       (set! (-> self fish-fight-time) 0.0)
-      (set! (-> self fish-fighting?) #f))
+      (set! (-> self fish-fighting?) #f)
+      (fisher-clear-button-fight! self))
 
     ((and
         (= (-> self fish-state) 'catch-display)
@@ -5754,6 +5990,9 @@
             (task-status need-introduction))))
 
       (cond
+        ((-> self button-fight-data active?)
+          (none))
+
         ((-> self fish-fighting?)
           (draw-mod-menu-text-custom
             "DON'T REEL!"
@@ -5788,7 +6027,7 @@
       (format *fish-ui-str* "FRICKED UP FISH"))
 
     ((= (-> self caught-fish-suffix) 10)
-      (format *fish-ui-str* "PRECURSOR ORB-EATER"))
+      (format *fish-ui-str* "PRECURSOR ORB-HUNTER"))
 
     ((= (-> self caught-fish-species) 4)
       (format *fish-ui-str* "SCOUT FLY"))
@@ -5814,8 +6053,9 @@
     (or (= (-> self fish-state) 'catch-enter) (= (-> self fish-state) 'catch-display) (= (-> self fish-state) 'catch-exit))
 
     (let* ((menu-offset
-          (the int
-            (-> self catch-menu-offset)))
+          (-
+            (the int (-> self catch-menu-offset))
+            20))
 
         (whole-lbs (the int (/ (-> self caught-weight-tenths) 10)))
 
@@ -5833,12 +6073,12 @@
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
 
-        (draw-sprite2d-xy buf 82 (+ 98 menu-offset) 348 panel-height (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xc8))
+        (draw-sprite2d-xy buf 82 (+ 84 menu-offset) 348 panel-height (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xc8))
 
         (draw-sprite2d-xy
           buf
           86
-          (+ 102 menu-offset)
+          (+ 88 menu-offset)
           340
           (- panel-height 8)
           (new 'static 'rgba
@@ -5850,7 +6090,7 @@
       (draw-fisher-large-font-scaled
         (fisher-format-catch-name! self)
         256
-        (+ 116 menu-offset)
+        (+ 102 menu-offset)
         0.60)
 
       (cond
@@ -5866,7 +6106,7 @@
           (draw-fisher-large-font-scaled
             *fish-ui-str*
             256
-            (+ 142 menu-offset)
+            (+ 128 menu-offset)
             0.52)
 
           (clear *fish-ui-str*)
@@ -5878,7 +6118,7 @@
           (draw-fisher-large-font-scaled
             *fish-ui-str*
             256
-            (+ 164 menu-offset)
+            (+ 150 menu-offset)
             0.52))
 
         (else
@@ -5893,7 +6133,7 @@
           (draw-fisher-large-font-scaled
             *fish-ui-str*
             256
-            (+ 142 menu-offset)
+            (+ 128 menu-offset)
             0.52)
 
           (clear *fish-ui-str*)
@@ -5906,14 +6146,14 @@
           (draw-fisher-large-font-scaled
             *fish-ui-str*
             256
-            (+ 164 menu-offset)
+            (+ 150 menu-offset)
             0.48)
 
           (when carrier?
             (draw-fisher-large-font-scaled
               "THE FISH HAD SWALLOWED A POWERCELL!"
               256
-              (+ 184 menu-offset)
+              (+ 170 menu-offset)
               0.40))))
 
       (clear *fish-ui-str*)
@@ -5921,7 +6161,7 @@
       (draw-fisher-large-font-scaled
         *fish-ui-str*
         256
-        (+ (if carrier? 205 181) menu-offset)
+        (+ (if carrier? 191 167) menu-offset)
         0.52)))
 
   (none))
@@ -5933,7 +6173,7 @@
       (= (-> self fish-state) 'rare-display)
       (= (-> self fish-state) 'rare-exit))
 
-    (let ((menu-offset (the int (-> self catch-menu-offset)))
+    (let ((menu-offset (- (the int (-> self catch-menu-offset)) 20))
         (suffix (-> self caught-fish-suffix)))
 
       (with-dma-buffer-add-bucket
@@ -5941,68 +6181,80 @@
           (bucket-id subtitle))
 
         (draw-sprite2d-xy
-          buf 48 (+ 58 menu-offset) 416 172
+          buf 48 (+ 48 menu-offset) 416 172
           (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
 
         (draw-sprite2d-xy
-          buf 52 (+ 62 menu-offset) 408 164
+          buf 52 (+ 52 menu-offset) 408 164
           (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
 
       (draw-fisher-large-font-scaled
         (fisher-format-catch-name! self)
         256
-        (+ 76 menu-offset)
+        (+ 66 menu-offset)
         0.52)
 
       (cond
         ((= suffix 7)
-          (draw-fisher-small-text
-            "This bad boy can make a grown Fisherman cry."
-            256 (+ 104 menu-offset))
-          (draw-fisher-small-text
-            "Ye thought the precursors didn't work their magic"
-            256 (+ 120 menu-offset))
-          (draw-fisher-small-text
-            "across the fish, did ye? This here fish was once"
-            256 (+ 136 menu-offset))
-          (draw-fisher-small-text
-            "said to lead the precursors to the location of"
-            256 (+ 152 menu-offset))
-          (draw-fisher-small-text
-            "building an ancient precursor city that is lost"
-            256 (+ 168 menu-offset))
-          (draw-fisher-small-text
-            "to time itself! Good catch lad!"
-            256 (+ 184 menu-offset)))
+          (draw-fisher-large-font-scaled
+            "THIS BAD BOY CAN MAKE A GROWN FISHERMAN CRY."
+            256 (+ 94 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "YE THOUGHT THE PRECURSORS DIDN'T WORK THEIR MAGIC"
+            256 (+ 110 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "ACROSS THE FISH, DID YE? THIS HERE FISH WAS ONCE"
+            256 (+ 126 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "SAID TO LEAD THE PRECURSORS TO THE LOCATION OF"
+            256 (+ 142 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "BUILDING AN ANCIENT PRECURSOR CITY THAT IS LOST"
+            256 (+ 158 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "TO TIME ITSELF! GOOD CATCH LAD!"
+            256 (+ 174 menu-offset)
+            0.34))
 
         ((= suffix 8)
-          (draw-fisher-small-text
-            "Avast! It's already askin' me for a hundred"
-            256 (+ 126 menu-offset))
-          (draw-fisher-small-text
-            "and twenty orbs."
-            256 (+ 144 menu-offset)))
+          (draw-fisher-large-font-scaled
+            "AVAST! IT'S ALREADY ASKIN' ME FOR A HUNDRED"
+            256 (+ 116 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "AND TWENTY ORBS."
+            256 (+ 134 menu-offset)
+            0.34))
 
         ((= suffix 9)
-          (draw-fisher-small-text
-            "Avast! Ye---what? What the frick is this fish?"
-            256 (+ 126 menu-offset))
-          (draw-fisher-small-text
-            "Did Zed destroy my mod?"
-            256 (+ 144 menu-offset)))
+          (draw-fisher-large-font-scaled
+            "AVAST! YE---WHAT? WHAT THE FRICK IS THIS FISH?"
+            256 (+ 116 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "DID ZED DESTROY MY MOD?"
+            256 (+ 134 menu-offset)
+            0.34))
 
         ((= suffix 10)
-          (draw-fisher-small-text
-            "Ye best keep that fish safe from other fishermen.--"
-            256 (+ 126 menu-offset))
-          (draw-fisher-small-text
-            "I'll buy it from ye for 90 orbs."
-            256 (+ 144 menu-offset))))
+          (draw-fisher-large-font-scaled
+            "YE BEST KEEP THAT FISH SAFE FROM OTHER FISHERMEN.--"
+            256 (+ 116 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "I'LL BUY IT FROM YE FOR 90 ORBS."
+            256 (+ 134 menu-offset)
+            0.34)))
 
       (draw-fisher-large-font-scaled
         "PRESS <PAD_X> TO CONTINUE"
         256
-        (+ 210 menu-offset)
+        (+ 200 menu-offset)
         0.46)))
 
   (none))
@@ -6017,6 +6269,7 @@
   (fisher-update-all-fish-debug! self)
 
   (fisher-update-camera-water! self)
+  (fisher-maintain-pool-rendering! self)
 
   (fisher-update-background-mist! self)
 
@@ -6126,14 +6379,27 @@
   (fisher-update-xp-gain-animation!)
 
   (when
-    (and
-      (not (= (-> self cast-state) 'catch-transition))
-      (not (fisher-level-up-window-active?)))
+    (not (= (-> self cast-state) 'catch-transition))
 
+    ;; The meter animates down while catch, XP, level-up, and rare-description
+    ;; windows occupy the center of the screen, then returns afterward.
     (fisher-draw-xp-meter!)
-    (fisher-draw-skill-cooldowns! self))
+
+    ;; Cooldown bars share the lower foreground space with catch, power-cell,
+    ;; lore, and level-up cards.  Hide them until those cards are gone.
+    (when
+      (and
+        (not (fisher-level-up-blocking?))
+        (not (= (-> self fish-state) 'catch-enter))
+        (not (= (-> self fish-state) 'catch-display))
+        (not (= (-> self fish-state) 'catch-exit))
+        (not (= (-> self fish-state) 'rare-enter))
+        (not (= (-> self fish-state) 'rare-display))
+        (not (= (-> self fish-state) 'rare-exit)))
+      (fisher-draw-skill-cooldowns! self)))
 
   (fisher-draw-fish-status! self)
+  (fisher-draw-button-fight! self)
   (fisher-draw-fishing-clock!)
   (none))
 
@@ -6264,8 +6530,9 @@
   (set! *fisher-power-cell-reward-active?* #f)
 
   (when *fisher-game*
-    (fisher-add-power-cell-fish-slot!
-      (the-as fisher-game (-> *fisher-game* 0))))
+    (let ((game (the-as fisher-game (-> *fisher-game* 0))))
+      (fisher-add-power-cell-fish-slot! game)
+      (fisher-add-fire-canyon-cellfish-slot! game)))
 
   (deactivate self)
   (none))
@@ -6406,6 +6673,9 @@
       (when
         (and
           (= (-> self cast-state) 'ready)
+          (= (-> self fish-state) 'free)
+          (not *fisher-xp-fly-active?*)
+          (not *fisher-xp-bar-anim-active?*)
           (not (fisher-level-up-blocking?))
           (cpad-pressed? 0 triangle))
 
