@@ -2,18 +2,10 @@
 (in-package goal)
 (bundles "JUN.DGO")
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Core fishing minigame, lure, casting, reeling, catches, fish behavior, camera and UI
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Underwater fishing background curtain colors
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; name: fisher-game.gc
 
 (define *fisher-background-cloud-visible?* #f)
 (define *fisher-background-cloud-session-active?* #f)
-
 (define *fisher-curtain-color-0a* (new 'static 'rgba :r #x1c :g #x70 :b #x8c :a #xff))
 (define *fisher-curtain-color-0b* (new 'static 'rgba :r #x20 :g #x7a :b #x94 :a #xff))
 (define *fisher-curtain-color-1a* (new 'static 'rgba :r #x16 :g #x60 :b #x80 :a #xff))
@@ -27,65 +19,51 @@
 (define *fisher-curtain-color-5a* (new 'static 'rgba :r #x06 :g #x28 :b #x48 :a #xff))
 (define *fisher-curtain-color-5b* (new 'static 'rgba :r #x09 :g #x30 :b #x50 :a #xff))
 
+;; This is the backwall curtain effect
 (defun fisher-set-particle-fishbox-rotation!
-  ((self fisher-game))
-
-  ;; The curtain plane is built from self.camera-axis:
-  ;;
-  ;;   camera-axis.x = sin(camera-angle)
-  ;;   camera-axis.z = cos(camera-angle)
-  ;;
-  ;; Therefore its actual world-space orientation is camera-angle around Y.
-  ;; Use that exact same yaw for every 3D underwater particle. Do not derive
-  ;; this from playfield-angle and do not use screen-space rot-z.
-  (let ((curtain-yaw
-          (-> self camera-angle)))
-
-    ;; All four definitions place rot-y at init-spec index 5.
+  ((self fisher-game)
+  )
+  (let (
+      (curtain-yaw (-> self camera-angle))
+    )
     (set!
       (-> *part-id-table* 3570 init-specs 5 initial-valuef)
       curtain-yaw)
-
     (set!
       (-> *part-id-table* 3571 init-specs 5 initial-valuef)
       curtain-yaw)
-
     (set!
       (-> *part-id-table* 3572 init-specs 5 initial-valuef)
       curtain-yaw)
-
     (set!
       (-> *part-id-table* 3574 init-specs 5 initial-valuef)
       curtain-yaw)
-
     (set!
       (-> *part-id-table* 3575 init-specs 5 initial-valuef)
       curtain-yaw))
-
   (none))
-
 
 (define *fisher-level-up-window-state* 'hidden)
 (define *fisher-level-up-window-time* 0.0)
 (define *fisher-level-up-window-offset* 150.0)
 (define *fisher-power-cell-reward-active?* #f)
-;; True only while Jak is actually inside the modal fishing state.
-;; The area process also exists while idle, so hooks must not use *fisher-game*
-;; alone as proof that fishing owns the HUD/camera/player.
 (define *fisher-session-active?* #f)
 
 (define *fisher-stop-lure-cooldown-color*
-  (new 'static 'rgba :r #xe8 :g #xb8 :b #x38 :a #xe8))
+  (new 'static 'rgba :r #xe8 :g #xb8 :b #x38 :a #xe8)
+)
 
 (define *fisher-sink-lure-cooldown-color*
-  (new 'static 'rgba :r #x28 :g #xb8 :b #xe8 :a #xe8))
+  (new 'static 'rgba :r #x28 :g #xb8 :b #xe8 :a #xe8)
+)
 
-;; Reddish-purple so Tug Line is visually distinct from Sink Lure.
 (define *fisher-tug-line-cooldown-color*
-  (new 'static 'rgba :r #xb8 :g #x38 :b #x78 :a #xe8))
+  (new 'static 'rgba :r #xb8 :g #x38 :b #x78 :a #xe8)
+)
 
 (defun fisher-level-up-window-active? ()
-  (!= *fisher-level-up-window-state* 'hidden))
+  (!= *fisher-level-up-window-state* 'hidden)
+)
 
 (defun fisher-level-up-blocking? ()
   (or
@@ -194,9 +172,9 @@
 
 (defun fisher-draw-level-up-title!
   ((text string)
-   (text-x-pos int)
-   (text-y-pos int)
-   (text-scale float))
+    (text-x-pos int)
+    (text-y-pos int)
+    (text-scale float))
 
   (clear matt-str)
   (clear *pc-encoded-matt-str*)
@@ -205,7 +183,7 @@
 
   (with-dma-buffer-add-bucket
     ((buf (-> (current-frame) global-buf))
-     (bucket-id subtitle))
+      (bucket-id subtitle))
 
     (draw-string-xy-scaled
       *pc-encoded-matt-str*
@@ -232,7 +210,6 @@
           *fisher-level-up-window-skill-mask*)
 
         ;; Keep the complete card inside Jak 1's visible 240-line UI area.
-        ;; Skill cards use a taller layout, but still stop at y = 230.
         (panel-y
           (if
             (> *fisher-level-up-window-skill-mask* 0)
@@ -259,9 +236,8 @@
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
-        ;; Outer shadow/backplate.
         (draw-sprite2d-xy
           buf
           48
@@ -274,7 +250,6 @@
             :b #x14
             :a #xe8))
 
-        ;; Inner blue panel.
         (draw-sprite2d-xy
           buf
           52
@@ -287,7 +262,6 @@
             :b #x42
             :a #xc8))
 
-        ;; Top title accent.
         (draw-sprite2d-xy
           buf
           68
@@ -300,7 +274,6 @@
             :b #x38
             :a #xb0))
 
-        ;; Separate the general level-up information from the unlocked skill.
         (when
           (> skill-mask 0)
 
@@ -334,8 +307,6 @@
         (+ (if (> skill-mask 0) 62 88) menu-offset)
         0.40)
 
-      ;; Tighter line spacing and shorter copy keep this readable without
-      ;; allowing the text to run through the bottom of the screen.
       (draw-fisher-large-font-scaled
         "LOWER LEVEL FISH DEAL LESS LINE DAMAGE,"
         256
@@ -451,7 +422,6 @@
 
         ((> skill-mask 0)
           ;; This compact combined card also handles debug/REPL XP grants that
-          ;; skip across more than one skill-unlock level at once.
           (fisher-draw-level-up-title!
             "SKILLS UNLOCKED"
             256
@@ -548,22 +518,16 @@
           :from *default-dead-pool*
           :to *default-pool*
           :name "fisher-lure-snake")))
-
     (when snake
       (let ((snake-proc
             (-> snake 0 self)))
-
         (send-event snake-proc 'anim-mode 'loop)
-
         (set! (-> (the-as manipy snake-proc) root trans quad) (-> pos quad))
-
         (set-vector! (-> (the-as manipy snake-proc) root scale) 0.0333333 0.0333333 0.0333333 1.0)
-
         (send-event
           snake-proc
           'max-vis-dist
           (meters 999999.0))))
-
     snake)
 )
 
@@ -573,102 +537,55 @@
   (none)
 )
 
-(defbehavior fisher-game-init-by-other fisher-game
-  ((location-id int)
-   (vec vector)
-   (camera-vec vector)
-   (water-height float)
-   (angles vector))
-
+(defbehavior fisher-game-init-by-other fisher-game ((location-id int) (vec vector) (camera-vec vector) (water-height float) (angles vector))
   (set! (-> self location-id) location-id)
-
+  (set! (-> self fish-data) *fisher-fish-runtime*)
   (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
   (vector-copy! (-> self pos) vec)
-
   (vector-copy!
     (-> self fishing-player-pos)
     *fisher-spawn-player-pos*)
-
   (vector-copy! (-> self fisher-cam) camera-vec)
-
   (let ((camera-offset
         (new 'stack-no-clear 'vector)))
-
     (vector-! camera-offset camera-vec vec)
-
     (set! (-> camera-offset y) 0.0)
-
     (set! (-> camera-offset w) 0.0)
-
     (set! (-> self camera-radius) (vector-length camera-offset))
   )
-
   (vector-reset! (-> self lure-snake-angle))
-
   (vector-reset! (-> self lure-snake-angular-speed))
-
   (vector-reset! (-> self lure-snake-last-anchor))
-
   (set! (-> self lure-snake-flow-time) 0.0)
-
   (set! (-> self water-level) water-height)
-
   (set! (-> self camera-angle) (-> angles x))
-
   (set! (-> self playfield-angle) (-> angles y))
-
   (set! (-> self camera-axis x) (sin (-> self camera-angle)))
-
   (set! (-> self camera-axis y) 0.0)
-
   (set! (-> self camera-axis z) (cos (-> self camera-angle)))
-
   (set! (-> self camera-axis w) 0.0)
-
   (vector-normalize! (-> self camera-axis) 1.0)
-
   (set! (-> self playfield-axis x) (sin (-> self playfield-angle)))
-
   (set! (-> self playfield-axis y) 0.0)
-
   (set! (-> self playfield-axis z) (cos (-> self playfield-angle)))
-
   (set! (-> self playfield-axis w) 0.0)
-
   (vector-normalize! (-> self playfield-axis) 1.0)
-
   (set! (-> self saved-camera-read-analog) #t)
-
   (set! (-> self saved-external-cam-mode) #f)
-
   (set! (-> self casted?) #f)
-
   (set! (-> self camera-state) 'before-cast)
-
   (set! (-> self camera-underwater?) #f)
-
   (set! (-> self cast-state) 'ready)
-
   (set! (-> self cast-charge) 0.0)
-
   (set! (-> self cast-charge-direction) 0.0)
-
   (set! (-> self cast-time) 0.0)
-
   (set! (-> self cast-duration) 1.0)
-
   (set! (-> self camera-blend) 0.0)
-
   (set! (-> self lure-fall-speed) 1.25)
-
   (set! (-> self lure-reel-x-speed) 4.0)
-
   (set! (-> self lure-reel-y-speed) 3.0)
-
   (set! (-> self lure-x-velocity) 0.0)
-
   (set! (-> self reel-hint-time) 0.0)
-
   (fisher-reset-level-up-window!)
   (set! (-> self lure-stop-active?) #f)
   (set! (-> self lure-stop-used?) #f)
@@ -681,17 +598,11 @@
   (set! (-> self tug-line-active?) #f)
   (set! (-> self tug-line-time) 0.0)
   (set! (-> self tug-line-cooldown) 0.0)
-
   (set! (-> self lure-y-velocity) 0.0)
-
   (set! (-> self bubble-time) -2.0)
-
   (set! (-> self underwater-wave-time) 0.0)
-
   (set! (-> self background-mist-time) 0.0)
-
   (set! (-> self background-curtain-phase) 0.0)
-
   (set! (-> self hooked-fish) #f)
   (set! (-> self fish-state) 'free)
   (set! (-> self fish-scare-on-arrival?) #f)
@@ -704,338 +615,23 @@
   (set! (-> self power-cell-victory-pending?) #f)
   (set! (-> self caught-power-cell-task) 0)
   (set! (-> self fish-count) 0)
-  (set! (-> self fish-0) (the-as (pointer manipy) #f))
-  (set! (-> self fish-1) (the-as (pointer manipy) #f))
-  (set! (-> self fish-2) (the-as (pointer manipy) #f))
-  (set! (-> self fish-3) (the-as (pointer manipy) #f))
-  (set! (-> self fish-4) (the-as (pointer manipy) #f))
-  (set! (-> self fish-5) (the-as (pointer manipy) #f))
-  (set! (-> self fish-6) (the-as (pointer manipy) #f))
-  (set! (-> self fish-7) (the-as (pointer manipy) #f))
-  (set! (-> self fish-8) (the-as (pointer manipy) #f))
-  (set! (-> self fish-9) (the-as (pointer manipy) #f))
-  (set! (-> self fish-10) (the-as (pointer manipy) #f))
-  (set! (-> self fish-11) (the-as (pointer manipy) #f))
-  (set! (-> self fish-12) (the-as (pointer manipy) #f))
-  (set! (-> self fish-13) (the-as (pointer manipy) #f))
-  (set! (-> self fish-14) (the-as (pointer manipy) #f))
-  (set! (-> self fish-15) (the-as (pointer manipy) #f))
-  (set! (-> self fish-16) (the-as (pointer manipy) #f))
-  (set! (-> self fish-17) (the-as (pointer manipy) #f))
-  (set! (-> self fish-18) (the-as (pointer manipy) #f))
-  (set! (-> self fish-19) (the-as (pointer manipy) #f))
-  (set! (-> self fish-20) (the-as (pointer manipy) #f))
-  (set! (-> self fish-21) (the-as (pointer manipy) #f))
-  (set! (-> self hooked-fish-slot) -1)
-  (set! (-> self fish-hook-time) 0.0)
-  (set! (-> self fish-reel-progress) 0.0)
-  (set! (-> self fish-fight-time) 0.0)
-  (set! (-> self fish-fight-phase) 0.0)
-  (set! (-> self fish-fight-base-y) 0.0)
-  (set! (-> self reel-camera-blend) 0.0)
-  (vector-copy! (-> self hooked-fish-facing) (-> self lure-cast-axis))
-  (vector-reset! (-> self hooked-fish-last-hook-pos))
-  (set! (-> self fish-fighting?) #f)
-  (set! (-> self hooked-fish-poison-dps) 0.0)
-  (set! (-> self fish-scare-on-arrival?) #f)
-  (set! (-> self caught-weight-tenths) 0)
-  (set! (-> self caught-orb-value) 0)
-  (set! (-> self caught-fish-species) 0)
-  (set! (-> self caught-fish-suffix) 2)
-  (set! (-> self caught-fish-level) 1)
-  (set! (-> self caught-fish-xp) 0)
-  (set! (-> self catch-transition-time) 0.0)
-  (set! (-> self catch-menu-offset) 0.0)
-  (set! (-> self sandover-eco-count) 0)
-  (set! (-> self sandover-largemouth-count) 0)
-  (set! (-> self fish-level-min) 1)
-  (set! (-> self fish-level-max) 1)
-  (set! (-> self fish-species-0) 0)
-  (set! (-> self fish-species-1) 0)
-  (set! (-> self fish-species-2) 0)
-  (set! (-> self fish-species-3) 0)
-  (set! (-> self fish-species-4) 0)
-  (set! (-> self fish-species-5) 0)
-  (set! (-> self fish-species-6) 0)
-  (set! (-> self fish-species-7) 0)
-  (set! (-> self fish-species-8) 0)
-  (set! (-> self fish-species-9) 0)
-  (set! (-> self fish-species-10) 0)
-  (set! (-> self fish-species-11) 0)
-  (set! (-> self fish-species-12) 0)
-  (set! (-> self fish-species-13) 0)
-  (set! (-> self fish-species-14) 0)
-  (set! (-> self fish-species-15) 0)
-  (set! (-> self fish-species-16) 0)
-  (set! (-> self fish-species-17) 0)
-  (set! (-> self fish-species-18) 0)
-  (set! (-> self fish-species-19) 0)
-  (set! (-> self fish-species-20) 0)
-  (set! (-> self fish-species-21) 0)
-  (set! (-> self fish-level-0) 1)
-  (set! (-> self fish-level-1) 1)
-  (set! (-> self fish-level-2) 1)
-  (set! (-> self fish-level-3) 1)
-  (set! (-> self fish-level-4) 1)
-  (set! (-> self fish-level-5) 1)
-  (set! (-> self fish-level-6) 1)
-  (set! (-> self fish-level-7) 1)
-  (set! (-> self fish-level-8) 1)
-  (set! (-> self fish-level-9) 1)
-  (set! (-> self fish-level-10) 1)
-  (set! (-> self fish-level-11) 1)
-  (set! (-> self fish-level-12) 1)
-  (set! (-> self fish-level-13) 1)
-  (set! (-> self fish-level-14) 1)
-  (set! (-> self fish-level-15) 1)
-  (set! (-> self fish-level-16) 1)
-  (set! (-> self fish-level-17) 1)
-  (set! (-> self fish-level-18) 1)
-  (set! (-> self fish-level-19) 1)
-  (set! (-> self fish-level-20) 1)
-  (set! (-> self fish-level-21) 1)
-  (set! (-> self fish-suffix-0) 2)
-  (set! (-> self fish-suffix-1) 2)
-  (set! (-> self fish-suffix-2) 2)
-  (set! (-> self fish-suffix-3) 2)
-  (set! (-> self fish-suffix-4) 2)
-  (set! (-> self fish-suffix-5) 2)
-  (set! (-> self fish-suffix-6) 2)
-  (set! (-> self fish-suffix-7) 2)
-  (set! (-> self fish-suffix-8) 2)
-  (set! (-> self fish-suffix-9) 2)
-  (set! (-> self fish-suffix-10) 2)
-  (set! (-> self fish-suffix-11) 2)
-  (set! (-> self fish-suffix-12) 2)
-  (set! (-> self fish-suffix-13) 2)
-  (set! (-> self fish-suffix-14) 2)
-  (set! (-> self fish-suffix-15) 2)
-  (set! (-> self fish-suffix-16) 2)
-  (set! (-> self fish-suffix-17) 2)
-  (set! (-> self fish-suffix-18) 2)
-  (set! (-> self fish-suffix-19) 2)
-  (set! (-> self fish-suffix-20) 2)
-  (set! (-> self fish-suffix-21) 2)
-  (set! (-> self fish-weight-tenths-0) 10)
-  (set! (-> self fish-weight-tenths-1) 10)
-  (set! (-> self fish-weight-tenths-2) 10)
-  (set! (-> self fish-weight-tenths-3) 10)
-  (set! (-> self fish-weight-tenths-4) 10)
-  (set! (-> self fish-weight-tenths-5) 10)
-  (set! (-> self fish-weight-tenths-6) 10)
-  (set! (-> self fish-weight-tenths-7) 10)
-  (set! (-> self fish-weight-tenths-8) 10)
-  (set! (-> self fish-weight-tenths-9) 10)
-  (set! (-> self fish-weight-tenths-10) 10)
-  (set! (-> self fish-weight-tenths-11) 10)
-  (set! (-> self fish-weight-tenths-12) 10)
-  (set! (-> self fish-weight-tenths-13) 10)
-  (set! (-> self fish-weight-tenths-14) 10)
-  (set! (-> self fish-weight-tenths-15) 10)
-  (set! (-> self fish-weight-tenths-16) 10)
-  (set! (-> self fish-weight-tenths-17) 10)
-  (set! (-> self fish-weight-tenths-18) 10)
-  (set! (-> self fish-weight-tenths-19) 10)
-  (set! (-> self fish-weight-tenths-20) 10)
-  (set! (-> self fish-weight-tenths-21) 10)
-  (set! (-> self fish-distance-0) 0.0)
-  (set! (-> self fish-lane-0) 0.0)
-  (set! (-> self fish-depth-0) 0.0)
-  (set! (-> self fish-direction-0) 1.0)
-  (set! (-> self fish-speed-0) 1.0)
-  (set! (-> self fish-distance-1) 0.0)
-  (set! (-> self fish-lane-1) 0.0)
-  (set! (-> self fish-depth-1) 0.0)
-  (set! (-> self fish-direction-1) 1.0)
-  (set! (-> self fish-speed-1) 1.0)
-  (set! (-> self fish-distance-2) 0.0)
-  (set! (-> self fish-lane-2) 0.0)
-  (set! (-> self fish-depth-2) 0.0)
-  (set! (-> self fish-direction-2) 1.0)
-  (set! (-> self fish-speed-2) 1.0)
-  (set! (-> self fish-distance-3) 0.0)
-  (set! (-> self fish-lane-3) 0.0)
-  (set! (-> self fish-depth-3) 0.0)
-  (set! (-> self fish-direction-3) 1.0)
-  (set! (-> self fish-speed-3) 1.0)
-  (set! (-> self fish-distance-4) 0.0)
-  (set! (-> self fish-lane-4) 0.0)
-  (set! (-> self fish-depth-4) 0.0)
-  (set! (-> self fish-direction-4) 1.0)
-  (set! (-> self fish-speed-4) 1.0)
-  (set! (-> self fish-distance-5) 0.0)
-  (set! (-> self fish-lane-5) 0.0)
-  (set! (-> self fish-depth-5) 0.0)
-  (set! (-> self fish-direction-5) 1.0)
-  (set! (-> self fish-speed-5) 1.0)
-  (set! (-> self fish-distance-6) 0.0)
-  (set! (-> self fish-lane-6) 0.0)
-  (set! (-> self fish-depth-6) 0.0)
-  (set! (-> self fish-direction-6) 1.0)
-  (set! (-> self fish-speed-6) 1.0)
-  (set! (-> self fish-distance-7) 0.0)
-  (set! (-> self fish-distance-8) 0.0)
-  (set! (-> self fish-distance-9) 0.0)
-  (set! (-> self fish-distance-10) 0.0)
-  (set! (-> self fish-distance-11) 0.0)
-  (set! (-> self fish-distance-12) 0.0)
-  (set! (-> self fish-distance-13) 0.0)
-  (set! (-> self fish-distance-14) 0.0)
-  (set! (-> self fish-distance-15) 0.0)
-  (set! (-> self fish-distance-16) 0.0)
-  (set! (-> self fish-distance-17) 0.0)
-  (set! (-> self fish-distance-18) 0.0)
-  (set! (-> self fish-distance-19) 0.0)
-  (set! (-> self fish-distance-20) 0.0)
-  (set! (-> self fish-distance-21) 0.0)
-  (set! (-> self fish-lane-7) 0.0)
-  (set! (-> self fish-lane-8) 0.0)
-  (set! (-> self fish-lane-9) 0.0)
-  (set! (-> self fish-lane-10) 0.0)
-  (set! (-> self fish-lane-11) 0.0)
-  (set! (-> self fish-lane-12) 0.0)
-  (set! (-> self fish-lane-13) 0.0)
-  (set! (-> self fish-lane-14) 0.0)
-  (set! (-> self fish-lane-15) 0.0)
-  (set! (-> self fish-lane-16) 0.0)
-  (set! (-> self fish-lane-17) 0.0)
-  (set! (-> self fish-lane-18) 0.0)
-  (set! (-> self fish-lane-19) 0.0)
-  (set! (-> self fish-lane-20) 0.0)
-  (set! (-> self fish-lane-21) 0.0)
-  (set! (-> self fish-depth-7) 0.0)
-  (set! (-> self fish-depth-8) 0.0)
-  (set! (-> self fish-depth-9) 0.0)
-  (set! (-> self fish-depth-10) 0.0)
-  (set! (-> self fish-depth-11) 0.0)
-  (set! (-> self fish-depth-12) 0.0)
-  (set! (-> self fish-depth-13) 0.0)
-  (set! (-> self fish-depth-14) 0.0)
-  (set! (-> self fish-depth-15) 0.0)
-  (set! (-> self fish-depth-16) 0.0)
-  (set! (-> self fish-depth-17) 0.0)
-  (set! (-> self fish-depth-18) 0.0)
-  (set! (-> self fish-depth-19) 0.0)
-  (set! (-> self fish-depth-20) 0.0)
-  (set! (-> self fish-depth-21) 0.0)
-  (set! (-> self fish-direction-7) 1.0)
-  (set! (-> self fish-direction-8) 1.0)
-  (set! (-> self fish-direction-9) 1.0)
-  (set! (-> self fish-direction-10) 1.0)
-  (set! (-> self fish-direction-11) 1.0)
-  (set! (-> self fish-direction-12) 1.0)
-  (set! (-> self fish-direction-13) 1.0)
-  (set! (-> self fish-direction-14) 1.0)
-  (set! (-> self fish-direction-15) 1.0)
-  (set! (-> self fish-direction-16) 1.0)
-  (set! (-> self fish-direction-17) 1.0)
-  (set! (-> self fish-direction-18) 1.0)
-  (set! (-> self fish-direction-19) 1.0)
-  (set! (-> self fish-direction-20) 1.0)
-  (set! (-> self fish-direction-21) 1.0)
-  (set! (-> self fish-speed-7) 1.0)
-  (set! (-> self fish-speed-8) 1.0)
-  (set! (-> self fish-speed-9) 1.0)
-  (set! (-> self fish-speed-10) 1.0)
-  (set! (-> self fish-speed-11) 1.0)
-  (set! (-> self fish-speed-12) 1.0)
-  (set! (-> self fish-speed-13) 1.0)
-  (set! (-> self fish-speed-14) 1.0)
-  (set! (-> self fish-speed-15) 1.0)
-  (set! (-> self fish-speed-16) 1.0)
-  (set! (-> self fish-speed-17) 1.0)
-  (set! (-> self fish-speed-18) 1.0)
-  (set! (-> self fish-speed-19) 1.0)
-  (set! (-> self fish-speed-20) 1.0)
-  (set! (-> self fish-speed-21) 1.0)
-  (set! (-> self fish-cooldown-0) 0.0)
-  (set! (-> self fish-cooldown-1) 0.0)
-  (set! (-> self fish-cooldown-2) 0.0)
-  (set! (-> self fish-cooldown-3) 0.0)
-  (set! (-> self fish-cooldown-4) 0.0)
-  (set! (-> self fish-cooldown-5) 0.0)
-  (set! (-> self fish-cooldown-6) 0.0)
-  (set! (-> self fish-cooldown-7) 0.0)
-  (set! (-> self fish-cooldown-8) 0.0)
-  (set! (-> self fish-cooldown-9) 0.0)
-  (set! (-> self fish-cooldown-10) 0.0)
-  (set! (-> self fish-cooldown-11) 0.0)
-  (set! (-> self fish-cooldown-12) 0.0)
-  (set! (-> self fish-cooldown-13) 0.0)
-  (set! (-> self fish-cooldown-14) 0.0)
-  (set! (-> self fish-cooldown-15) 0.0)
-  (set! (-> self fish-cooldown-16) 0.0)
-  (set! (-> self fish-cooldown-17) 0.0)
-  (set! (-> self fish-cooldown-18) 0.0)
-  (set! (-> self fish-cooldown-19) 0.0)
-  (set! (-> self fish-cooldown-20) 0.0)
-  (set! (-> self fish-cooldown-21) 0.0)
-  (set! (-> self fish-turn-time-0) 0.0)
-  (set! (-> self fish-turn-time-1) 0.0)
-  (set! (-> self fish-turn-time-2) 0.0)
-  (set! (-> self fish-turn-time-3) 0.0)
-  (set! (-> self fish-turn-time-4) 0.0)
-  (set! (-> self fish-turn-time-5) 0.0)
-  (set! (-> self fish-turn-time-6) 0.0)
-  (set! (-> self fish-turn-time-7) 0.0)
-  (set! (-> self fish-turn-time-8) 0.0)
-  (set! (-> self fish-turn-time-9) 0.0)
-  (set! (-> self fish-turn-time-10) 0.0)
-  (set! (-> self fish-turn-time-11) 0.0)
-  (set! (-> self fish-turn-time-12) 0.0)
-  (set! (-> self fish-turn-time-13) 0.0)
-  (set! (-> self fish-turn-time-14) 0.0)
-  (set! (-> self fish-turn-time-15) 0.0)
-  (set! (-> self fish-turn-time-16) 0.0)
-  (set! (-> self fish-turn-time-17) 0.0)
-  (set! (-> self fish-turn-time-18) 0.0)
-  (set! (-> self fish-turn-time-19) 0.0)
-  (set! (-> self fish-turn-time-20) 0.0)
-  (set! (-> self fish-turn-time-21) 0.0)
-  (set! (-> self fish-turn-old-direction-0) 1.0)
-  (set! (-> self fish-turn-old-direction-1) 1.0)
-  (set! (-> self fish-turn-old-direction-2) 1.0)
-  (set! (-> self fish-turn-old-direction-3) 1.0)
-  (set! (-> self fish-turn-old-direction-4) 1.0)
-  (set! (-> self fish-turn-old-direction-5) 1.0)
-  (set! (-> self fish-turn-old-direction-6) 1.0)
-  (set! (-> self fish-turn-old-direction-7) 1.0)
-  (set! (-> self fish-turn-old-direction-8) 1.0)
-  (set! (-> self fish-turn-old-direction-9) 1.0)
-  (set! (-> self fish-turn-old-direction-10) 1.0)
-  (set! (-> self fish-turn-old-direction-11) 1.0)
-  (set! (-> self fish-turn-old-direction-12) 1.0)
-  (set! (-> self fish-turn-old-direction-13) 1.0)
-  (set! (-> self fish-turn-old-direction-14) 1.0)
-  (set! (-> self fish-turn-old-direction-15) 1.0)
-  (set! (-> self fish-turn-old-direction-16) 1.0)
-  (set! (-> self fish-turn-old-direction-17) 1.0)
-  (set! (-> self fish-turn-old-direction-18) 1.0)
-  (set! (-> self fish-turn-old-direction-19) 1.0)
-  (set! (-> self fish-turn-old-direction-20) 1.0)
-  (set! (-> self fish-turn-old-direction-21) 1.0)
-  (set! (-> self fish-turn-side-0) 1.0)
-  (set! (-> self fish-turn-side-1) 1.0)
-  (set! (-> self fish-turn-side-2) 1.0)
-  (set! (-> self fish-turn-side-3) 1.0)
-  (set! (-> self fish-turn-side-4) 1.0)
-  (set! (-> self fish-turn-side-5) 1.0)
-  (set! (-> self fish-turn-side-6) 1.0)
-  (set! (-> self fish-turn-side-7) 1.0)
-  (set! (-> self fish-turn-side-8) 1.0)
-  (set! (-> self fish-turn-side-9) 1.0)
-  (set! (-> self fish-turn-side-10) 1.0)
-  (set! (-> self fish-turn-side-11) 1.0)
-  (set! (-> self fish-turn-side-12) 1.0)
-  (set! (-> self fish-turn-side-13) 1.0)
-  (set! (-> self fish-turn-side-14) 1.0)
-  (set! (-> self fish-turn-side-15) 1.0)
-  (set! (-> self fish-turn-side-16) 1.0)
-  (set! (-> self fish-turn-side-17) 1.0)
-  (set! (-> self fish-turn-side-18) 1.0)
-  (set! (-> self fish-turn-side-19) 1.0)
-  (set! (-> self fish-turn-side-20) 1.0)
-  (set! (-> self fish-turn-side-21) 1.0)
+  (dotimes (slot-index *fisher-max-fish-slots*)
+    (set! (-> self fish-data slot slot-index visual)
+      (the-as (pointer manipy) #f))
+    (set! (-> self fish-data slot slot-index species) 0)
+    (set! (-> self fish-data slot slot-index level) 1)
+    (set! (-> self fish-data slot slot-index suffix) 2)
+    (set! (-> self fish-data slot slot-index weight-tenths) 10)
+    (set! (-> self fish-data slot slot-index power-cell-task) 0)
+    (set! (-> self fish-data slot slot-index distance) 0.0)
+    (set! (-> self fish-data slot slot-index lane) 0.0)
+    (set! (-> self fish-data slot slot-index depth) 0.0)
+    (set! (-> self fish-data slot slot-index direction) 1.0)
+    (set! (-> self fish-data slot slot-index speed) 1.0)
+    (set! (-> self fish-data slot slot-index cooldown) 0.0)
+    (set! (-> self fish-data slot slot-index turn-time) 0.0)
+    (set! (-> self fish-data slot slot-index turn-old-direction) 1.0)
+    (set! (-> self fish-data slot slot-index turn-side) 1.0))
 
   (vector-reset! (-> self lure-pos))
 
@@ -1058,15 +654,14 @@
   (go-virtual idle)
 )
 
-
 (defun spawn-fisher-game
   ((location-id int)
-   (fishnet-pos vector)
-   (player-pos vector)
-   (camera-pos vector)
-   (water-height float)
-   (camera-angle float)
-   (playfield-angle float))
+    (fishnet-pos vector)
+    (player-pos vector)
+    (camera-pos vector)
+    (water-height float)
+    (camera-angle float)
+    (playfield-angle float))
 
   (let ((angles
         (new 'stack-no-clear 'vector)))
@@ -1076,7 +671,6 @@
     (set! (-> angles z) 0.0)
     (set! (-> angles w) 0.0)
 
-    ;; Match the existing working fishing-area spawn path.
     (vector-copy!
       *fisher-spawn-player-pos*
       player-pos)
@@ -1439,70 +1033,6 @@
   (none)
 )
 
-(defun fisher-heal-line! ((amount float))
-  (+! *fisher-line-hp* amount)
-
-  (when
-    (> *fisher-line-hp* *fisher-line-hp-max*)
-
-    (set!
-      *fisher-line-hp*
-      *fisher-line-hp-max*))
-
-  (when
-    (> *fisher-line-hp* 0.0)
-
-    (set!
-      *fisher-line-broken?*
-      #f))
-
-  (none)
-)
-
-(defun fisher-set-line-color!
-  ((color rgba))
-
-  (let ((health-ratio
-        (fmax
-          0.0
-          (fmin
-            1.0
-            (/
-              *fisher-line-hp*
-              *fisher-line-hp-max*))))
-
-      (red-blend
-        0.0))
-
-    ;; Keep the line and its HP bar yellow while the line is healthy.
-    ;; Below 50% HP, smoothly blend both from yellow into red.
-    (cond
-      ((>= health-ratio 0.5)
-        (set! (-> color r) #xff)
-        (set! (-> color g) #xe0)
-        (set! (-> color b) #x20))
-
-      (else
-        (set!
-          red-blend
-          (* (- 0.5 health-ratio) 2.0))
-
-        (set! (-> color r) #xff)
-
-        (set!
-          (-> color g)
-          (the uint8
-            (+
-              224.0
-              (* (- 32.0 224.0) red-blend))))
-
-        (set! (-> color b) #x20)))
-
-    (set! (-> color a) #xc0))
-
-  (none)
-)
-
 (defun fisher-draw-line-hp-number ()
   (let ((display-hp
         (the int
@@ -1560,8 +1090,6 @@
           :b #x40
           :a #xc0)))
 
-    ;; Color is relative to this cast's actual line HP maximum:
-    ;; full HP = green, half HP = yellow, zero HP = pure red.
     (let ((line-health-ratio
           (fmax
             0.0
@@ -1573,7 +1101,6 @@
           0.0))
 
       (cond
-        ;; 100% -> 50%: green to yellow.
         ((>= line-health-ratio 0.5)
           (set!
             line-color-blend
@@ -1587,7 +1114,6 @@
           (set! (-> hp-color g) #xff)
           (set! (-> hp-color b) #x00))
 
-        ;; 50% -> 0%: yellow to pure red.
         (else
           (set!
             line-color-blend
@@ -1643,9 +1169,9 @@
 
 (defun fisher-draw-reel-hint-text
   ((text string)
-   (text-x-pos int)
-   (text-y-pos int)
-   (text-scale float))
+    (text-x-pos int)
+    (text-y-pos int)
+    (text-scale float))
 
   (clear matt-str)
   (clear *pc-encoded-matt-str*)
@@ -1658,7 +1184,7 @@
 
   (with-dma-buffer-add-bucket
     ((buf (-> (current-frame) global-buf))
-     (bucket-id subtitle))
+      (bucket-id subtitle))
 
     (draw-string-xy-scaled
       *pc-encoded-matt-str*
@@ -1673,9 +1199,9 @@
 
 (defun fisher-draw-reel-hint-text-red
   ((text string)
-   (text-x-pos int)
-   (text-y-pos int)
-   (text-scale float))
+    (text-x-pos int)
+    (text-y-pos int)
+    (text-scale float))
 
   (clear matt-str)
   (clear *pc-encoded-matt-str*)
@@ -1688,7 +1214,7 @@
 
   (with-dma-buffer-add-bucket
     ((buf (-> (current-frame) global-buf))
-     (bucket-id subtitle))
+      (bucket-id subtitle))
 
     (draw-string-xy-scaled
       *pc-encoded-matt-str*
@@ -1705,11 +1231,9 @@
   (when
     (> (-> self reel-hint-time) 0.0)
 
-    ;; Always show reel. Higher levels add each unlocked ability above it.
     (when
       (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
 
-      ;; Jak 1 has no <PAD_L1> font icon. Draw the button name in red.
       (fisher-draw-reel-hint-text-red
         "L1"
         10
@@ -1725,8 +1249,6 @@
     (when
       (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
 
-      ;; Jak 1 has no <PAD_R1> font icon. Draw the button name in red,
-      ;; followed by the action in the normal white hint color.
       (fisher-draw-reel-hint-text-red
         "R1"
         10
@@ -1905,10 +1427,7 @@
 
   (none))
 
-
 (defun fisher-update-background-mist-color! ()
-  ;; Match the live underwater background exactly. Visibility now comes from
-  ;; the texture at low alpha, not from artificially brightening its RGB.
   (set!
     (-> *part-id-table* 3572 init-specs 8 initial-valuef)
     (-> *fisher-underwater-haze-color* x))
@@ -1926,18 +1445,16 @@
 (defun fisher-submit-background-mist!
   ((self fisher-game))
 
-  ;; Submit immediately after the curtain so this true 3D sprite remains in
-  ;; front of it in the retail render chain.
   (when
     (and
       *fisher-background-cloud-session-active?*
       (-> self camera-underwater?))
 
     (let ((curtain-forward
-            (new 'stack-no-clear 'vector))
+          (new 'stack-no-clear 'vector))
 
-          (particle-pos
-            (new 'stack-no-clear 'vector)))
+        (particle-pos
+          (new 'stack-no-clear 'vector)))
 
       (singlefish-vector-copy-safe!
         curtain-forward
@@ -1950,14 +1467,8 @@
       (fisher-update-background-mist-color!)
       (fisher-set-particle-fishbox-rotation! self)
 
-      ;; Exactly one giant 3D bigpuff.
       ;;
-      ;; Curtain depth: 92m.
-      ;; Bigpuff depth: 86m, so it stays visibly in front.
       ;;
-      ;; Its center is placed far below the waterline. Combined with the fixed
-      ;; vertical scale in part 3572, its upper edge stays in the same place
-      ;; instead of protruding above it.
       (vector+float*!
         particle-pos
         (-> self fisher-cam)
@@ -1986,15 +1497,12 @@
 (defun fisher-launch-background-mist!
   ((self fisher-game))
 
-  ;; The persistent object is the session emitter. Individual render tiles are
-  ;; refreshed after the curtain each underwater frame to guarantee ordering.
   (set! *fisher-background-cloud-session-active?* #t)
   (none))
 
 (defun fisher-update-background-mist!
   ((self fisher-game))
 
-  ;; Nothing is submitted here. Submission must occur after the curtain draw.
   (none))
 
 (defun fisher-force-underwater-background! ()
@@ -2131,8 +1639,6 @@
             (-> cam-slave trans y)
             (-> self water-level)))
 
-        ;; Particle callbacks cannot safely dereference *fisher-game*.
-        ;; Mirror the current camera state into a plain global instead.
         (set!
           *fisher-background-cloud-visible?*
           (-> self camera-underwater?))))
@@ -2200,29 +1706,15 @@
   (stop-sound-file "water-waves.wav")
   (fisher-remove-lure-snake! self)
   (set! (-> self reel-hint-time) 0.0)
-  ;; Ending/resetting a cast cancels Stop Lure, but its cooldown persists.
   (set! (-> self lure-stop-active?) #f)
   (set! (-> self lure-stop-time) 0.0)
-  ;; Ending or resetting a cast cancels the active sink effect, but does not
-  ;; bypass its cooldown. lure-sink-used? is cleared by the cooldown updater.
   (set! (-> self lure-sink-active?) #f)
   (set! (-> self lure-sink-time) 0.0)
-  ;; Tug Line ends with the current catch/cast, but its cooldown persists.
   (set! (-> self tug-line-active?) #f)
   (set! (-> self tug-line-time) 0.0)
   (set! (-> self bubble-time) -2.0)
 
   (none))
-
-(defun singlefish-prefix-string ((self singlefish-base))
-  (cond
-    ((= (-> self prefix) 'stressed) "Stressed")
-    ((= (-> self prefix) 'malnourished) "Malnourished")
-    ((= (-> self prefix) 'common) "Common")
-    ((= (-> self prefix) 'healthy) "Healthy")
-    ((= (-> self prefix) 'royal) "Royal")
-    ((= (-> self prefix) 'legendary) "Mega")
-    (else "Golden")))
 
 (defun singlefish-prefix-multiplier ((self singlefish-base))
   (cond
@@ -2233,12 +1725,6 @@
     ((= (-> self prefix) 'royal) 2.00)
     ((= (-> self prefix) 'legendary) 3.00)
     (else 5.00)))
-
-(defun singlefish-tier-string ((self singlefish-base))
-  (cond
-    ((= (-> self tier) 'topwater) "Topwater")
-    ((= (-> self tier) 'bottom-feeder) "Bottom-Feeder")
-    (else "Deepwater")))
 
 (defun singlefish-remove-visual! ((self singlefish-base)) (none))
 
@@ -2276,8 +1762,8 @@
 
 (defun fisher-debug-line!
   ((start vector)
-   (end vector)
-   (color rgba))
+    (end vector)
+    (color rgba))
 
   (add-debug-line
     #t
@@ -2293,8 +1779,8 @@
 
 (defun fisher-draw-retail-line-segment!
   ((world-start vector)
-   (world-end vector)
-   (color rgba))
+    (world-end vector)
+    (color rgba))
 
   (when
     (and
@@ -2310,8 +1796,6 @@
       (set! (-> world-start w) 1.0)
       (set! (-> world-end w) 1.0)
 
-      ;; Each piece is projected separately. A failed piece no longer
-      ;; prevents the remaining visible pieces from being rendered.
       (when
         (and
           (transform-point-qword!
@@ -2322,7 +1806,6 @@
             (-> screen-points vector 1)
             world-end))
 
-        ;; Pull both ends forward so the line remains visible over geometry.
         (+! (-> screen-points vector 0 z) -8192)
         (+! (-> screen-points vector 1 z) -8192)
 
@@ -2351,7 +1834,7 @@
 
         (with-dma-buffer-add-bucket
           ((buf (-> (current-frame) global-buf))
-           (bucket-id subtitle))
+            (bucket-id subtitle))
 
           (with-cnt-vif-block
             (buf)
@@ -2382,8 +1865,8 @@
 
 (defun fisher-draw-retail-line!
   ((start vector)
-   (end vector)
-   (color rgba))
+    (end vector)
+    (color rgba))
 
   (let ((delta
         (new 'stack-no-clear 'vector))
@@ -2401,8 +1884,6 @@
     ;;
     ;; start -> 25% -> 50% -> 75% -> end
     ;;
-    ;; This is important because transform-point-qword! may reject the
-    ;; Jak-side endpoint when the underwater camera is far from Jak.
     (vector-! delta end start)
 
     (vector+float*!
@@ -2593,7 +2074,7 @@
 
 (defun singlefish-roll-weight-and-value! ((self singlefish-base))
   (let* ((owner
-          (the-as fisher-game (-> self owner)))
+        (the-as fisher-game (-> self owner)))
 
       (weight-range
         (max
@@ -2645,7 +2126,7 @@
           (the int
             (+ raw-value 0.5)))))
 
-  (none)))
+    (none)))
 
 (defun singlefish-face-vector! ((self singlefish-base) (forward vector))
   (when *camera*
@@ -2934,7 +2415,6 @@
 
     (cond
       (lurker-shark?
-        ;; Return the line immediately after the shark steals the lure.
         (fisher-reset-cast! owner)
         (set! (-> owner fish-message) "LURE STOLEN")
         (set! (-> owner fish-message-time) 1.75))
@@ -3021,7 +2501,7 @@
 
 (defun singlefish-caught! ((self singlefish-base))
   (let* ((owner
-          (the-as fisher-game (-> self owner)))
+        (the-as fisher-game (-> self owner)))
 
       (suffix
         (singlefish-prefix->suffix self))
@@ -3039,8 +2519,6 @@
     (set! (-> owner caught-fish-suffix) suffix)
     (set! (-> owner caught-fish-level) (-> self level))
     (set! (-> owner caught-weight-tenths) (-> self weight-tenths))
-    ;; Lurker Shark pays only one-third of its normal calculated orb value.
-    ;; Weight, fishing XP, and fight difficulty are unchanged.
     (set!
       (-> owner caught-orb-value)
       (if
@@ -3125,7 +2603,7 @@
           (cpad-hold? 0 x)
 
           (let* ((fish-level
-                  (-> self level))
+                (-> self level))
 
               (jak-level
                 (fisher-current-level))
@@ -3297,7 +2775,6 @@
       xp-start
       (-> owner caught-fish-xp))
 
-    ;; Preserve auto-saving for the legacy catch path as well.
     (when
       (<= (-> owner caught-fish-xp) 0)
 
@@ -3444,9 +2921,6 @@
             0.0
             (-> self catch-menu-offset))))
 
-      ;; Once the loot card begins leaving for a rare fish, keep the displayed
-      ;; fish and its attachments parked in view. Only the cards transition;
-      ;; the fish finally moves out with the rare-description exit.
       (+!
         (-> dst y)
         (+
@@ -3484,7 +2958,7 @@
               ((= (-> self caught-fish-suffix) 7) *catch-fishb-sgc*)
               ((= (-> self caught-fish-suffix) 8) *catch-fishc-sgc*)
               ((or (= (-> self caught-fish-suffix) 9)
-                   (= (-> self caught-fish-suffix) 10)) *catch-fisha-sgc*)
+                  (= (-> self caught-fish-suffix) 10)) *catch-fisha-sgc*)
 
               ((= (-> self caught-fish-species) 1) *catch-fishb-sgc*)
 
@@ -3622,7 +3096,6 @@
           (fisher-fish-pointer self slot)
           (the-as (pointer manipy) #f))))
 
-    ;; Remove the catch-display model.
     (when fish
       (deactivate (-> fish 0)))
 
@@ -3644,13 +3117,9 @@
     (set! (-> self catch-menu-offset) 0.0)
 
     (cond
-      ;; The seventh fly closes fishing only after the loot menu finishes.
       ((-> self buzzer-victory-pending?)
         (set! (-> self cast-state) 'buzzer-exit))
 
-      ;; Earlier flies return to fishing. The used special slot becomes a
-      ;; normal fish slot. If no second Scout Fly remains active, immediately
-      ;; perform another 30% area-specific Scout Fly spawn roll.
       (else
         (when (>= slot 0)
           (fisher-set-fish-species! self slot 0)
@@ -3662,10 +3131,6 @@
             (when (= (fisher-fish-species self fish-slot) 4)
               (+! active-buzzer-count 1)))
 
-          ;; Do not reroll while the second member of an existing Scout Fly
-          ;; pair is still swimming. Once the active group is gone, this can
-          ;; replace one or two ordinary slots, but never beyond the area's
-          ;; remaining unique Scout Fly indexes.
           (when (= active-buzzer-count 0)
             (fisher-add-buzzer-fish-slots! self)))
 
@@ -3725,17 +3190,12 @@
                 slot
                 (the-as (pointer manipy) #f))
 
-              ;; The cell task is preserved in caught-power-cell-task until the
-              ;; delayed reward movie is complete, but this recycled fish slot
-              ;; must become an ordinary slot immediately.
               (fisher-set-fish-power-cell-task! self slot 0)
 
               (fisher-randomize-fish-slot!
                 self
                 slot)))
 
-          ;; Do not roll another carrier while this one is still waiting to
-          ;; award its cell.
           (unless carrier?
             (fisher-add-power-cell-fish-slot! self))
 
@@ -3743,8 +3203,6 @@
             xp-start
             (-> self caught-fish-xp))
 
-          ;; A carrier's eventual cell movie performs the save. Ordinary
-          ;; zero-XP catches still need their orb reward saved here.
           (when
             (and
               (not carrier?)
@@ -3825,8 +3283,6 @@
                   (= (-> self fish-state) 'catch-exit)
                   (fisher-rare-fish? (-> self caught-fish-suffix)))
 
-                ;; Loot is fully gone before the description begins. Keep the
-                ;; fish and all child attachments alive for the second card.
                 (set! (-> self fish-state) 'rare-enter)
                 (set! (-> self catch-transition-time) 0.0)
                 (set! (-> self catch-menu-offset) 150.0))
@@ -4164,8 +3620,6 @@
       (when (<= (-> self tug-line-cooldown) 0.0)
         (set! (-> self tug-line-cooldown) 0.0)))
 
-    ;; Tug Line may only be started while a fish is actively being reeled.
-    ;; The multiplier begins immediately; there is no ramp-in or ease.
     (when
       (and
         (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
@@ -4222,9 +3676,8 @@
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
-        ;; Each unlocked skill owns an equal-width section of the strip.
         (draw-sprite2d-xy
           buf segment-x 200 segment-width 3
           (new 'static 'rgba
@@ -4234,7 +3687,6 @@
           (draw-sprite2d-xy
             buf segment-x 200 fill-width 3 fill-color))
 
-        ;; A one-pixel divider keeps cooldown segments distinct.
         (when (> slot 0)
           (draw-sprite2d-xy
             buf (- segment-x 1) 200 1 3
@@ -4284,10 +3736,9 @@
                 (-> self tug-line-cooldown)
                 *fisher-tug-line-cooldown-seconds*)))))
 
-      ;; Thin frame directly above the existing level/XP meter.
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
         (draw-sprite2d-xy
           buf 114 198 284 6
@@ -4300,7 +3751,6 @@
             :r #x38 :g #x48 :b #x58 :a #xd0)))
 
       ;; Cooldown order always follows skill acquisition order:
-      ;; Stop Lure, Sink Lure, then Tug Line.
       (fisher-draw-cooldown-segment!
         0
         skill-count
@@ -4331,9 +3781,7 @@
   (let ((slot (-> self hooked-fish-slot)))
     (cond
       ((< slot 0) (meters 9.0))
-      ;; Lurker Shark needs substantially more room to remain fully visible.
       ((= (fisher-fish-species self slot) 3) (meters 17.0))
-      ;; Scout Fly is tiny, so the camera may safely get closest.
       ((= (fisher-fish-species self slot) 4) (meters 6.5))
       ((= (fisher-fish-species self slot) 1) (meters 10.5))
       ((= (fisher-fish-species self slot) 2) (meters 9.5))
@@ -4361,8 +3809,6 @@
 
     (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
 
-    ;; Fishing level 2 ability: freeze the free lure for three seconds. It can
-    ;; be reused after its independent 20-second cooldown.
     (when
       (and
         (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
@@ -4379,8 +3825,6 @@
       (set! (-> self lure-x-velocity) 0.0)
       (set! (-> self lure-y-velocity) 0.0))
 
-    ;; Fishing level 5 ability: sink at triple speed for five seconds.
-    ;; It can be reused after its cooldown completes, even during the same cast.
     (when
       (and
         (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
@@ -4395,7 +3839,6 @@
       (set! (-> self lure-sink-time) *fisher-sink-lure-active-seconds*)
       (set! (-> self lure-sink-cooldown) *fisher-sink-lure-cooldown-seconds*))
 
-    ;; Any reeling cancels either lure ability early.
     (when
       (cpad-hold? 0 x)
 
@@ -4557,7 +4000,7 @@
   ((self fisher-game) (slot int))
 
   (let* ((species
-          (fisher-fish-species self slot))
+        (fisher-fish-species self slot))
 
       (weight
         (the float
@@ -4565,7 +4008,6 @@
             1
             (fisher-fish-weight-tenths self slot))))
 
-      ;; Reference weights preserve the old damage at an average poundage.
       (reference-weight
         (cond
           ((= species 3) 260.0)
@@ -4584,7 +4026,7 @@
   ((self fisher-game) (slot int))
 
   (let* ((species
-          (fisher-fish-species self slot))
+        (fisher-fish-species self slot))
 
       (base-damage
         (cond
@@ -4605,8 +4047,6 @@
     (*
       base-damage
       (fisher-fish-weight-damage-multiplier self slot)
-
-      ;; Lurker Shark remains dangerous even when Jak outlevels it.
       (if
         (= species 3)
         (fmax 1.15 level-mult)
@@ -4625,9 +4065,6 @@
       (top-y
         (- (-> self water-level)
           (meters 3.0))))
-
-    ;; Poison damage is independent of ordinary fish fights and continues
-    ;; even while Jak is not holding X.
     (when
       (and
         (>= (-> self hooked-fish-slot) 0)
@@ -4744,8 +4181,6 @@
                 ((= (-> self fish-state) 'approaching)
                   (fisher-hook-target! self hook-target)
 
-                  ;; Keep accelerating for as long as this fish is chasing the
-                  ;; lure. There is deliberately no upper clamp.
                   (+!
                     (-> self fish-approach-speed)
                     (* *fisher-approach-acceleration* dt))
@@ -4799,7 +4234,6 @@
                     (cond
                       ((= (fisher-fish-species self slot) 3)
                         ;; The shark takes the lure and immediately returns the
-                        ;; line to Jak instead of leaving it cast.
                         (fisher-fish-scared-off! self slot)
                         (fisher-reset-cast! self)
                         (set! (-> self fish-message) "LURE STOLEN")
@@ -4838,8 +4272,6 @@
                         (degrees 180.0))))
 
                   ;; Each expired fight cooldown is only a 25% chance to
-                  ;; begin another fight. A failed roll starts a fresh cooldown,
-                  ;; reducing average fight frequency to one quarter.
                   (when
                     (and
                       (<= (-> self fish-hook-time) 0.0)
@@ -5006,13 +4438,6 @@
 
   (none))
 
-(defun fisher-remove-debug-fish!
-  ((fish (pointer manipy)))
-
-  (when fish (deactivate (-> fish 0)))
-
-  (none))
-
 (defun singlefish-end-session! ((self fisher-game))
   (set! *singlefish-session-active?* #f)
   (+! *singlefish-session-id* 1)
@@ -5092,9 +4517,6 @@
 
         (set! distance (singlefish-vector-length-safe move-dir))
 
-        ;; This process-based fish follows the same uncapped chase rule as the
-        ;; slot-based fish: accelerate every frame until its nose reaches the
-        ;; lure, then stop ramping when it enters the hook window.
         (+!
           (-> self approach-speed)
           (*
@@ -5424,11 +4846,10 @@
   (none)
 )
 
-
 (defun fisher-set-background-curtain-color!
   ((dst rgba)
-   (base-color vector)
-   (brightness float))
+    (base-color vector)
+    (brightness float))
 
   (set!
     (-> dst r)
@@ -5465,10 +4886,8 @@
   (let ((base-color
         (new 'stack-no-clear 'vector)))
 
-    ;; Use the exact same time-of-day RGB as the underwater void/horizon.
     (fisher-background-color! base-color)
 
-    ;; Entire curtain matches the void color exactly.
     (fisher-set-background-curtain-color! *fisher-curtain-color-0a* base-color 1.00)
     (fisher-set-background-curtain-color! *fisher-curtain-color-0b* base-color 1.00)
 
@@ -5491,10 +4910,10 @@
 
 (defun fisher-add-retail-flat-triangle!
   ((buf dma-buffer)
-   (world-p0 vector)
-   (world-p1 vector)
-   (world-p2 vector)
-   (color rgba))
+    (world-p0 vector)
+    (world-p1 vector)
+    (world-p2 vector)
+    (color rgba))
 
   (let ((screen-points-a
         (new 'stack 'vector4w-2))
@@ -5520,8 +4939,6 @@
           (-> screen-points-b vector 0)
           world-p2))
 
-      ;; Keep the real projected depth. Unlike the fishing line, the curtain
-      ;; must remain behind fish, particles, and other nearby world geometry.
       (set! (-> screen-points-a vector 0 w) 1)
       (set! (-> screen-points-a vector 1 w) 1)
       (set! (-> screen-points-b vector 0 w) 1)
@@ -5571,15 +4988,15 @@
 
 (defun fisher-build-background-curtain-vertex!
   ((self fisher-game)
-   (dst vector)
-   (curtain-center vector)
-   (curtain-forward vector)
-   (curtain-side vector)
-   (column int)
-   (row int))
+    (dst vector)
+    (curtain-center vector)
+    (curtain-forward vector)
+    (curtain-side vector)
+    (column int)
+    (row int))
 
   (let* ((u
-          (/ (the float column) 20.0))
+        (/ (the float column) 20.0))
 
       (v
         (/ (the float row) 12.0))
@@ -5588,8 +5005,6 @@
         (+ (meters -180.0)
           (* (meters 360.0) u)))
 
-      ;; Keep the top edge exactly where it is now, but extend the wall
-      ;; farther downward and wider on both sides.
       (base-y
         (+ (-> self water-level)
           (meters -0.75)
@@ -5626,14 +5041,12 @@
           (* (meters 0.24) (sin wave-angle-y))
           (* (meters 0.10) (sin wave-angle-b)))))
 
-    ;; Width runs across the live camera view.
     (vector+float*!
       dst
       curtain-center
       curtain-side
       side-distance)
 
-    ;; Wave depth moves toward/away from the live camera.
     (vector+float*!
       dst
       dst
@@ -5698,8 +5111,6 @@
             :b #x00
             :a #xff)))
 
-      ;; camera-axis is the configured horizontal viewing direction for this
-      ;; fishing location. It remains fixed while the follow camera moves.
       (vector-copy!
         curtain-forward
         (-> self camera-axis))
@@ -5711,7 +5122,6 @@
         curtain-forward
         1.0)
 
-      ;; Horizontal axis across the configured camera view.
       (set! (-> curtain-side x) (-> curtain-forward z))
       (set! (-> curtain-side y) 0.0)
       (set! (-> curtain-side z) (- (-> curtain-forward x)))
@@ -5721,15 +5131,12 @@
         curtain-side
         1.0)
 
-      ;; Anchor the curtain in the world at the fishing location. It is now
-      ;; 30 meters farther back than before: roughly three curtain grid cells.
       (vector+float*!
         curtain-center
         (-> self fisher-cam)
         curtain-forward
         (meters 92.0))
 
-      ;; Center the fixed wall over the full 55.5-meter fish travel lane.
       (vector+float*!
         curtain-center
         curtain-center
@@ -5739,9 +5146,6 @@
       (set! (-> curtain-center y) (-> self water-level))
       (set! (-> curtain-center w) 1.0)
 
-      ;; fisher-force-underwater-background! runs immediately before this
-      ;; draw and writes the exact live void/horizon RGB here. Copy that
-      ;; already-applied color directly instead of recalculating it separately.
       (set!
         (-> curtain-color r)
         (the uint8
@@ -5765,15 +5169,10 @@
 
       (set! (-> curtain-color a) #xff)
 
-      ;; Bucket 66 is the retail sprite bucket. Sprite3 accepts ordinary
-      ;; direct-GIF packets before its normal sprite chain. This curtain chain
-      ;; is inserted first; the particle renderer appends bubbles afterward.
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id sprite))
+          (bucket-id sprite))
 
-        ;; Use the real world z-buffer. The opaque curtain writes its depth;
-        ;; later world-space particles pass when they are physically in front.
         (dma-buffer-add-gs-set
           buf
           (zbuf-1
@@ -5788,69 +5187,62 @@
               :zte #x1
               :ztst (gs-ztest greater-equal))))
 
-        ;; Batch every curtain triangle into one retail direct-GIF block.
         (with-cnt-vif-block
           (buf)
 
           (dotimes (row 12)
             (dotimes (column 20)
               (fisher-build-background-curtain-vertex!
-                  self
-                  p00
-                  curtain-center
-                  curtain-forward
-                  curtain-side
-                  column
-                  row)
+                self
+                p00
+                curtain-center
+                curtain-forward
+                curtain-side
+                column
+                row)
 
-                (fisher-build-background-curtain-vertex!
-                  self
-                  p01
-                  curtain-center
-                  curtain-forward
-                  curtain-side
-                  (+ column 1)
-                  row)
+              (fisher-build-background-curtain-vertex!
+                self
+                p01
+                curtain-center
+                curtain-forward
+                curtain-side
+                (+ column 1)
+                row)
 
-                (fisher-build-background-curtain-vertex!
-                  self
-                  p10
-                  curtain-center
-                  curtain-forward
-                  curtain-side
-                  column
-                  (+ row 1))
+              (fisher-build-background-curtain-vertex!
+                self
+                p10
+                curtain-center
+                curtain-forward
+                curtain-side
+                column
+                (+ row 1))
 
-                (fisher-build-background-curtain-vertex!
-                  self
-                  p11
-                  curtain-center
-                  curtain-forward
-                  curtain-side
-                  (+ column 1)
-                  (+ row 1))
-
-                ;; This winding faces back toward the configured camera.
-                (fisher-add-retail-flat-triangle!
-                  buf
-                  p00
-                  p01
-                  p10
-                  curtain-color)
+              (fisher-build-background-curtain-vertex!
+                self
+                p11
+                curtain-center
+                curtain-forward
+                curtain-side
+                (+ column 1)
+                (+ row 1))
 
               (fisher-add-retail-flat-triangle!
-                  buf
-                  p10
-                  p01
-                  p11
-                  curtain-color)))
+                buf
+                p00
+                p01
+                p10
+                curtain-color)
 
-          ;; All curtain triangles share this one DIRECT transfer. Their GIF
-          ;; tags keep EOP clear, and this unconditional final tag terminates
-          ;; the stream after every visible triangle has been appended.
+              (fisher-add-retail-flat-triangle!
+                buf
+                p10
+                p01
+                p11
+                curtain-color)))
+
           ;;
-          ;; The terminator cannot be skipped when an edge triangle fails
-          ;; projection, because it is outside both grid loops.
           (dma-buffer-add-gif-tag
             buf
             (new 'static
@@ -5860,7 +5252,6 @@
               :nreg 1)
             (gs-reg-list prim))
 
-          ;; Harmless packed PRIM write. It creates no vertices.
           (dma-buffer-add-uint128
             buf
             (the-as uint128 0))))))
@@ -5877,7 +5268,6 @@
       (fisher-force-underwater-background!)
       (fisher-draw-background-curtain! self)
 
-      ;; Submit the 3D bigpuff chain after the curtain packet.
       (fisher-submit-background-mist! self))
 
     (else
@@ -5952,7 +5342,6 @@
         (reel-zoom-speed 1.8)
         (reel-distance (meters 9.0)))
 
-      ;; Ease the close camera in only while a fish is hooked and reeling.
       (cond
         ((and
             (= (-> self fish-state) 'reeling)
@@ -5979,11 +5368,8 @@
           (-> self camera-radius)
           (fisher-hooked-fish-camera-distance self)))
 
-      ;; Normal lure-follow offset remains the far endpoint.
       (vector-copy! camera-offset (-> self lure-camera-offset))
 
-      ;; The close endpoint remains on the configured camera axis, so every
-      ;; fishing location keeps its authored view direction.
       (vector-float*! reel-offset (-> self camera-axis) (- reel-distance))
       (set! (-> reel-offset y) 0.0)
       (set! (-> reel-offset w) 0.0)
@@ -6129,8 +5515,6 @@
             :b #x40
             :a #xc0)))
 
-      ;; Use the same cast-relative green -> yellow -> red gradient
-      ;; as the HP bar, calculated directly into the rendered line color.
       (let ((line-health-ratio
             (fmax
               0.0
@@ -6142,7 +5526,6 @@
             0.0))
 
         (cond
-          ;; 100% -> 50%: green to yellow.
           ((>= line-health-ratio 0.5)
             (set!
               line-color-blend
@@ -6156,7 +5539,6 @@
             (set! (-> line-color g) #xff)
             (set! (-> line-color b) #x00))
 
-          ;; 50% -> 0%: yellow to pure red.
           (else
             (set!
               line-color-blend
@@ -6215,7 +5597,6 @@
       (set! (-> self fish-fight-base-y) (-> self lure-pos y))
       (set! (-> self reel-camera-blend) 0.0)
 
-      ;; Poisonous EelFish drain a flat 10 line HP per second while hooked.
       (set!
         (-> self hooked-fish-poison-dps)
         (if
@@ -6259,7 +5640,7 @@
       (-> (current-frame) global-buf))
 
     (let* ((time-value
-            (-> *time-of-day-context* time))
+          (-> *time-of-day-context* time))
 
         (hour-24
           (the int time-value))
@@ -6309,7 +5690,7 @@
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
         (draw-string-xy-scaled
           *pc-encoded-matt-str*
@@ -6364,7 +5745,6 @@
         #t
         #f))
 
-    ;; Show reeling instructions until the orb tutorial task is closed.
     ((and
         (= (-> self fish-state) 'reeling)
 
@@ -6474,8 +5854,6 @@
         0.60)
 
       (cond
-        ;; Scout Fly catches display 50.0 pounds, but still award no
-        ;; precursor orbs and no fishing XP.
         ((= (-> self caught-fish-species) 4)
           (clear *fish-ui-str*)
           (format
@@ -6560,7 +5938,7 @@
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
         (draw-sprite2d-xy
           buf 48 (+ 58 menu-offset) 416 172
@@ -6638,17 +6016,10 @@
 
   (fisher-update-all-fish-debug! self)
 
-  ;; Keep cloud visibility synchronized even in ready/charging states.
-  ;; Reeling a lure all the way in must not leave the existing cloud hidden.
   (fisher-update-camera-water! self)
 
-  ;; Keep the underwater cloud population alive for the entire fishing
-  ;; session. Rendering is still controlled separately by camera height.
   (fisher-update-background-mist! self)
 
-  ;; Level-up notices are modal. A crossed level blocks the next cast while
-  ;; the XP bar finishes, then the window uses the catch menu's exact entrance
-  ;; and exit timing until the player dismisses it with X.
   (fisher-update-level-up-window!)
 
   (cond
@@ -6660,8 +6031,6 @@
         *fisher-level-up-window-pending?*
         *fisher-level-up-window-request?*)
 
-      ;; The XP meter is still finishing its level-up animation. Do not allow
-      ;; a new cast before the modal level-up window appears.
       (fisher-restore-normal-background!))
 
     ((= (-> self cast-state) 'ready)
@@ -6732,8 +6101,6 @@
       (fisher-draw-line! self))
 
     ((= (-> self cast-state) 'power-cell-ui-wait)
-      ;; The fish-stat window has closed. Keep fishing modal until the flying
-      ;; XP, XP-bar fill, and optional level-up window have all completed.
       (fisher-restore-normal-background!)
 
       (when
@@ -6745,8 +6112,6 @@
         (set! (-> self cast-state) 'buzzer-exit)))
 
     ((= (-> self cast-state) 'buzzer-exit)
-      ;; Leave through the normal exit state so every fishing/camera/particle
-      ;; parameter is restored in one place.
       (go-virtual exit))
 
     ((= (-> self cast-state) 'catch-transition) (fisher-restore-normal-background!) (fisher-update-catch-return! self))
@@ -6758,7 +6123,6 @@
       (fisher-draw-catch-ui! self)
       (fisher-draw-rare-fish-ui! self)))
 
-  ;; XP reward presentation continues after the loot window closes.
   (fisher-update-xp-gain-animation!)
 
   (when
@@ -6798,13 +6162,7 @@
   (none)
 )
 
-
-;; Present fishing power-cell rewards through the same ordering used by
-;; the retail fuel-cell pickup: initialize and clone, place the temporary cell
-;; at Jak, award the exact area task, start othercam from joint 10, play the
-;; randomized spool, then perform the standard camera/target cleanup.
 (defbehavior fisher-buzzer-power-cell-reward fuel-cell ((task int))
-  
 
   (initialize self)
   (set! (-> self fact pickup-type) (pickup-type fuel-cell))
@@ -6813,11 +6171,7 @@
   (logclear! (-> self mask) (process-mask actor-pause))
   (set! (-> self actor-pause) #f)
 
-  
-
   (suspend)
-
-  
 
   (when *target*
     (sound-play "pu-powercell")
@@ -6828,8 +6182,6 @@
     (if (nonzero? (-> self sound))
       (stop! (-> self sound)))
 
-    
-
     (while (handle->process (-> *game-info* other-camera-handle))
       (spool-push
         *art-control*
@@ -6839,9 +6191,6 @@
         (the-as float -99.0))
       (suspend))
 
-    
-    
-
     (while (not (send-event *target* 'clone-anim self))
       (spool-push
         *art-control*
@@ -6850,8 +6199,6 @@
         self
         (the-as float -99.0))
       (suspend))
-
-    
 
     (move-to-point! (-> self root) (-> *target* control trans))
     (set-yaw-angle-clear-roll-pitch!
@@ -6868,8 +6215,6 @@
     (update-transforms! (-> self root))
     (ja-post)
 
-    
-
     (spool-push
       *art-control*
       (-> self victory-anim name)
@@ -6883,8 +6228,6 @@
       (pickup-type fuel-cell)
       (the float task))
 
-    
-
     (set! (-> self draw bounds w) 32768.0)
     (logior! (-> self skel status) (janim-status inited))
     (send-event *target* 'blend-shape #t)
@@ -6896,23 +6239,15 @@
     (add-setting! 'ambient-volume 'rel
       (-> *setting-control* current ambient-volume-movie) 0)
 
-    
-
     (process-spawn othercam self 10 #f #t :to self)
 
-    
-
     (auto-save-command 'auto-save 0 0 *default-pool*)
-
-    
 
     (ja-play-spooled-anim
       (-> self victory-anim)
       (the-as art-joint-anim fuel-cell-idle-ja)
       (the-as art-joint-anim #f)
       (the-as (function process-drawable symbol) false-func))
-
-    
 
     (remove-setting! 'music-volume)
     (remove-setting! 'sfx-volume)
@@ -6923,20 +6258,14 @@
     (send-event *camera* 'clear-entity)
     (ja-channel-set! 0)
 
-    
-
     (suspend)
     (suspend))
-
-  
 
   (set! *fisher-power-cell-reward-active?* #f)
 
   (when *fisher-game*
     (fisher-add-power-cell-fish-slot!
       (the-as fisher-game (-> *fisher-game* 0))))
-
-  
 
   (deactivate self)
   (none))
@@ -6946,8 +6275,6 @@
   :code
   (behavior ()
     (loop
-      ;; Launch a pending reward from its own process thread. Using
-      ;; process-spawn here would synchronously block fisher-game's idle loop.
       (when
         (and
           (not *fisher-power-cell-reward-active?*)
@@ -6956,12 +6283,12 @@
             (-> self power-cell-victory-pending?)))
 
         (let* ((carrier-reward?
-                (-> self power-cell-victory-pending?))
-               (reward-task
-                (if
-                  carrier-reward?
-                  (-> self caught-power-cell-task)
-                  (-> self caught-buzzer-task))))
+              (-> self power-cell-victory-pending?))
+            (reward-task
+              (if
+                carrier-reward?
+                (-> self caught-power-cell-task)
+                (-> self caught-buzzer-task))))
 
           (set! (-> self buzzer-victory-pending?) #f)
           (set! (-> self power-cell-victory-pending?) #f)
@@ -7022,8 +6349,6 @@
       (suspend))))
 
 (defun fisher-maintain-player-control! ((self fisher-game))
-  ;; Fishing is modal. Keep Jak fixed at the authored fishing position every
-  ;; frame so no unrelated state transition can quietly restore player motion.
   (when *target*
     (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
     (set! (-> *target* control trans quad) (-> self fishing-player-pos quad))
@@ -7033,10 +6358,6 @@
   (none))
 
 (defun fisher-session-invalid? ((self fisher-game))
-  ;; A death/respawn or same-level save load can replace or reposition Jak
-  ;; without immediately changing the level. Treat a large displacement as a
-  ;; broken session and leave through the normal exit path instead of pulling
-  ;; the newly spawned Jak back into the minigame.
   (or
     (not *target*)
     (> (vector-vector-distance (target-pos 0) (-> self fishing-player-pos)) (meters 18))))
@@ -7046,8 +6367,6 @@
 
   :enter
   (behavior ()
-    ;; Jak was already grabbed by idle before this transition. Enter handlers
-    ;; run on a small temporary thread and must never suspend.
     (set! *fisher-session-active?* #t)
 
     (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
@@ -7067,9 +6386,6 @@
     (fisher-reset-cast! self)
     (singlefish-start-session! self)
 
-    ;; Start the persistent background-mist emitter for this fishing session.
-    ;; Do not modify *particles-flag*: it is a global engine flag shared by
-    ;; blue eco and other normal game particle effects.
     (set! *fisher-background-cloud-session-active?* #t)
     (set! *fisher-background-cloud-visible?* #f)
     (fisher-launch-background-mist! self)
@@ -7123,17 +6439,12 @@
     (set! *fisher-background-cloud-session-active?* #f)
     (fisher-restore-normal-background!)
 
-    ;; Request the release once, but never wait inside exit. A fuel-cell movie,
-    ;; death, save load, or another process may already own Jak; waiting for a
-    ;; successful release handshake in that case can strand this state forever.
     (when *target*
       (process-release? *target*))
 
     (fisher-reset-cast! self)
     (set! *fisher-session-active?* #f)
 
-    ;; Keep the pending reward fields intact. idle launches the independent
-    ;; reward process on its next update, after this state transition is done.
     (go-virtual idle)
   )
 )

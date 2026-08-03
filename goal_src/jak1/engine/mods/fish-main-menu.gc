@@ -4,11 +4,6 @@
 
 (define *main-menu-camera-prepare-time* 0.0)
 
-;; The temporary main-menu settings must be removed from the exact process
-;; that created their setting-control connections.  The load-game exit can
-;; execute under a different process than main-menu-update!, so using the
-;; current (with-pp pp) there can leave the menu's music-volume 0.0 request
-;; alive forever.
 (define *main-menu-setting-owner* (the-as (pointer process) #f))
 
 (defun main-menu-remove-owned-settings! ()
@@ -25,7 +20,6 @@
   (none))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Fishing Legacy main menu, menu fish, camera transition and new-game handoff
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun turn-to-scene-camera ((tpos vector) (cam-vec vector))
@@ -96,9 +90,6 @@
   (set! *main-menu-bubble-time* 0.0)
   (set! *main-menu-camera-prepare-time* 0.0)
 
-  ;; Cover game-start, the initial warp and camera setup with one blackout.
-  ;; Do not refresh this every frame: repeatedly changing blackout-time
-  ;; interferes with the Continue Without Saving startup path.
   (set-blackout-frames (seconds 2.0))
   (set! *main-menu-extra-blackout-set?* #t)
 
@@ -138,8 +129,6 @@
           (-> *display* seconds-per-frame))
 
         ;; Retail reaches this hook sooner than debug. Give the initial
-        ;; target warp/startup enough time to finish before saving the
-        ;; gameplay position that the transition and final warp will use.
         (when
           (>= *main-menu-camera-prepare-time* 1.0)
 
@@ -172,8 +161,6 @@
       *main-menu-saved-music-volume*
       (-> *setting-control* current music-volume))
 
-    ;; Remember the process that owns the temporary menu settings.  This is
-    ;; the process whose connection list receives the music-volume 0.0 entry.
     (set!
       *main-menu-setting-owner*
       (the-as (pointer process)
@@ -200,9 +187,6 @@
             *main-menu-saved-time-ratio*
             (if *time-of-day-fast* 18000.0 300.0))))
 
-      ;; Jak 1 time-of-day-proc only uses time-ratio. Restore the saved
-      ;; gameplay rate, or the engine's normal ticking rate if the saved
-      ;; value was already zero when the menu was entered.
       (set!
         (-> *time-of-day-proc* 0 time-ratio)
         resume-ratio))
@@ -319,7 +303,7 @@
     (main-menu-build-camera-basis!)
 
     (let* ((cam-slave
-            (-> *camera* slave 0 0))
+          (-> *camera* slave 0 0))
 
         (fish-proc
           (the-as manipy
@@ -514,7 +498,7 @@
             (-> self visual))
 
           (let* ((linear-t
-                  (/ *main-menu-new-game-transition-time* 4.0))
+                (/ *main-menu-new-game-transition-time* 4.0))
 
               (smooth-t
                 (*
@@ -627,60 +611,58 @@
       (<= *main-menu-bubble-time* 0.0)
 
       (let ((bubble-pos
-          (new 'stack-no-clear 'vector))
+            (new 'stack-no-clear 'vector))
 
-        (bubble-offset
-          (new 'stack-no-clear 'vector)))
+          (bubble-offset
+            (new 'stack-no-clear 'vector)))
 
-      (main-menu-build-camera-basis!)
+        (main-menu-build-camera-basis!)
 
-      (vector-copy!
-        bubble-pos
-        *main-menu-camera-pos*)
+        (vector-copy!
+          bubble-pos
+          *main-menu-camera-pos*)
 
-      ;; Put bubbles in the same closer screen field as the fish.
-      (singlefish-vector-scale-safe!
-        bubble-offset
-        *main-menu-camera-forward*
-        (rand-vu-float-range
-          (meters 1.0)
-          (meters 6.0)))
+        (singlefish-vector-scale-safe!
+          bubble-offset
+          *main-menu-camera-forward*
+          (rand-vu-float-range
+            (meters 1.0)
+            (meters 6.0)))
 
-      (singlefish-vector-add-safe!
-        bubble-pos
-        bubble-pos
-        bubble-offset)
+        (singlefish-vector-add-safe!
+          bubble-pos
+          bubble-pos
+          bubble-offset)
 
-      (singlefish-vector-scale-safe!
-        bubble-offset
-        *main-menu-camera-right*
-        (rand-vu-float-range
-          (meters -8.0)
-          (meters 8.0)))
+        (singlefish-vector-scale-safe!
+          bubble-offset
+          *main-menu-camera-right*
+          (rand-vu-float-range
+            (meters -8.0)
+            (meters 8.0)))
 
-      (singlefish-vector-add-safe!
-        bubble-pos
-        bubble-pos
-        bubble-offset)
+        (singlefish-vector-add-safe!
+          bubble-pos
+          bubble-pos
+          bubble-offset)
 
-      (singlefish-vector-scale-safe!
-        bubble-offset
-        *main-menu-camera-up*
-        (rand-vu-float-range
-          (meters -8.0)
-          (meters -3.0)))
+        (singlefish-vector-scale-safe!
+          bubble-offset
+          *main-menu-camera-up*
+          (rand-vu-float-range
+            (meters -8.0)
+            (meters -3.0)))
 
-      (singlefish-vector-add-safe!
-        bubble-pos
-        bubble-pos
-        bubble-offset)
+        (singlefish-vector-add-safe!
+          bubble-pos
+          bubble-pos
+          bubble-offset)
 
-      ;; Keep menu bubbles in world space too. Part 3574 uses
-      ;; birth-func-camera-orient, so each 3D billboard faces the camera.
-      (launch-particles
-        :system *sp-particle-system-3d*
-        (-> *part-id-table* 3574)
-        bubble-pos))
+        ;; Keep menu bubbles in world space too. Part 3574 uses
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3574)
+          bubble-pos))
 
       (set!
         *main-menu-bubble-time*
@@ -715,10 +697,8 @@
         (set! *main-menu-music-resumed?* #t)
 
         ;; Progress/title menu was closed. Return to the visible
-        ;; Fishing Legacy / PRESS START state.
         (set! *main-menu-start-accepted?* #f)
 
-        ;; Consume the closing input so it cannot instantly reopen.
         (cpad-clear! 0 start)
         (cpad-clear! 0 x))))
 
@@ -774,8 +754,8 @@
     (when
       (and
         (and
-        (not *main-menu-start-accepted?*)
-        (not *main-menu-new-game-transition?*))
+          (not *main-menu-start-accepted?*)
+          (not *main-menu-new-game-transition?*))
         (>= *main-menu-made-by-time* 8.322))
 
       (draw-mod-menu-text-custom
@@ -789,8 +769,8 @@
     (when
       (and
         (and
-        (not *main-menu-start-accepted?*)
-        (not *main-menu-new-game-transition?*))
+          (not *main-menu-start-accepted?*)
+          (not *main-menu-new-game-transition?*))
         (>= *main-menu-made-by-time* 8.868))
 
       (draw-mod-menu-text-custom
@@ -804,8 +784,8 @@
     (when
       (and
         (and
-        (not *main-menu-start-accepted?*)
-        (not *main-menu-new-game-transition?*))
+          (not *main-menu-start-accepted?*)
+          (not *main-menu-new-game-transition?*))
         (>= *main-menu-made-by-time* 9.389))
 
       (draw-mod-menu-text-custom
@@ -819,12 +799,12 @@
     (when
       (and
         (and
-        (not *main-menu-start-accepted?*)
-        (not *main-menu-new-game-transition?*))
+          (not *main-menu-start-accepted?*)
+          (not *main-menu-new-game-transition?*))
         (>= *main-menu-made-by-time* 12.0))
 
       (when
-        (= 
+        (=
           (logand
             (the int (- *main-menu-made-by-time* 12.0))
             1)
@@ -838,8 +818,6 @@
           #t
           #f))
 
-      ;; On the custom main menu, Start/X open the title progress menu.
-      ;; Clear Start immediately so normal gameplay pause cannot open too.
       (when
         (and
           (not *main-menu-start-accepted?*)
@@ -893,7 +871,7 @@
 
         ((< *main-menu-made-by-time* 6.0)
           (let* ((transition
-                  (/ (- *main-menu-made-by-time* 4.0) 2.0))
+                (/ (- *main-menu-made-by-time* 4.0) 2.0))
 
               (back-strength
                 1.70158)
@@ -964,8 +942,6 @@
       *camera*
       (> (-> *camera* num-slaves) 0))
 
-    ;; This function is entered on the first unpaused frame that begins
-    ;; the custom camera transition, so stop the custom title music here.
     (stop-main-music)
 
     (set-master-mode 'game)
@@ -1027,11 +1003,8 @@
   (none))
 
 (defun main-menu-restore-gameplay-settings! ()
-  ;; Remove temporary settings owned by the main-menu update process.
   (main-menu-remove-owned-settings!)
 
-  ;; Progress changes master mode when opened. This is the important part
-  ;; required for the normal Start-button pause path to work again.
   (set-master-mode 'game)
 
   (set! *main-menu-saved-default-allow-pause* #t)
@@ -1088,7 +1061,6 @@
     (sound-group dialog)
     (-> *pc-settings* memcard-volume-dialog))
 
-  ;; Always return target execution after the custom menu has finished.
   (when *target*
     (process-release? *target*)
     (send-event *target* 'draw #t))
@@ -1175,7 +1147,6 @@
 
       (set-blackout-frames 0)
 
-      ;; Give target-warp-in time to run before returning camera control.
       (when
         (>= *main-menu-transition-warp-wait-time* 2.0)
 
@@ -1218,8 +1189,6 @@
       *target*
       *camera*)
 
-    ;; Saved-new-game initialization can release or reinitialize Jak.
-    ;; Reassert the grab every retail frame.
     (process-grab? *target*)
 
     (+!
@@ -1239,7 +1208,6 @@
           'teleport-to-vector-start-string
           *main-menu-camera-pos*)
 
-        ;; Reassert after the camera event.
         (set!
           (-> *target* control trans quad)
           (-> *main-menu-target-pos* quad)))
@@ -1254,7 +1222,7 @@
           (set! *main-menu-transition-fish-cleared?* #t))
 
         (let* ((pan-time
-                (- *main-menu-new-game-transition-time* 4.0))
+              (- *main-menu-new-game-transition-time* 4.0))
 
             (camera-linear-t
               (min
@@ -1294,8 +1262,6 @@
             *main-menu-saved-jak-pos*
             jak-smooth-t)
 
-          ;; The saved-game path may have replaced/released the target
-          ;; since the transition began.
           (process-grab? *target*)
 
           (set!
@@ -1307,7 +1273,6 @@
             'teleport-to-vector-start-string
             *main-menu-new-game-camera-current*)
 
-          ;; Reassert after camera/event processing.
           (set!
             (-> *target* control trans quad)
             (-> *main-menu-new-game-jak-current* quad))))
@@ -1341,8 +1306,6 @@
 
     (main-menu-restore-time-of-day!)
 
-    ;; Remove the zero-volume request from the process that created it,
-    ;; not from whichever process happens to be executing the load exit.
     (main-menu-remove-owned-settings!)
 
     (set! (-> *setting-control* default allow-pause) #t)

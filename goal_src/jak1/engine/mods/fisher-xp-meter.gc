@@ -9,7 +9,6 @@
 ;;   Fishing level: (-> *game-info* auto-save-count)
 ;;   Current XP:    (-> *game-info* total-deaths)
 ;;
-;; Fishing levels are clamped to 1-20. At level 20, catches award 0 XP.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define *fisher-xp-text*
@@ -44,8 +43,6 @@
 (define *fisher-xp-bar-flash-time* 0.0)
 (define *fisher-xp-level-bounce-time* 0.0)
 
-;; A level-up notice is queued while the XP meter fills, then handed to
-;; fisher-game after the meter reaches its final value.
 (define *fisher-level-up-window-pending?* #f)
 (define *fisher-level-up-window-request?* #f)
 (define *fisher-level-up-window-old-level* 1)
@@ -65,8 +62,6 @@
 (defun fisher-xp-needed-for-level
   ((level int))
 
-  ;; Level 1 -> 100 XP, level 2 -> 200 XP, and so on.
-  ;; Level 20 is capped and has no next-level requirement.
   (if
     (>= level *fisher-level-cap*)
     0
@@ -89,8 +84,6 @@
     (if
       (= safe-min safe-max)
       safe-min
-      ;; rand-vu-int-range uses an exclusive upper bound, so add one to make
-      ;; the configured table maximum reachable.
       (rand-vu-int-range safe-min (+ safe-max 1)))))
 
 (defun fisher-level-fight-multiplier
@@ -99,9 +92,6 @@
   (let ((difference
         (- fish-level jak-level)))
 
-    ;; Same level is exactly the old difficulty. Fish one or two levels below
-    ;; Jak also retain normal fight strength. Three or more levels below become
-    ;; progressively easier. Fish five or more levels above become near-impossible.
     (cond
       ((<= difference -7) 0.35)
       ((= difference -6) 0.42)
@@ -122,9 +112,8 @@
   ((fish-level int) (jak-level int))
 
   (let* ((safe-fish-level
-          (max 1 (min *fisher-level-cap* fish-level)))
+        (max 1 (min *fisher-level-cap* fish-level)))
 
-      ;; Higher-level fish have a modest intrinsic increase in value.
       (level-value
         (+
           1.0
@@ -133,8 +122,6 @@
       (levels-below
         (- jak-level safe-fish-level)))
 
-    ;; Value remains normal until the fish is at least five levels below Jak.
-    ;; At that point its worth is drastically reduced to discourage farming.
     (cond
       ((< levels-below 5) level-value)
       ((= levels-below 5) (* level-value 0.25))
@@ -170,7 +157,6 @@
 (defun fisher-xp-suffix-multiplier
   ((suffix int))
 
-  ;; Suffix 5 is MEGA/Legendary. Suffix 6 is Golden.
   (cond
     ((= suffix 5) 2.0)
     ((= suffix 6) 4.0)
@@ -275,7 +261,6 @@
       (-! current-xp needed)
       (+! level 1))
 
-    ;; XP beyond the level-20 threshold is discarded, and later catches give 0.
     (when (>= level *fisher-level-cap*)
       (-! awarded-xp current-xp)
       (set! current-xp 0)
@@ -284,9 +269,6 @@
     (set! (-> *game-info* auto-save-count) level)
     (set! (-> *game-info* total-deaths) current-xp)
 
-    ;; Direct REPL XP grants should also expose the notification. The normal
-    ;; catch animation converts this immediate request into a pending request
-    ;; until the XP meter has finished filling.
     (when
       (> level starting-level)
 
@@ -328,7 +310,7 @@
 
 (defun fisher-start-xp-gain-animation!
   ((world-pos vector)
-   (amount int))
+    (amount int))
 
   (when
     (> amount 0)
@@ -343,7 +325,6 @@
             (-> screen-points vector 0)
             world-pos)
 
-          ;; transform-point-qword! returns GS 12.4-style screen coordinates
           ;; centered around 32768. Convert them into the 512x448 UI space.
           (set!
             *fisher-xp-fly-start-x*
@@ -367,8 +348,6 @@
                     32768)
                   64))))
 
-          ;; Keep the number on-screen even when the displayed fish is close
-          ;; to the edge of the camera.
           (set!
             *fisher-xp-fly-start-x*
             (max 28
@@ -408,9 +387,6 @@
       (when
         (> awarded 0)
 
-        ;; The orb reward was already granted when the catch window closed,
-        ;; and fisher-add-fishing-xp! has now committed the XP. Save the
-        ;; complete catch rather than the pre-reward catch-display state.
         (auto-save-command
           'auto-save
           0
@@ -420,7 +396,6 @@
         (let ((new-level
               (fisher-current-level)))
 
-          ;; The old display level/XP were captured immediately before this call.
           (set! *fisher-xp-bar-remaining* (the float awarded))
           (set! *fisher-xp-bar-total* (the float awarded))
           (set! *fisher-xp-bar-flash-time* 0.0)
@@ -473,7 +448,7 @@
       (-> (current-frame) global-buf))
 
     (let* ((duration
-            0.72)
+          0.72)
 
         (progress
           (fmax
@@ -500,8 +475,6 @@
         (scale
           0.68))
 
-      ;; Hold briefly over the caught fish so the amount is readable, then
-      ;; accelerate sharply into the center of the XP meter.
       (when
         (> progress 0.16)
 
@@ -562,7 +535,7 @@
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
         (draw-string-xy-scaled
           *fisher-xp-gain-encoded-text*
@@ -611,7 +584,6 @@
             (set! *fisher-xp-fly-active?* #f)
             (set! *fisher-xp-fly-time* 0.72)
 
-            ;; Capture the old meter before committing the pending reward.
             (set! *fisher-xp-bar-display-level* old-level)
             (set! *fisher-xp-bar-display-xp* (the float old-xp))
 
@@ -622,9 +594,9 @@
 
     (when *fisher-xp-bar-anim-active?*
       (let* ((rate
-              (fmax
-                80.0
-                (/ *fisher-xp-bar-total* 0.90)))
+            (fmax
+              80.0
+              (/ *fisher-xp-bar-total* 0.90)))
 
           (step
             (fmin
@@ -651,7 +623,6 @@
 
           (+! *fisher-xp-bar-display-level* 1)
 
-          ;; Each crossed level restarts the level-number bounce.
           (set! *fisher-xp-level-bounce-time* 0.38))
 
         (when
@@ -660,8 +631,6 @@
           (set! *fisher-xp-bar-remaining* 0.0)
           (set! *fisher-xp-bar-anim-active?* #f)
 
-          ;; After the fill reaches its destination, fade the inner bar
-          ;; smoothly back from its bright impact color.
           (set! *fisher-xp-bar-flash-time* 0.30)
 
           (when
@@ -691,10 +660,10 @@
       (-> (current-frame) global-buf))
 
     (let* ((level
-            (if
-              *fisher-xp-bar-anim-active?*
-              *fisher-xp-bar-display-level*
-              (fisher-current-level)))
+          (if
+            *fisher-xp-bar-anim-active?*
+            *fisher-xp-bar-display-level*
+            (fisher-current-level)))
 
         (at-cap?
           (>= level *fisher-level-cap*))
@@ -768,9 +737,6 @@
                 0.42
                 (sin (* (degrees 180.0) bounce-progress)))))))
 
-      ;; Brighten only the filled inner portion while XP is moving.
-      ;; Once the fill reaches its target, flash-time fades that color back
-      ;; to the normal orange without drawing any box around the meter.
       (cond
         (*fisher-xp-bar-anim-active?*
           (when
@@ -853,9 +819,8 @@
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
-         (bucket-id subtitle))
+          (bucket-id subtitle))
 
-        ;; Normal frame.
         (draw-sprite2d-xy
           buf 114 204 284 20
           (new 'static 'rgba
@@ -880,7 +845,6 @@
             buf 118 208 fill-width 2
             fill-shine-color))
 
-        ;; The level number uses a scaled draw so it can bounce on level-up.
         (draw-string-xy-scaled
           *fisher-level-encoded-text*
           buf

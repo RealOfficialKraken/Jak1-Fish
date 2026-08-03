@@ -3,7 +3,6 @@
 (bundles "JUN.DGO" "GAME.CGO")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Shared assets, particles, skeleton groups, strings, drawing and vector helpers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defpart 3570
@@ -13,8 +12,6 @@
     (:num 1.0)
     (:scale-x (meters 0.08) (meters 0.10))
 
-    ;; Cancel the birth function's texture-specific quarter turn. This keeps
-    ;; the 3D lakedrop quad facing the camera instead of lying horizontally.
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:scale-y :copy scale-x)
@@ -60,33 +57,24 @@
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
 
-    ;; One deterministic 3D backdrop tile. No random ranges means no frame-to-
-    ;; frame scale changes and therefore no visible jitter.
     (:scale-x (meters 230.0))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:scale-y (meters 110.0))
 
-    ;; RGB is rewritten from the live underwater background before each launch.
-    ;; Keep alpha very low; bigpuff is naturally bright when layered over the
-    ;; opaque curtain.
     (:r 32.0)
     (:g 80.0)
     (:b 104.0)
     (:a 22.0)
 
-    ;; Absolutely no particle movement or scaling.
     (:vel-x 0.0)
     (:vel-y 0.0)
     (:vel-z 0.0)
     (:scalevel-x 0.0)
     (:scalevel-y 0.0)
 
-    ;; One render refresh. The session emitter submits the same exact tile
-    ;; after the curtain every underwater frame.
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
-
 
 (defpart 3575
   :init-specs
@@ -139,7 +127,6 @@
   ((sharkey-lod0-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 6))
 
-;; Scout-fly fish art. This uses the real buzzer skeleton and idle animation.
 (defskelgroup *buzzer-sgc*
   buzzer
   buzzer-lod0-jg
@@ -179,15 +166,13 @@
   ((catch-fishc-lod0-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 4))
 
-;; Rare-fish attachment clones. These use unique skeleton-group symbols so the
-;; fishing mod can tune and spawn them without changing the retail groups.
 (defskelgroup *towertop-sgc*
   towertop
   towertop-lod0-jg
   towertop-idle-ja
   ((towertop-lod0-mg (meters 20))
-   (towertop-lod1-mg (meters 40))
-   (towertop-lod2-mg (meters 999999)))
+    (towertop-lod1-mg (meters 40))
+    (towertop-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 30))
 
 (defskelgroup *oracle-sgc*
@@ -202,8 +187,8 @@
   money-lod0-jg
   money-idle-ja
   ((money-lod0-mg (meters 20))
-   (money-lod1-mg (meters 40))
-   (money-lod2-mg (meters 999999)))
+    (money-lod1-mg (meters 40))
+    (money-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 0.6)
   :texture-level 2)
 
@@ -306,7 +291,7 @@
     *pc-encoded-matt-str*)
   (with-dma-buffer-add-bucket
     ((buf (-> (current-frame) global-buf))
-     (bucket-id subtitle))
+      (bucket-id subtitle))
     (draw-string-xy-scaled
       *pc-encoded-matt-str*
       buf
@@ -380,8 +365,8 @@
 
 (defun fisher-draw-retail-line!
   ((line-start vector)
-   (line-end vector)
-   (line-color rgba))
+    (line-end vector)
+    (line-color rgba))
 
   ;; Restore the original continuous 3D debug-line renderer.
   (add-debug-line

@@ -3,29 +3,21 @@
 (bundles "JUN.DGO")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Engine hooks and dialogue compatibility globals/functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define *fisher-active-location-id* -1)
 
-;; Normal power-cell movies can leave Jak in clone/movie mode even after the
-;; temporary othercam disappears. Queue a repair from the real pickup hook and
-;; perform it only after the movie has been gone for two complete frames.
 (define *fisher-cell-repair-pending?* #f)
 (define *fisher-cell-repair-clear-frames* 0)
 
 (defun fisher-despawn-current-area! ()
   (when *fisher-game*
-    ;; fisher-game exists while the shoreline prompt is idle. Only perform
-    ;; modal fishing cleanup when Jak actually entered the fishing state.
     (when *fisher-session-active?*
       (set! *singlefish-session-active?* #f)
       (+! *singlefish-session-id* 1)
       (set! *fisher-background-cloud-visible?* #f)
       (set! *fisher-background-cloud-session-active?* #f)
       (set! *fisher-underwater-haze-override?* #f)
-      ;; Never disable *particles-flag* here. It is global engine state used
-      ;; by blue eco and other non-fishing particles.
       (set! *camera-read-analog* #t)
       (set! *external-cam-mode* #f)
       (remove-setting! 'music-volume)
@@ -56,7 +48,6 @@
 
 (defun fisher-spawn-area-for-level! ((level-name symbol))
   (cond
-    ;; Sandover Village.
     ((= level-name 'village1)
       (spawn-fisher-game
         0
@@ -81,7 +72,6 @@
 
       (set! *fisher-active-location-id* 0))
 
-    ;; Forbidden Jungle.
     ((= level-name 'jungle)
       (spawn-fisher-game
         1
@@ -106,7 +96,6 @@
 
       (set! *fisher-active-location-id* 1))
 
-    ;; Sentinel Beach pontoon.
     ((= level-name 'beach)
       (spawn-fisher-game
         3
@@ -131,7 +120,6 @@
 
       (set! *fisher-active-location-id* 3))
 
-    ;; Training lagoon.
     ((= level-name 'training)
       (spawn-fisher-game
         2
@@ -156,9 +144,6 @@
 
       (set! *fisher-active-location-id* 2))
 
-    ;; Misty Island pontoon fishing area. Camera angle is derived from the
-    ;; Fishnet->Camera horizontal vector; playfield angle is derived from the
-    ;; supplied target->facing-point vector.
     ((= level-name 'misty)
       (spawn-fisher-game
         4
@@ -210,8 +195,6 @@
         ((= (-> inside name) 'misty)
           (set! wanted-location-id 4))))
 
-    ;; Remove the process when Jak leaves a supported level or enters
-    ;; a different fishing level.
     (when
       (and
         *fisher-game*
@@ -221,7 +204,6 @@
 
       (fisher-despawn-current-area!))
 
-    ;; Spawn the fishing process for Jak's current level.
     (when
       (and
         (not *fisher-game*)
@@ -234,14 +216,12 @@
   (none))
 
 (defun runs-every-frame ()
-  ;;(increase-power-cell-by-one) This is a call to increase-power-cell-by-one defined in mod-common-functions.gc
   (if *show-input-display* (input-display-on) (input-display-off))
 
   (when in-main-menu?
     (main-menu-update!)
   )
 
-  ;; Spawn the custom pontoon once while the player is inside Training.
   (when
     (and
       *target*
@@ -253,10 +233,6 @@
     (maintain-misty-pontoon!)
     (maintain-fisher-game!)
 
-    ;; runs-on-cell-pickup is reliably called for the actual pickup, while a
-    ;; synthetic 'cutscene-end hook is not guaranteed to be called at all.
-    ;; Wait until othercam has stayed gone for two frames, then clear the
-    ;; leftover clone/movie mode and recreate only the idle fishing process.
     (when
       (and
         *fisher-cell-repair-pending?*
@@ -271,9 +247,6 @@
           (+! *fisher-cell-repair-clear-frames* 1)
 
           (when (>= *fisher-cell-repair-clear-frames* 2)
-            ;; The retail movie is over, but Jak may still be left in its
-            ;; clone-animation mode. This is the state a Jak reload was
-            ;; clearing and is what prevents fisher-game from grabbing him.
             (when *target*
               (send-event *target* 'blend-shape #f)
               (send-event *target* 'end-mode))
@@ -293,47 +266,47 @@
             (set! *fisher-cell-repair-pending?* #f)
             (set! *fisher-cell-repair-clear-frames* 0)))))
   )
-(when
-  (and
-    *level*
-    *target*
-    (= (pause-allowed?) #t)
-    (= (paused?) #f))
+  (when
+    (and
+      *level*
+      *target*
+      (= (pause-allowed?) #t)
+      (= (paused?) #f))
 
-  (let ((current-level
-        (-> (level-get-target-inside *level*) name)))
-    (when
-      (and
-        *fisher-man*
-        (!=
-          current-level
-          (-> *fisher-man* 0 level-name)))
+    (let ((current-level
+          (-> (level-get-target-inside *level*) name)))
+      (when
+        (and
+          *fisher-man*
+          (!=
+            current-level
+            (-> *fisher-man* 0 level-name)))
 
-      (kill-by-name "fisher-man" *active-pool*)
-      (set! *fisher-man* #f))
-    (when
-      (not *fisher-man*)
+        (kill-by-name "fisher-man" *active-pool*)
+        (set! *fisher-man* #f))
+      (when
+        (not *fisher-man*)
 
-      (cond
-        ((= current-level 'training)
-          (spawn-fisher-man
-            (new 'static 'vector
-              :x (meters -1307.8538)
-              :y (meters 7.4157)
-              :z (meters 1021.6666)
-              :w 1.0)
-            0
-            'training))
+        (cond
+          ((= current-level 'training)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters -1307.8538)
+                :y (meters 7.4157)
+                :z (meters 1021.6666)
+                :w 1.0)
+              0
+              'training))
 
-        ((= current-level 'village1)
-          (spawn-fisher-man
-            (new 'static 'vector
-              :x (meters -56.7375)
-              :y (meters 9.4762)
-              :z (meters 54.4226)
-              :w 1.0)
-            1
-            'village1))))))
+          ((= current-level 'village1)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters -56.7375)
+                :y (meters 9.4762)
+                :z (meters 54.4226)
+                :w 1.0)
+              1
+              'village1))))))
 
   ;; ensure orb-placer is spawned/killed as requested, debug menu is updated
   (when *debug-segment* (orb-placer-maintenance))
@@ -346,7 +319,6 @@
       ;; Code here runs only if the orb was from an orb cache
     )
     (when (not from-cache?)
-      ;; Code here runs only if the orb was NOT from an orb cache
   ))
   (none))
 
@@ -357,15 +329,11 @@
 (defun runs-on-cell-pickup ((cell-event symbol))
   (case cell-event
     (('pickup)
-      ;; Fishing's own carrier reward performs its cleanup inside the fishing
-      ;; exit state. Queue this repair only for ordinary world power cells.
       (when (not *fisher-power-cell-reward-active?*)
         (set! *fisher-cell-repair-pending?* #t)
         (set! *fisher-cell-repair-clear-frames* 0)))
 
     (('cutscene-end)
-      ;; Keep compatibility with builds that do emit this event, but let the
-      ;; frame-based repair above decide when othercam is truly finished.
       (when (not *fisher-power-cell-reward-active?*)
         (set! *fisher-cell-repair-pending?* #t)
         (set! *fisher-cell-repair-clear-frames* 0))))
@@ -392,14 +360,10 @@
         ;; Code here runs as soon as you pickup big green eco
     ))
     (when from-vent?
-      ;; Code here runs only if the eco was picked up from a vent
   ))
   (none))
 
 (defun runs-on-jak-spawn ()
-  ;; A same-level load/respawn must discard a genuinely active fishing
-  ;; session. Do not run modal cleanup merely because the idle prompt process
-  ;; exists; that was corrupting the normal HUD/camera before fishing began.
   (when
     (and *fisher-game* *fisher-session-active?*)
     (fisher-despawn-current-area!))
