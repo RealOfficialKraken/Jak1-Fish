@@ -72,6 +72,39 @@
     (:scalevel-x 0.0)
     (:scalevel-y 0.0)
 
+    (:timer (seconds 0.05))
+    (:flags (bit2 bit3))))
+
+
+
+;; Soft underwater light shafts.  These are deliberately true 3D sprites so
+;; they depth-test in front of the fishing curtain instead of disappearing
+;; behind the custom underwater background.
+(defpart 3580
+  :init-specs
+  ((:texture (bigpuff-half effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+
+    (:scale-x (meters 10.0))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:scale-y (meters 58.0))
+
+    (:r 178.0)
+    (:g 222.0)
+    (:b 242.0)
+    (:a 26.0)
+
+    (:vel-x 0.0)
+    (:vel-y 0.0)
+    (:vel-z 0.0)
+    (:scalevel-x 0.0)
+    (:scalevel-y 0.0)
+
+    ;; Re-submit once per frame.  This makes the rays disappear immediately
+    ;; when the camera leaves the water and prevents stale sheets lingering.
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
 

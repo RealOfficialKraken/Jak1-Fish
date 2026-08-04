@@ -6,6 +6,17 @@
 
 (define *fisher-background-cloud-visible?* #f)
 (define *fisher-background-cloud-session-active?* #f)
+(define *fisher-god-ray-x-0* (meters -34.0))
+(define *fisher-god-ray-x-1* (meters -17.0))
+(define *fisher-god-ray-x-2* (meters 1.0))
+(define *fisher-god-ray-x-3* (meters 21.0))
+(define *fisher-god-ray-x-4* (meters 38.0))
+(define *fisher-god-ray-reroll-0?* #t)
+(define *fisher-god-ray-reroll-1?* #t)
+(define *fisher-god-ray-reroll-2?* #t)
+(define *fisher-god-ray-reroll-3?* #t)
+(define *fisher-god-ray-reroll-4?* #t)
+
 (define *fisher-curtain-color-0a* (new 'static 'rgba :r #x1c :g #x70 :b #x8c :a #xff))
 (define *fisher-curtain-color-0b* (new 'static 'rgba :r #x20 :g #x7a :b #x94 :a #xff))
 (define *fisher-curtain-color-1a* (new 'static 'rgba :r #x16 :g #x60 :b #x80 :a #xff))
@@ -49,6 +60,9 @@
       curtain-yaw)
     (set!
       (-> *part-id-table* 3579 init-specs 5 initial-valuef)
+      curtain-yaw)
+    (set!
+      (-> *part-id-table* 3580 init-specs 5 initial-valuef)
       curtain-yaw))
   (none))
 
@@ -1337,6 +1351,75 @@
   (none)
 )
 
+(defun fisher-misty-curtain-color!
+  ((dst vector))
+
+  (let ((hour
+          (if
+            *time-of-day-context*
+            (-> *time-of-day-context* time)
+            12.0))
+
+        (blend 0.0))
+
+    (cond
+      ((and (>= hour 4.0) (< hour 7.0))
+        (set! blend (/ (- hour 4.0) 3.0))
+        (set! (-> dst x) (+ 16.0 (* (- 43.0 16.0) blend)))
+        (set! (-> dst y) (+ 78.0 (* (- 88.0 78.0) blend)))
+        (set! (-> dst z) (+ 91.0 (* (- 76.0 91.0) blend))))
+
+      ((and (>= hour 7.0) (< hour 9.0))
+        (set! blend (/ (- hour 7.0) 2.0))
+        (set! (-> dst x) 43.0)
+        (set! (-> dst y) (+ 88.0 (* (- 100.0 88.0) blend)))
+        (set! (-> dst z) (+ 76.0 (* (- 112.0 76.0) blend))))
+
+      ((and (>= hour 9.0) (< hour 12.0))
+        (set! blend (/ (- hour 9.0) 3.0))
+        (set! (-> dst x) (+ 43.0 (* (- 65.0 43.0) blend)))
+        (set! (-> dst y) (+ 100.0 (* (- 117.0 100.0) blend)))
+        (set! (-> dst z) (+ 112.0 (* (- 146.0 112.0) blend))))
+
+      ((and (>= hour 12.0) (< hour 15.0))
+        (set! (-> dst x) 65.0)
+        (set! (-> dst y) 117.0)
+        (set! (-> dst z) 146.0))
+
+      ((and (>= hour 15.0) (< hour 18.0))
+        (set! blend (/ (- hour 15.0) 3.0))
+        (set! (-> dst x) (+ 65.0 (* (- 54.0 65.0) blend)))
+        (set! (-> dst y) (+ 117.0 (* (- 95.0 117.0) blend)))
+        (set! (-> dst z) (+ 146.0 (* (- 86.0 146.0) blend))))
+
+      ((and (>= hour 18.0) (< hour 19.0))
+        (set! blend (- hour 18.0))
+        (set! (-> dst x) (+ 54.0 (* (- 9.0 54.0) blend)))
+        (set! (-> dst y) (+ 95.0 (* (- 58.0 95.0) blend)))
+        (set! (-> dst z) (+ 86.0 (* (- 94.0 86.0) blend))))
+
+      ((and (>= hour 19.0) (< hour 23.0))
+        (set! blend (/ (- hour 19.0) 4.0))
+        (set! (-> dst x) (+ 9.0 (* (- 11.0 9.0) blend)))
+        (set! (-> dst y) (+ 58.0 (* (- 46.0 58.0) blend)))
+        (set! (-> dst z) (+ 94.0 (* (- 78.0 94.0) blend))))
+
+      ((>= hour 23.0)
+        (set! blend (/ (- hour 23.0) 5.0))
+        (set! (-> dst x) (+ 11.0 (* (- 16.0 11.0) blend)))
+        (set! (-> dst y) (+ 46.0 (* (- 78.0 46.0) blend)))
+        (set! (-> dst z) (+ 78.0 (* (- 91.0 78.0) blend))))
+
+      (else
+        (set! blend (/ (+ hour 1.0) 5.0))
+        (set! (-> dst x) (+ 11.0 (* (- 16.0 11.0) blend)))
+        (set! (-> dst y) (+ 46.0 (* (- 78.0 46.0) blend)))
+        (set! (-> dst z) (+ 78.0 (* (- 91.0 78.0) blend)))))
+
+    (set! (-> dst w) 1.0))
+
+  dst)
+
 (defun fisher-background-color!
   ((dst vector))
 
@@ -1534,6 +1617,388 @@
 
 (defun fisher-update-background-mist!
   ((self fisher-game))
+
+  (none))
+
+
+(defun fisher-set-god-ray-particle!
+  ((width float)
+    (height float)
+    (roll float)
+    (alpha float))
+
+  (let ((ray-r
+        (+
+          (-> *fisher-underwater-haze-color* x)
+          (*
+            (- 255.0 (-> *fisher-underwater-haze-color* x))
+            0.62)))
+
+      (ray-g
+        (+
+          (-> *fisher-underwater-haze-color* y)
+          (*
+            (- 255.0 (-> *fisher-underwater-haze-color* y))
+            0.72)))
+
+      (ray-b
+        (+
+          (-> *fisher-underwater-haze-color* z)
+          (*
+            (- 255.0 (-> *fisher-underwater-haze-color* z))
+            0.82))))
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 3 initial-valuef)
+      width)
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 4 initial-valuef)
+      (degrees -90.0))
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 6 initial-valuef)
+      roll)
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 7 initial-valuef)
+      height)
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 8 initial-valuef)
+      ray-r)
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 9 initial-valuef)
+      ray-g)
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 10 initial-valuef)
+      ray-b)
+
+    (set!
+      (-> *part-id-table* 3580 init-specs 11 initial-valuef)
+      alpha))
+
+  (none))
+
+(defun fisher-submit-god-ray!
+  ((self fisher-game)
+    (lateral float)
+    (depth float)
+    (width float)
+    (height float)
+    (roll float)
+    (alpha float))
+
+  (let ((ray-forward
+        (new 'stack-no-clear 'vector))
+
+      (ray-side
+        (new 'stack-no-clear 'vector))
+
+      (ray-pos
+        (new 'stack-no-clear 'vector)))
+
+    (singlefish-vector-copy-safe!
+      ray-forward
+      (-> self camera-axis))
+
+    (set! (-> ray-forward y) 0.0)
+    (set! (-> ray-forward w) 0.0)
+    (vector-normalize! ray-forward 1.0)
+
+    (set! (-> ray-side x) (-> ray-forward z))
+    (set! (-> ray-side y) 0.0)
+    (set! (-> ray-side z) (- (-> ray-forward x)))
+    (set! (-> ray-side w) 0.0)
+    (vector-normalize! ray-side 1.0)
+
+    ;; Keep the rays behind the fish playfield, but well in front of both the
+    ;; mist sheet (86 m) and the solid curtain (92 m).
+    (vector+float*!
+      ray-pos
+      (-> self fisher-cam)
+      ray-forward
+      depth)
+
+    (vector+float*!
+      ray-pos
+      ray-pos
+      (-> self playfield-axis)
+      (meters 27.75))
+
+    (vector+float*!
+      ray-pos
+      ray-pos
+      ray-side
+      lateral)
+
+    ;; The bigpuff sprite's scale-y is its full height.  Centering it at half
+    ;; that distance below water keeps the top of every shaft at the surface.
+    (set!
+      (-> ray-pos y)
+      (-
+        (-> self water-level)
+        (* height 0.50)))
+
+    (set! (-> ray-pos w) 1.0)
+
+    (fisher-set-god-ray-particle!
+      width
+      height
+      roll
+      alpha)
+
+    (fisher-set-particle-fishbox-rotation! self)
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3580)
+      ray-pos))
+
+  (none))
+
+(defun fisher-submit-animated-god-ray!
+  ((self fisher-game)
+    (base-lateral float)
+    (depth float)
+    (width float)
+    (height float)
+    (roll float)
+    (max-alpha float)
+    (phase float))
+
+  (let ((cycle phase)
+        (progress 0.0)
+        (alpha 0.0)
+        (ray-x base-lateral))
+
+    (while
+      (>= cycle (degrees 360.0))
+      (-! cycle (degrees 360.0)))
+
+    (set!
+      progress
+      (/ cycle (degrees 360.0)))
+
+    ;; Pick a new X only while the ray is fully invisible at the beginning of
+    ;; a new cycle.  The chosen position remains fixed throughout the complete
+    ;; fade-in and fade-out, so there is no visible sliding or reposition pop.
+    (cond
+      ((= base-lateral (meters -34.0))
+        (when
+          (and
+            (< progress 0.08)
+            *fisher-god-ray-reroll-0?*)
+          (set!
+            *fisher-god-ray-x-0*
+            (+
+              (meters -42.0)
+              (* (meters 84.0) (rand-vu))))
+          (set! *fisher-god-ray-reroll-0?* #f))
+        (when (> progress 0.20)
+          (set! *fisher-god-ray-reroll-0?* #t))
+        (set! ray-x *fisher-god-ray-x-0*))
+
+      ((= base-lateral (meters -17.0))
+        (when
+          (and
+            (< progress 0.08)
+            *fisher-god-ray-reroll-1?*)
+          (set!
+            *fisher-god-ray-x-1*
+            (+
+              (meters -42.0)
+              (* (meters 84.0) (rand-vu))))
+          (set! *fisher-god-ray-reroll-1?* #f))
+        (when (> progress 0.20)
+          (set! *fisher-god-ray-reroll-1?* #t))
+        (set! ray-x *fisher-god-ray-x-1*))
+
+      ((= base-lateral (meters 1.0))
+        (when
+          (and
+            (< progress 0.08)
+            *fisher-god-ray-reroll-2?*)
+          (set!
+            *fisher-god-ray-x-2*
+            (+
+              (meters -42.0)
+              (* (meters 84.0) (rand-vu))))
+          (set! *fisher-god-ray-reroll-2?* #f))
+        (when (> progress 0.20)
+          (set! *fisher-god-ray-reroll-2?* #t))
+        (set! ray-x *fisher-god-ray-x-2*))
+
+      ((= base-lateral (meters 21.0))
+        (when
+          (and
+            (< progress 0.08)
+            *fisher-god-ray-reroll-3?*)
+          (set!
+            *fisher-god-ray-x-3*
+            (+
+              (meters -42.0)
+              (* (meters 84.0) (rand-vu))))
+          (set! *fisher-god-ray-reroll-3?* #f))
+        (when (> progress 0.20)
+          (set! *fisher-god-ray-reroll-3?* #t))
+        (set! ray-x *fisher-god-ray-x-3*))
+
+      (else
+        (when
+          (and
+            (< progress 0.08)
+            *fisher-god-ray-reroll-4?*)
+          (set!
+            *fisher-god-ray-x-4*
+            (+
+              (meters -42.0)
+              (* (meters 84.0) (rand-vu))))
+          (set! *fisher-god-ray-reroll-4?* #f))
+        (when (> progress 0.20)
+          (set! *fisher-god-ray-reroll-4?* #t))
+        (set! ray-x *fisher-god-ray-x-4*)))
+
+    ;; A genuinely seamless cycle with a fully invisible handoff window.
+    ;; Both eased sections reach zero velocity at their endpoints, so there is
+    ;; no brightness snap when fading changes direction or the cycle wraps.
+    (cond
+      ((< progress 0.10)
+        (set! alpha 0.0))
+
+      ((< progress 0.42)
+        (let* ((t
+                (/ (- progress 0.10) 0.32))
+
+              (smooth
+                (* t t (- 3.0 (* 2.0 t)))))
+
+          (set! alpha (* max-alpha smooth))))
+
+      ((< progress 0.88)
+        (let* ((t
+                (/ (- progress 0.42) 0.46))
+
+              (smooth
+                (* t t (- 3.0 (* 2.0 t)))))
+
+          (set! alpha (* max-alpha (- 1.0 smooth)))))
+
+      (else
+        (set! alpha 0.0)))
+
+    (fisher-submit-god-ray!
+      self
+      ray-x
+      depth
+      width
+      height
+      roll
+      alpha))
+
+  (none))
+
+(defun fisher-submit-god-rays!
+  ((self fisher-game))
+
+  (when
+    (and
+      *fisher-background-cloud-session-active?*
+      (-> self camera-underwater?))
+
+    (let ((dt
+          (-> *display* seconds-per-frame))
+
+        (hour
+          (if
+            *time-of-day-context*
+            (-> *time-of-day-context* time)
+            12.0))
+
+        (daylight 0.0)
+
+        (phase
+          (-> self background-mist-time)))
+
+      ;; God rays exist only during daytime.  They are fully disabled before
+      ;; 7:00 and at/after 18:00 rather than lingering through dawn or dusk.
+      (if
+        (and
+          (>= hour 7.0)
+          (< hour 18.0))
+        (set! daylight 1.0)
+        (set! daylight 0.0))
+
+      (+!
+        (-> self background-mist-time)
+        (* (degrees 60.0) dt))
+
+      (when
+        (>=
+          (-> self background-mist-time)
+          (degrees 360.0))
+
+        (-!
+          (-> self background-mist-time)
+          (degrees 360.0)))
+
+      (when (> daylight 0.0)
+        ;; Five overlapping shafts with different depths, widths and slow
+        ;; side-to-side drift.  They remain separate 3D sheets, creating mild
+        ;; parallax during the reel-camera zoom instead of behaving like HUD.
+        (fisher-submit-animated-god-ray!
+          self
+          (meters -34.0)
+          (meters 73.0)
+          (meters 11.0)
+          (meters 62.0)
+          (degrees -34.0)
+          (* daylight 30.0)
+          (+ (* phase 0.83) (degrees 35.0)))
+
+        (fisher-submit-animated-god-ray!
+          self
+          (meters -17.0)
+          (meters 76.0)
+          (meters 7.5)
+          (meters 56.0)
+          (degrees -28.0)
+          (* daylight 24.0)
+          (+ (* phase 1.07) (degrees 145.0)))
+
+        (fisher-submit-animated-god-ray!
+          self
+          (meters 1.0)
+          (meters 70.0)
+          (meters 14.0)
+          (meters 68.0)
+          (degrees -38.0)
+          (* daylight 34.0)
+          (+ (* phase 0.71) (degrees 250.0)))
+
+        (fisher-submit-animated-god-ray!
+          self
+          (meters 21.0)
+          (meters 75.0)
+          (meters 8.5)
+          (meters 54.0)
+          (degrees -30.0)
+          (* daylight 25.0)
+          (+ (* phase 1.13) (degrees 25.0)))
+
+        (fisher-submit-animated-god-ray!
+          self
+          (meters 38.0)
+          (meters 72.0)
+          (meters 12.0)
+          (meters 64.0)
+          (degrees -26.0)
+          (* daylight 28.0)
+          (+ (* phase 0.76) (degrees 185.0)))))
+
+  )
 
   (none))
 
@@ -5620,28 +6085,40 @@
       (set! (-> curtain-center y) (-> self water-level))
       (set! (-> curtain-center w) 1.0)
 
-      (set!
-        (-> curtain-color r)
-        (the uint8
-          (fmax
-            0.0
-            (fmin 255.0 (-> *fisher-underwater-haze-color* x)))))
+      (let ((active-curtain-color
+              (new 'stack-no-clear 'vector)))
 
-      (set!
-        (-> curtain-color g)
-        (the uint8
-          (fmax
-            0.0
-            (fmin 255.0 (-> *fisher-underwater-haze-color* y)))))
+        (if
+          (=
+            (-> self location-id)
+            (the-as int (fisher-zone misty-island)))
+          (fisher-misty-curtain-color! active-curtain-color)
+          (set!
+            (-> active-curtain-color quad)
+            (-> *fisher-underwater-haze-color* quad)))
 
-      (set!
-        (-> curtain-color b)
-        (the uint8
-          (fmax
-            0.0
-            (fmin 255.0 (-> *fisher-underwater-haze-color* z)))))
+        (set!
+          (-> curtain-color r)
+          (the uint8
+            (fmax
+              0.0
+              (fmin 255.0 (-> active-curtain-color x)))))
 
-      (set! (-> curtain-color a) #xff)
+        (set!
+          (-> curtain-color g)
+          (the uint8
+            (fmax
+              0.0
+              (fmin 255.0 (-> active-curtain-color y)))))
+
+        (set!
+          (-> curtain-color b)
+          (the uint8
+            (fmax
+              0.0
+              (fmin 255.0 (-> active-curtain-color z)))))
+
+        (set! (-> curtain-color a) #xff))
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
@@ -5742,7 +6219,8 @@
       (fisher-force-underwater-background!)
       (fisher-draw-background-curtain! self)
 
-      (fisher-submit-background-mist! self))
+      (fisher-submit-background-mist! self)
+      (fisher-submit-god-rays! self))
 
     (else
       (set!
