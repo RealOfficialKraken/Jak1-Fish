@@ -402,6 +402,7 @@
   (none))
 
 (defun runs-on-jak-spawn ()
+  (fisher-refill-lures!)
   ;; This callback can occur while level/art loading is still settling.
   ;; Queue cleanup instead of destroying process or art objects here.
   (when *fisher-game*
@@ -410,6 +411,9 @@
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
+  (case death-event
+    (('dying) (fisher-refill-lures!))
+    (('blackout) (fisher-refill-lures!)))
   ;; Do not walk or kill the fish/manipy process tree from a death or blackout
   ;; callback.  These callbacks may overlap the loader's art-record iteration.
   ;; Queue one delayed teardown instead.

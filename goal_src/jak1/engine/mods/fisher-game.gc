@@ -620,6 +620,8 @@
   (set! (-> self fish-scare-on-arrival?) #f)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
+  (set! (-> self skill-message) #f)
+  (set! (-> self skill-message-time) 0.0)
   (set! (-> self fish-approach-speed) 2.20)
   (set! (-> self buzzer-victory-pending?) #f)
   (set! (-> self caught-buzzer-count) 0)
@@ -1023,6 +1025,28 @@
 
   (none)
 )
+
+(defun fisher-draw-lure-count ()
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str "LURES ~D/~D" *fisher-lure-count* (fisher-lure-capacity))
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id subtitle))
+    ;; Place the count at the far-left edge directly above the skill cooldown
+    ;; bar.  Zero lures are red so the empty state is immediately obvious.
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      114
+      187
+      (if (= *fisher-lure-count* 0)
+        (font-color red)
+        (font-color white))
+      (font-flags large shadow kerning)
+      0.50))
+  (none))
 
 (defun fisher-reset-line-hp! ()
   (set! *fisher-line-hp* *fisher-line-hp-max*)
@@ -1703,6 +1727,8 @@
   (set! (-> self fish-state) 'free)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
+  (set! (-> self skill-message) #f)
+  (set! (-> self skill-message-time) 0.0)
   (set! (-> self reel-camera-blend) 0.0)
   (set! (-> self hooked-fish-poison-dps) 0.0)
   (fisher-clear-button-fight! self)
@@ -1728,6 +1754,113 @@
   (set! (-> self tug-line-active?) #f)
   (set! (-> self tug-line-time) 0.0)
   (set! (-> self bubble-time) -2.0)
+
+  (none))
+
+
+(defun fisher-begin-lure-stolen-return! ((self fisher-game))
+  ;; Losing a lure should not snap the camera back to Jak.  Keep the current
+  ;; lure position long enough for the camera to follow it back to the normal
+  ;; reeling point, then blend smoothly to the before-cast camera.
+  (when (!= (-> self cast-state) 'lure-stolen-return)
+    (fisher-lose-lure!)
+    (fisher-clear-button-fight! self)
+    (set! (-> self cast-state) 'lure-stolen-return)
+    (set! (-> self camera-state) 'lure-stolen-lure-return)
+    (set! (-> self cast-time) 0.0)
+    (set! (-> self fish-state) 'free)
+    (set! (-> self hooked-fish) #f)
+    (set! (-> self hooked-fish-slot) -1)
+    (set! (-> self fish-fighting?) #f)
+    (set! (-> self hooked-fish-poison-dps) 0.0)
+    (set! (-> self reel-camera-blend) 0.0)
+    (set! (-> self lure-x-velocity) 0.0)
+    (set! (-> self lure-y-velocity) 0.0)
+    (set! (-> self fish-message) "LURE STOLEN")
+    (set! (-> self fish-message-time) 1.75)
+
+    ;; The hook/lure disappears immediately, but the invisible lure position
+    ;; continues moving so the camera can complete a natural return.
+    (fisher-remove-lure-snake! self))
+
+  (none))
+
+(defun fisher-camera-lure-stolen-return! ((self fisher-game))
+  (when (and *camera* (> (-> *camera* num-slaves) 0))
+    (let ((cam-slave (-> *camera* slave 0 0))
+        (desired-camera (new 'stack-no-clear 'vector))
+        (desired-look (new 'stack-no-clear 'vector))
+        (current-camera (new 'stack-no-clear 'vector))
+        (blended-camera (new 'stack-no-clear 'vector))
+        (forward (new 'stack-no-clear 'vector))
+        (blend 0.0))
+
+      (cond
+        ((= (-> self location-id) 1)
+          (vector-copy! desired-camera (-> self fisher-cam)))
+        (else
+          (vector+float*! desired-camera (-> self pos) (-> self camera-axis) (- (-> self camera-radius)))
+          (set! (-> desired-camera y) (-> self fisher-cam y))
+          (set! (-> desired-camera w) 1.0)))
+
+      (vector-copy! desired-look (-> self pos))
+      (+! (-> desired-look y) (meters 1.0))
+      (set! (-> desired-look w) 1.0)
+
+      (+! (-> self cast-time) (/ (-> *display* seconds-per-frame) 0.70))
+      (when (> (-> self cast-time) 1.0)
+        (set! (-> self cast-time) 1.0))
+
+      (set! blend (parameter-ease-sin-clamp (-> self cast-time)))
+      (vector-copy! current-camera (-> cam-slave trans))
+      (vector-lerp! blended-camera current-camera desired-camera blend)
+      (set! (-> cam-slave saved-pt quad) (-> blended-camera quad))
+      (set! (-> cam-slave trans quad) (-> blended-camera quad))
+
+      (vector-! forward desired-look blended-camera)
+      (vector-normalize! forward 1.0)
+      (forward-down->inv-matrix (-> cam-slave tracking inv-mat) forward (-> *camera* local-down))))
+
+  (>= (-> self cast-time) 1.0))
+
+(defun fisher-update-lure-stolen-return! ((self fisher-game))
+  (let ((dt (-> *display* seconds-per-frame)))
+    (cond
+      ((= (-> self camera-state) 'lure-stolen-lure-return)
+        (let ((return-pos (new 'stack-no-clear 'vector))
+            (to-return (new 'stack-no-clear 'vector))
+            (distance 0.0)
+            (step (* (meters 15.0) dt)))
+
+          ;; This is the normal reel-in point immediately in front of Jak.
+          (vector+float*! return-pos (-> self fishing-player-pos) (-> self playfield-axis) (meters 1.55))
+          (+! (-> return-pos y) (meters 1.15))
+          (set! (-> return-pos w) 1.0)
+
+          (vector-! to-return return-pos (-> self lure-pos))
+          (set! distance (vector-length to-return))
+
+          (cond
+            ((<= distance step)
+              (vector-copy! (-> self lure-pos) return-pos)
+              (set! (-> self camera-state) 'lure-stolen-camera-return)
+              (set! (-> self cast-time) 0.0))
+            (else
+              (vector-normalize! to-return 1.0)
+              (vector+float*! (-> self lure-pos) (-> self lure-pos) to-return step)))
+
+          (fisher-camera-follow-lure! self)
+          (fisher-update-underwater-background! self)
+          (fisher-update-camera-bubbles! self)))
+
+      ((= (-> self camera-state) 'lure-stolen-camera-return)
+        (fisher-update-underwater-background! self)
+        (fisher-update-camera-bubbles! self)
+
+        (when (fisher-camera-lure-stolen-return! self)
+          (fisher-reset-cast! self)
+          (set! (-> self fish-message) "LURE STOLEN")
+          (set! (-> self fish-message-time) 1.75)))))
 
   (none))
 
@@ -2420,21 +2553,27 @@
 
   (none))
 
-(defun singlefish-fail-hook! ((self singlefish-base))
-  (let ((owner (the-as fisher-game (-> self owner)))
+(defun fisher-species-snap-on-bite? ((species int))
+  (when
+    (and
+      (>= species 0)
+      (< species *fisher-species-count*))
+    (return
+      (-> (fisher-species-info-for species) snap-on-bite?)))
+  #f)
 
-      (lurker-shark?
-        (or
-          (string= (-> self species-name) "Lurker Shark")
-          (string= (-> self species-name) "FIRE CANYON CELL SHARK"))))
+(defun singlefish-fail-hook! ((self singlefish-base))
+  (let* ((owner (the-as fisher-game (-> self owner)))
+
+      (snap-on-bite?
+        (fisher-species-snap-on-bite?
+          (fisher-fish-species owner (-> owner hooked-fish-slot)))))
 
     (when (= (-> owner hooked-fish) self) (set! (-> owner hooked-fish) #f) (set! (-> owner fish-state) 'free))
 
     (cond
-      (lurker-shark?
-        (fisher-reset-cast! owner)
-        (set! (-> owner fish-message) "LURE STOLEN")
-        (set! (-> owner fish-message-time) 1.75))
+      (snap-on-bite?
+        (fisher-begin-lure-stolen-return! owner))
 
       (else
         (set! (-> owner fish-message) "SCARED OFF")
@@ -2483,9 +2622,7 @@
 
 (defun singlefish-break-line! ((self singlefish-base))
   (let ((owner (the-as fisher-game (-> self owner))))
-    (fisher-reset-cast! owner)
-    (set! (-> owner fish-message) "LINE BROKEN")
-    (set! (-> owner fish-message-time) 1.75)
+    (fisher-begin-lure-stolen-return! owner)
     (set! (-> self fighting?) #f)
     (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
     (set! (-> self turning?) #f)
@@ -3004,6 +3141,7 @@
                 (-> fish 0 self))))
 
           (send-event fish-proc 'anim-mode 'loop)
+          (fisher-randomize-manipy-anim-frame! fish-proc)
 
           (send-event fish-proc 'max-vis-dist (meters 999999.0))
 
@@ -3028,14 +3166,17 @@
 
       (slot (-> self hooked-fish-slot))
 
-      (fish (if (>= slot 0) (fisher-fish-pointer self slot) (the-as (pointer manipy) #f)))
+      (fish
+        (if
+          (>= slot 0)
+          (fisher-fish-pointer self slot)
+          (the-as (pointer manipy) #f)))
 
-      (jak-pos (new 'stack-no-clear 'vector))
-
+      (catch-target (new 'stack-no-clear 'vector))
       (delta (new 'stack-no-clear 'vector))
-
-      (distance
-        0.0))
+      (surface-y (+ (-> self water-level) (meters 0.65)))
+      (distance 0.0)
+      (surfaced? #f))
 
     (+! (-> self catch-transition-time) dt)
 
@@ -3048,14 +3189,15 @@
           (camera-blend (fmin 1.0 (* dt 3.2)))
 
           (camera-pos (new 'stack-no-clear 'vector))
+          (camera-forward (new 'stack-no-clear 'vector)))
 
-          (camera-forward
-            (new 'stack-no-clear 'vector)))
-
-        (vector-lerp! camera-pos (-> cam-slave trans) (-> self fisher-cam) camera-blend)
+        (vector-lerp!
+          camera-pos
+          (-> cam-slave trans)
+          (-> self fisher-cam)
+          camera-blend)
 
         (set! (-> cam-slave saved-pt quad) (-> camera-pos quad))
-
         (set! (-> cam-slave trans quad) (-> camera-pos quad))
 
         (vector-! camera-forward (-> self fisher-look) camera-pos)
@@ -3075,16 +3217,35 @@
             (the-as manipy
               (-> fish 0 self))))
 
-        (vector-copy! jak-pos (target-pos 0))
+        ;; First make the actual hooked fish break the surface.  Only after it
+        ;; is visibly above the water does it travel toward Jak and become the
+        ;; loot-window display fish.
+        (set! surfaced?
+          (>=
+            (-> fish-proc root trans y)
+            (- surface-y (meters 0.08))))
 
-        (+! (-> jak-pos y) (meters 1.15))
+        (cond
+          (surfaced?
+            (vector-copy! catch-target (target-pos 0))
+            (+! (-> catch-target y) (meters 1.15)))
 
-        (vector-! delta jak-pos (-> fish-proc root trans))
+          (else
+            (vector-copy! catch-target (-> fish-proc root trans))
+            (set! (-> catch-target y) surface-y)
+            (set! (-> catch-target w) 1.0)))
 
+        (vector-! delta catch-target (-> fish-proc root trans))
         (set! distance (singlefish-vector-length-safe delta))
 
         (when (> distance (meters 0.001))
-          (singlefish-vector-normalize-safe! delta (fmin distance (* (meters 12.0) dt)))
+          (singlefish-vector-normalize-safe!
+            delta
+            (fmin
+              distance
+              (*
+                (if surfaced? (meters 12.0) (meters 18.0))
+                dt)))
 
           (vector+!
             (-> fish-proc root trans)
@@ -3092,12 +3253,12 @@
             delta))
 
         (when
-          (or (<= distance (meters 0.30)) (>= (-> self catch-transition-time) 2.0))
+          (or
+            (and surfaced? (<= distance (meters 0.30)))
+            (>= (-> self catch-transition-time) 4.5))
 
           (fisher-destroy-manipy! fish)
-
           (fisher-set-fish-pointer! self slot (the-as (pointer manipy) #f))
-
           (fisher-spawn-catch-display-fish! self)
 
           (set! (-> self fish-state) 'catch-enter)
@@ -3628,6 +3789,12 @@
 
   (none))
 
+(defun fisher-show-lure-skill-message!
+  ((self fisher-game) (message string))
+  (set! (-> self skill-message) message)
+  (set! (-> self skill-message-time) 1.10)
+  (none))
+
 (defun fisher-update-ability-cooldowns! ((self fisher-game))
   (let ((dt (-> *display* seconds-per-frame)))
     (when (> (-> self lure-stop-cooldown) 0.0)
@@ -3654,6 +3821,8 @@
       (and
         (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
         (= (-> self fish-state) 'reeling)
+        (not (-> self fish-fighting?))
+        (not (-> self button-fight-data active?))
         (<= (-> self tug-line-cooldown) 0.0)
         (not (-> self tug-line-active?))
         (cpad-pressed? 0 l1))
@@ -3661,7 +3830,9 @@
       (cpad-clear! 0 l1)
       (set! (-> self tug-line-active?) #t)
       (set! (-> self tug-line-time) *fisher-tug-line-active-seconds*)
-      (set! (-> self tug-line-cooldown) *fisher-tug-line-cooldown-seconds*))
+      (set! (-> self tug-line-cooldown) *fisher-tug-line-cooldown-seconds*)
+      (play-sound-file "bwoop.wav" (the int (-> *setting-control* current sfx-volume)))
+      (fisher-show-lure-skill-message! self "FAST REEL"))
 
     (when
       (-> self tug-line-active?)
@@ -3843,6 +4014,8 @@
       (and
         (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
         (<= (-> self lure-stop-cooldown) 0.0)
+        (!= (-> self fish-state) 'reeling)
+        (not (-> self fish-fighting?))
         (not (-> self lure-stop-active?))
         (not (-> self lure-sink-active?))
         (cpad-pressed? 0 square))
@@ -3852,6 +4025,8 @@
       (set! (-> self lure-stop-used?) #t)
       (set! (-> self lure-stop-time) *fisher-stop-lure-active-seconds*)
       (set! (-> self lure-stop-cooldown) *fisher-stop-lure-cooldown-seconds*)
+      (play-sound-file "bwoop.wav" (the int (-> *setting-control* current sfx-volume)))
+      (fisher-show-lure-skill-message! self "FREEZE LURE")
       (set! (-> self lure-x-velocity) 0.0)
       (set! (-> self lure-y-velocity) 0.0))
 
@@ -3859,6 +4034,8 @@
       (and
         (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
         (<= (-> self lure-sink-cooldown) 0.0)
+        (!= (-> self fish-state) 'reeling)
+        (not (-> self fish-fighting?))
         (not (-> self lure-sink-active?))
         (not (-> self lure-stop-active?))
         (cpad-pressed? 0 r1))
@@ -3867,7 +4044,9 @@
       (set! (-> self lure-sink-active?) #t)
       (set! (-> self lure-sink-used?) #t)
       (set! (-> self lure-sink-time) *fisher-sink-lure-active-seconds*)
-      (set! (-> self lure-sink-cooldown) *fisher-sink-lure-cooldown-seconds*))
+      (set! (-> self lure-sink-cooldown) *fisher-sink-lure-cooldown-seconds*)
+      (play-sound-file "bwoop.wav" (the int (-> *setting-control* current sfx-volume)))
+      (fisher-show-lure-skill-message! self "SINK LURE"))
 
     (when
       (cpad-hold? 0 x)
@@ -4378,9 +4557,7 @@
         (when (>= (-> data slot i y) 448.0)
           (fisher-clear-button-fight! self)
           (fisher-fish-scared-off! self slot)
-          (fisher-reset-cast! self)
-          (set! (-> self fish-message) "LURE STOLEN")
-          (set! (-> self fish-message-time) 1.75)
+          (fisher-begin-lure-stolen-return! self)
           (return #t))))
 
     (when (<= (-> data remaining) 0)
@@ -4449,12 +4626,10 @@
     (cond
       (*fisher-line-broken?*
         (let ((slot (-> self hooked-fish-slot)))
-          (fisher-reset-cast! self)
-          (set! (-> self fish-message) "POISON BROKE THE LINE")
-          (set! (-> self fish-message-time) 1.75)
-
           (when (>= slot 0)
-            (fisher-fish-scared-off! self slot))))
+            (fisher-fish-scared-off! self slot))
+
+          (fisher-begin-lure-stolen-return! self)))
 
       ((-> self fish-fighting?)
         (let* ((slot (-> self hooked-fish-slot))
@@ -4478,14 +4653,17 @@
           (cond
             (button-fight?
               (unless (fisher-update-button-fight! self)
-                (when (-> self fish-fighting?)
+                ;; Button fights no longer drain line HP passively.  Full
+                ;; fight damage is applied only while an incorrect button is
+                ;; still being held.
+                (when
+                  (and
+                    (-> self fish-fighting?)
+                    (nonzero? (-> self button-fight-data wrong-mask)))
                   (fisher-damage-line!
                     (*
                       (fisher-fight-damage-per-second self slot)
-                      (if
-                        (nonzero? (-> self button-fight-data wrong-mask))
-                        (-> info button-miss-scale)
-                        (-> info button-damage-scale))
+                      (-> info button-miss-scale)
                       dt)))))
 
             ((cpad-hold? 0 x)
@@ -4496,12 +4674,11 @@
 
           (when *fisher-line-broken?*
             (fisher-clear-button-fight! self)
-            (fisher-reset-cast! self)
-            (set! (-> self fish-message) "LINE BROKEN")
-            (set! (-> self fish-message-time) 1.75)
 
             (when (>= slot 0)
-              (fisher-fish-scared-off! self slot)))))
+              (fisher-fish-scared-off! self slot))
+
+            (fisher-begin-lure-stolen-return! self))))
 
       (else
         (fisher-update-lure! self)
@@ -4596,10 +4773,8 @@
                           (set!
                             (-> self fish-hook-time)
                             (if
-                              (or
-                                (= (fisher-fish-species self slot) 3)
-                                (= (fisher-fish-species self slot)
-                                  (the-as int (fisher-species fire-canyon-cellfish))))
+                              (fisher-species-snap-on-bite?
+                                (fisher-fish-species self slot))
                               0.45
                               1.15))
 
@@ -4623,15 +4798,12 @@
                     (<= (-> self fish-hook-time) 0.0)
 
                     (cond
-                      ((or
-                          (= (fisher-fish-species self slot) 3)
-                          (= (fisher-fish-species self slot)
-                            (the-as int (fisher-species fire-canyon-cellfish))))
-                        ;; Aggressive sharks take the lure when the hook window expires.
+                      ((fisher-species-snap-on-bite?
+                          (fisher-fish-species self slot))
+                        ;; Species with snap-on-bite enabled steal the lure when
+                        ;; their hook window expires.
                         (fisher-fish-scared-off! self slot)
-                        (fisher-reset-cast! self)
-                        (set! (-> self fish-message) "LURE STOLEN")
-                        (set! (-> self fish-message-time) 1.75))
+                        (fisher-begin-lure-stolen-return! self))
 
                       (else
                         (fisher-fish-scared-off!
@@ -4679,8 +4851,14 @@
                         (not (-> self fish-fighting?)))
 
                       (cond
-                        ((rand-vu-percent? 0.25)
+                        ((rand-vu-percent? (-> info fight-chance))
                           (fisher-play-random-fight-sound!)
+                          (set! (-> self lure-stop-active?) #f)
+                          (set! (-> self lure-stop-time) 0.0)
+                          (set! (-> self lure-sink-active?) #f)
+                          (set! (-> self lure-sink-time) 0.0)
+                          (set! (-> self tug-line-active?) #f)
+                          (set! (-> self tug-line-time) 0.0)
                           (set! (-> self fish-fighting?) #t)
                           (set! (-> self fish-fight-phase) 0.0)
                           (set! (-> self fish-fight-base-y) (-> self lure-pos y))
@@ -4836,8 +5014,97 @@
 
   (none))
 
+(defun fisher-world-to-screen!
+  ((self fisher-game) (world-pos vector) (screen-pos vector))
+
+  (let ((camera-pos (new 'stack-no-clear 'vector))
+      (camera-look (new 'stack-no-clear 'vector))
+      (forward (new 'stack-no-clear 'vector))
+      (right (new 'stack-no-clear 'vector))
+      (up (new 'stack-no-clear 'vector))
+      (relative (new 'stack-no-clear 'vector))
+      (depth 0.0))
+
+    (cond
+      ((and *camera* (> (-> *camera* num-slaves) 0))
+        (vector-copy! camera-pos (-> *camera* slave 0 0 trans)))
+      (else
+        (vector-copy! camera-pos (-> self fisher-cam))))
+
+    (cond
+      ((or
+          (= (-> self camera-state) 'lure-camera)
+          (= (-> self camera-state) 'reel-camera))
+        (vector-copy! camera-look (-> self lure-camera-look)))
+      (else
+        (vector-copy! camera-look (-> self fisher-look))))
+
+    (singlefish-vector-sub-safe! forward camera-look camera-pos)
+    (when
+      (<= (singlefish-vector-length-safe forward) (meters 0.001))
+      (singlefish-vector-copy-safe! forward (-> self playfield-axis)))
+    (singlefish-vector-normalize-safe! forward 1.0)
+
+    (singlefish-vector-cross-safe! right forward (-> *camera* local-down))
+    (singlefish-vector-normalize-safe! right 1.0)
+
+    (singlefish-vector-cross-safe! up right forward)
+    (singlefish-vector-normalize-safe! up 1.0)
+
+    (singlefish-vector-sub-safe! relative world-pos camera-pos)
+    (set! depth (vector-dot relative forward))
+
+    (when (> depth (meters 0.10))
+      (set! (-> screen-pos x) (+ 256.0 (* 387.0 (/ (vector-dot relative right) depth))))
+      (set! (-> screen-pos y) (- 204.0 (* 387.0 (/ (vector-dot relative up) depth))))
+      (set! (-> screen-pos z) depth)
+      (set! (-> screen-pos w) 1.0)
+      (return #t)))
+
+  #f)
+
+(defun fisher-draw-approaching-question! ((self fisher-game))
+  (when
+    (and
+      (= (-> self fish-state) 'approaching)
+      (>= (-> self hooked-fish-slot) 0)
+      (-> self camera-underwater?))
+
+    (let ((fish (fisher-fish-pointer self (-> self hooked-fish-slot))))
+      (when (and fish (-> fish 0 self))
+        (let ((head-pos (new 'stack-no-clear 'vector))
+            (screen-pos (new 'stack-no-clear 'vector)))
+
+          (vector-copy!
+            head-pos
+            (-> (the-as manipy (-> fish 0 self)) root trans))
+
+          ;; Keep the glyph above the fish rather than over its body.  This is
+          ;; a world-space offset, so it follows every movement during approach.
+          (+! (-> head-pos y) (meters 0.72))
+          (set! (-> head-pos w) 1.0)
+
+          (when (fisher-world-to-screen! self head-pos screen-pos)
+            (let ((screen-x (the int (-> screen-pos x)))
+                (screen-y (the int (-> screen-pos y))))
+              (when
+                (and
+                  (> screen-x -32)
+                  (< screen-x 544)
+                  (> screen-y -32)
+                  (< screen-y 440))
+                (draw-fisher-large-font-scaled
+                  "?"
+                  screen-x
+                  screen-y
+                  0.72))))))))
+
+  (none))
+
 (defun fisher-update-all-fish-debug! ((self fisher-game))
   (dotimes (i 22) (fisher-update-gameplay-fish-one! self i (fisher-fish-pointer self i)))
+
+  (fisher-draw-approaching-question! self)
 
   (none))
 
@@ -5815,10 +6082,14 @@
         (= (-> self fish-state) 'approaching)
         (cpad-pressed? 0 x))
 
+      ;; Pressing X too early scares the fish immediately from its current
+      ;; mid-approach position.  Do not let it finish swimming to the lure
+      ;; before reacting.
       (cpad-clear! 0 x)
-      (set!
-        (-> self fish-scare-on-arrival?)
-        #t))
+      (when (>= (-> self hooked-fish-slot) 0)
+        (fisher-fish-scared-off!
+          self
+          (-> self hooked-fish-slot))))
 
     ((and
         (= (-> self fish-state) 'hook-window)
@@ -5846,6 +6117,12 @@
       (set! (-> self fish-hook-time) 0.65)
       (set! (-> self fish-fight-time) 0.0)
       (set! (-> self fish-fighting?) #f)
+      (set! (-> self lure-stop-active?) #f)
+      (set! (-> self lure-stop-time) 0.0)
+      (set! (-> self lure-sink-active?) #f)
+      (set! (-> self lure-sink-time) 0.0)
+      (set! (-> self tug-line-active?) #f)
+      (set! (-> self tug-line-time) 0.0)
       (fisher-clear-button-fight! self))
 
     ((and
@@ -5939,6 +6216,31 @@
 
   (none))
 
+
+
+
+
+(defun fisher-draw-lure-skill-message! ((self fisher-game))
+  (when (> (-> self skill-message-time) 0.0)
+    (when (-> self skill-message)
+      ;; Skill activations use the same centered hint position as the other
+      ;; fishing status and hook prompts.  Keep the existing compact scale.
+      (draw-fisher-large-font-scaled
+        (the-as string (-> self skill-message))
+        256
+        116
+        0.38))
+
+    (-!
+      (-> self skill-message-time)
+      (-> *display* seconds-per-frame))
+
+    (when (<= (-> self skill-message-time) 0.0)
+      (set! (-> self skill-message-time) 0.0)
+      (set! (-> self skill-message) #f)))
+
+  (none))
+
 (defun fisher-draw-fish-status! ((self fisher-game))
   (when (> (-> self fish-message-time) 0.0)
     (when
@@ -5963,14 +6265,6 @@
       (set! (-> self fish-message) #f)))
 
   (cond
-    ((= (-> self fish-state) 'approaching)
-      (draw-mod-menu-text-custom
-        "?"
-        256
-        116
-        #f
-        #t
-        #f))
 
     ((= (-> self fish-state) 'hook-window)
       (draw-mod-menu-text-custom
@@ -6289,13 +6583,16 @@
     ((= (-> self cast-state) 'ready)
       (fisher-restore-normal-background!)
 
-      (draw-mod-menu-text-custom "PRESS <PAD_X> TO CAST" 256 160 #f #t #f)
+      (if (> *fisher-lure-count* 0)
+        (draw-mod-menu-text-custom "PRESS <PAD_X> TO CAST" 256 160 #f #t #f)
+        (draw-mod-menu-text-custom "OUT OF LURES" 256 160 #f #t #f))
 
       (when (cpad-pressed? 0 x)
         (cpad-clear! 0 x)
-        (set! (-> self cast-state) 'charging)
-        (set! (-> self cast-charge) 0.0)
-        (set! (-> self cast-charge-direction) 1.0)))
+        (when (> *fisher-lure-count* 0)
+          (set! (-> self cast-state) 'charging)
+          (set! (-> self cast-charge) 0.0)
+          (set! (-> self cast-charge-direction) 1.0))))
 
     ((= (-> self cast-state) 'charging)
       (fisher-restore-normal-background!)
@@ -6353,6 +6650,9 @@
       (fisher-draw-line-hp-bar)
       (fisher-draw-line! self))
 
+    ((= (-> self cast-state) 'lure-stolen-return)
+      (fisher-update-lure-stolen-return! self))
+
     ((= (-> self cast-state) 'power-cell-ui-wait)
       (fisher-restore-normal-background!)
 
@@ -6399,7 +6699,9 @@
       (fisher-draw-skill-cooldowns! self)))
 
   (fisher-draw-fish-status! self)
+  (fisher-draw-lure-skill-message! self)
   (fisher-draw-button-fight! self)
+  (fisher-draw-lure-count)
   (fisher-draw-fishing-clock!)
   (none))
 

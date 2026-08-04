@@ -20,12 +20,12 @@
     (:b 255.0)
     (:a 88.0)
     (:vel-x (meters -0.00002) (meters 0.00004))
-    (:vel-y (meters 0.000025) (meters 0.000025))
+    (:vel-y (meters 0.0011667) (meters 0.0025))
     (:vel-z (meters -0.00002) (meters 0.00004))
     (:scalevel-x (meters 0.00001))
     (:scalevel-y :copy scalevel-x)
     (:fade-a -0.025)
-    (:timer (seconds 30.0))
+    (:timer (seconds 8.0))
     (:flags (bit2 bit3))))
 
 (defpart 3571
@@ -42,7 +42,7 @@
     (:b 255.0)
     (:a 112.0)
     (:vel-x (meters -0.006) (meters 0.012))
-    (:vel-y (meters 0.002) (meters 0.006))
+    (:vel-y (meters 0.0006667) (meters 0.002))
     (:vel-z (meters -0.006) (meters 0.012))
     (:scalevel-x (meters 0.00008))
     (:scalevel-y :copy scalevel-x)

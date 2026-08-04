@@ -74,6 +74,7 @@
     (none)))
 
 (defun fisher-set-normal-fight-info! ((info fisher-species-info))
+  (set! (-> info fight-chance) 0.25)
   (set! (-> info fight-mode) 0)
   (set! (-> info fight-pull-speed) (meters 1.35))
   (set! (-> info fight-recover-min) 0.75)
@@ -86,6 +87,7 @@
   (set! (-> info button-gravity) 0.0)
   (set! (-> info button-damage-scale) 1.0)
   (set! (-> info button-miss-scale) 1.0)
+  (set! (-> info snap-on-bite?) #f)
   (none))
 
 (defmacro fisher-set-button-fight-info!
@@ -93,6 +95,7 @@
    pull-speed
    recover-min
    recover-max
+   fight-chance
    button-count-min
    button-count-max
    button-launch-min
@@ -107,6 +110,7 @@
     (set! (-> ,info fight-pull-speed) ,pull-speed)
     (set! (-> ,info fight-recover-min) ,recover-min)
     (set! (-> ,info fight-recover-max) ,recover-max)
+    (set! (-> ,info fight-chance) ,fight-chance)
     (set! (-> ,info button-count-min) ,button-count-min)
     (set! (-> ,info button-count-max) ,button-count-max)
     (set! (-> ,info button-launch-min) ,button-launch-min)
@@ -196,29 +200,43 @@
     (meters 1.15)
     0.90
     1.35
+    0.25
     1
     3
     0.24
     0.38
     145.0
     155.0
-    0.33333334
+    0.0
     1.0)
 
   ;; The Fire Canyon Cell Shark is the harder version: always 4-5 prompts.
   (fisher-set-button-fight-info!
     (fisher-species-info-for (fisher-species fire-canyon-cellfish))
-    (meters 1.15)
-    0.90
-    1.35
+    (meters 1.30)
+    0.35
+    0.65
+    0.75
     4
     5
     0.24
     0.38
     145.0
     155.0
-    0.083333336
+    0.0
     1.0)
+
+  ;; Only species explicitly marked here steal the lure when their bite is
+  ;; not hooked in time.  All other species keep the default #f value.
+  (set!
+    (-> (fisher-species-info-for (fisher-species lurker-shark)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species poisonous-eelfish)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species fire-canyon-cellfish)) snap-on-bite?)
+    #t)
 
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone sandover-dock))
@@ -229,7 +247,8 @@
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone jungle-pillar))
     5 8 8 15 16 23 1.0)
-  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone jungle-pillar)) 0 (fisher-species babak-ecofish) 1 4 4 7)
+  ;; Jungle uses Babak Ecofish for the whole ordinary population.
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone jungle-pillar)) 0 (fisher-species babak-ecofish) 8 15 16 23)
 
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone training-lagoon))
@@ -240,6 +259,9 @@
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone sentinel-pontoon))
     2 4 5 8 12 14 1.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sentinel-pontoon)) 0 (fisher-species eco-drum) 1 2 4 5)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sentinel-pontoon)) 1 (fisher-species largemouth-ecofish) 2 3 4 5)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sentinel-pontoon)) 2 (fisher-species babak-ecofish) 2 3 4 4)
 
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone misty-island))
@@ -886,6 +908,30 @@
       ((= suffix 6) (* base-weight 18))
       (else base-weight))))
 
+
+(defun fisher-roll-level-for-current-zone ((self fisher-game))
+  ;; Roll directly from the active zone definition.  Do not depend on the
+  ;; cached fish-level-min/max fields, which can still be at their default
+  ;; values while a persistent/hidden pool is being configured.
+  (let ((zone
+          (fisher-zone-info-for
+            (the-as fisher-zone (-> self location-id)))))
+    (fisher-roll-level-in-range
+      (-> zone level-min)
+      (-> zone level-max))))
+
+(defun fisher-refresh-active-slot-levels! ((self fisher-game))
+  ;; Every live table slot owns its level.  Re-assert valid zone levels after
+  ;; initial table construction and hidden population growth so no slot can
+  ;; remain at the initialization default of level 1 unless the zone itself is
+  ;; level 1 (training).
+  (dotimes (slot (-> self fish-count))
+    (fisher-set-fish-level!
+      self
+      slot
+      (fisher-roll-level-for-current-zone self)))
+  (none))
+
 (defun fisher-randomize-fish-level-and-weight!
   ((self fisher-game) (slot int))
 
@@ -894,9 +940,7 @@
   (fisher-set-fish-level!
     self
     slot
-    (fisher-roll-level-in-range
-      (-> self fish-level-min)
-      (-> self fish-level-max)))
+    (fisher-roll-level-for-current-zone self))
 
   (fisher-set-fish-weight-tenths!
     self
@@ -972,9 +1016,7 @@
       (fisher-set-fish-level!
         self
         slot
-        (fisher-roll-level-in-range
-          (-> self fish-level-min)
-          (-> self fish-level-max)))
+        (fisher-roll-level-for-current-zone self))
       (fisher-set-fish-weight-tenths! self slot 260)))
 
   (none))
@@ -1202,9 +1244,7 @@
         (fisher-set-fish-level!
           self
           slot
-          (fisher-roll-level-in-range
-            (-> self fish-level-min)
-            (-> self fish-level-max)))
+          (fisher-roll-level-for-current-zone self))
         (fisher-set-fish-weight-tenths!
           self
           slot
@@ -1288,9 +1328,7 @@
           (fisher-set-fish-level!
             self
             slot
-            (fisher-roll-level-in-range
-              (-> self fish-level-min)
-              (-> self fish-level-max)))
+            (fisher-roll-level-for-current-zone self))
           (fisher-set-fish-weight-tenths! self slot first-index)
 
           (let ((old-fish (fisher-fish-pointer self slot)))
@@ -1472,26 +1510,120 @@
 
   (none))
 
+
+(defun fisher-configure-zone-table! ((self fisher-game))
+  ;; Build every ordinary population directly from fisher-zone-info.  The old
+  ;; area-specific builders hardcoded species, and hidden growth randomized a
+  ;; blank slot without assigning its species, which made it default to Eco Drum.
+  (let* ((zone
+          (fisher-zone-info-for
+            (the-as fisher-zone (-> self location-id))))
+         (golden? (fisher-golden-hour?))
+         (target-count
+          (min
+            *fisher-max-fish-slots*
+            (if golden?
+              (rand-vu-int-range
+                (-> zone golden-fish-count-min)
+                (-> zone golden-fish-count-max))
+              (rand-vu-int-range
+                (-> zone normal-fish-count-min)
+                (-> zone normal-fish-count-max)))))
+         (slot 0)
+         (index 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count) target-count)
+    (fisher-clear-power-cell-tasks! self)
+
+    ;; Fill the explicit species ranges in table order.
+    (while (and (< index 4) (< slot target-count))
+      (let* ((range-max
+              (if golden?
+                (-> zone golden-max index)
+                (-> zone normal-max index)))
+             (range-min
+              (if golden?
+                (-> zone golden-min index)
+                (-> zone normal-min index)))
+             (species (-> zone species index))
+             (count
+              (if (> range-max 0)
+                (rand-vu-int-range range-min range-max)
+                0)))
+
+        (dotimes (i count)
+          (when (< slot target-count)
+            (fisher-configure-random-fish-slot!
+              self
+              slot
+              species)
+            (+! slot 1))))
+      (+! index 1))
+
+    ;; If the rolled ranges did not reach the zone's total target, use the
+    ;; first table species rather than silently falling back to species 0.
+    (while (< slot target-count)
+      (fisher-configure-random-fish-slot!
+        self
+        slot
+        (-> zone species 0))
+      (+! slot 1))
+
+    ;; Shark chance replaces the last ordinary resident; it never raises count.
+    (when
+      (and
+        (> target-count 0)
+        (> (-> zone shark-chance) 0.0)
+        (rand-vu-percent? (-> zone shark-chance)))
+      (let ((shark-slot (- target-count 1)))
+        (fisher-configure-random-fish-slot!
+          self
+          shark-slot
+          (the-as int (fisher-species lurker-shark)))
+        (fisher-set-fish-suffix!
+          self
+          shark-slot
+          (fisher-roll-standard-fish-suffix))
+        (fisher-set-fish-weight-tenths! self shark-slot 260))))
+
+  (none))
+
+(defun fisher-table-species-for-new-slot
+  ((self fisher-game) (golden? symbol))
+
+  ;; Pick a configured species using the current table's maximum ranges as
+  ;; weights.  This is used only when an invisible normal/golden transition
+  ;; grows the live pool.
+  (let* ((zone
+          (fisher-zone-info-for
+            (the-as fisher-zone (-> self location-id))))
+         (w0 (if golden? (-> zone golden-max 0) (-> zone normal-max 0)))
+         (w1 (if golden? (-> zone golden-max 1) (-> zone normal-max 1)))
+         (w2 (if golden? (-> zone golden-max 2) (-> zone normal-max 2)))
+         (w3 (if golden? (-> zone golden-max 3) (-> zone normal-max 3)))
+         (total (+ w0 w1 w2 w3)))
+
+    (when (<= total 0)
+      (return (-> zone species 0)))
+
+    (let ((roll (rand-vu-int-range 0 (- total 1))))
+      (cond
+        ((< roll w0) (-> zone species 0))
+        ((< roll (+ w0 w1)) (-> zone species 1))
+        ((< roll (+ w0 w1 w2)) (-> zone species 2))
+        (else (-> zone species 3))))))
+
 (defun fisher-configure-location-table! ((self fisher-game))
-  (cond
-    ((= (-> self location-id) 1)
-      (fisher-configure-jungle-pillar-table! self))
-
-    ((= (-> self location-id) 2)
-      (fisher-configure-training-lagoon-table! self))
-
-    ((= (-> self location-id) 3)
-      (fisher-configure-sentinel-pontoon-table! self))
-
-    ((= (-> self location-id) 4)
-      (fisher-configure-misty-table! self))
-
-    (else
-      (fisher-configure-sandover-table! self)))
+  (fisher-configure-zone-table! self)
 
   (fisher-add-buzzer-fish-slots! self)
   (fisher-add-power-cell-fish-slot! self)
   (fisher-add-fire-canyon-cellfish-slot! self)
+
+  ;; The logical table is the source of truth for gameplay/catch levels.
+  (fisher-refresh-active-slot-levels! self)
 
   (none))
 
@@ -1537,7 +1669,7 @@
     (send-event
       self
       'max-vis-dist
-      (if *fisher-resident-fish-visible?*
+      (if (or *fisher-resident-fish-visible?* in-main-menu?)
         (meters 999999.0)
         (meters 0.0)))
 
@@ -1622,9 +1754,9 @@
               (send-event
                 attachment-proc
                 'trans-hook
-                fisher-rare-attachment-trans)))))))
+                fisher-rare-attachment-trans))))))
 
-  (none))
+    attachment))
 
 (defun fisher-spawn-rare-fish-attachments!
   ((fish-proc manipy) (suffix int) (catch-display? symbol))
@@ -1852,9 +1984,7 @@
         (fisher-set-fish-level!
           self
           slot
-          (fisher-roll-level-in-range
-            (-> self fish-level-min)
-            (-> self fish-level-max)))
+          (fisher-roll-level-for-current-zone self))
         (fisher-set-fish-weight-tenths!
           self
           slot
@@ -1975,6 +2105,15 @@
 
   (none))
 
+(defun fisher-randomize-manipy-anim-frame! ((fish-proc manipy))
+  ;; Every resident fish uses the same looping flap animation.  Starting each
+  ;; manipy on a different frame keeps the whole pool from moving in lockstep.
+  (send-event
+    fish-proc
+    'set-frame-num
+    (rand-vu-float-range 0.0 29.0))
+  (none))
+
 (defun fisher-spawn-gameplay-fish
   ((owner fisher-game) (slot int))
 
@@ -2015,6 +2154,7 @@
 
         (when fish-proc
           (send-event fish-proc 'anim-mode 'loop)
+          (fisher-randomize-manipy-anim-frame! (the-as manipy fish-proc))
           (send-event fish-proc 'max-vis-dist (meters 999999.0))
 
           (set! (-> (the-as manipy fish-proc) root trans quad) (-> pos quad))
@@ -2120,6 +2260,10 @@
     *fisher-session-active?*
     (or
       (-> self camera-underwater?)
+      ;; Keep the actual hooked fish visible while it rises out of the water
+      ;; and travels toward Jak.  Without catch-return here, the persistent
+      ;; pool visibility pass hides it as soon as the camera breaks surface.
+      (= (-> self fish-state) 'catch-return)
       (= (-> self fish-state) 'catch-enter)
       (= (-> self fish-state) 'catch-display)
       (= (-> self fish-state) 'catch-exit)
@@ -2202,12 +2346,33 @@
     (when (> new-count old-count)
       (dotimes (offset (- new-count old-count))
         (let ((slot (+ old-count offset)))
-          (when (not (fisher-fish-pointer self slot))
-            (fisher-randomize-fish-slot! self slot)
+          ;; Assign a species from the active zone table before randomizing the
+          ;; slot.  Blank slots otherwise contain integer zero: Eco Drum.
+          (fisher-set-fish-species!
+            self
+            slot
+            (fisher-table-species-for-new-slot self golden?))
+          (fisher-set-fish-power-cell-task! self slot 0)
+          (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+          (fisher-randomize-fish-slot! self slot)
+
+          ;; If a resident process already exists in a hidden excess slot, its
+          ;; old skeleton cannot be changed safely.  Deactivate it and replace
+          ;; only while the pool is invisible.
+          (when (fisher-fish-pointer self slot)
+            (fisher-destroy-manipy! (fisher-fish-pointer self slot))
             (fisher-set-fish-pointer!
               self
               slot
-              (fisher-spawn-gameplay-fish self slot)))))))
+              (the-as (pointer manipy) #f)))
+
+          (fisher-set-fish-pointer!
+            self
+            slot
+            (fisher-spawn-gameplay-fish self slot)))))
+
+    ;; Revalidate active slots after a normal/golden population change.
+    (fisher-refresh-active-slot-levels! self))
 
   (none))
 
@@ -2550,7 +2715,9 @@
 
   (fisher-set-fish-turn-time! self slot 0.0)
 
-  (fisher-set-fish-cooldown! self slot 2.0)
+  ;; A scared fish must wait seven seconds before it may sense and
+  ;; approach the lure again.
+  (fisher-set-fish-cooldown! self slot 7.0)
 
   (set! (-> self hooked-fish-slot) -1)
   (set! (-> self fish-state) 'free)
@@ -2782,6 +2949,8 @@
 ;;   2 = 10-orb completion/reward
 ;;   3 = both tutorial tasks completed
 ;;   4 = village1 random fishing hint
+;;   5 = lure refill confirmation
+;;   6 = first tutorial lure gift
 (define *fisher-man-dialogue-page-count* 6)
 (define *fisher-man-hint-count* 10)
 
@@ -2932,9 +3101,9 @@
     ""
 
     ;; Page 6
-    "SOME OF THE VILLAGERS DO HAVE POWERCELLS,"
-    "SO IT BE BEST TO TALK TO THEM."
-    ""
+    "THERE BE SOME RARE FISH TO FIND."
+    "IF YE CAN FIND THE GEOLOGIST, SHE COULD"
+    "HELP YOU LOG ALL OF THEM."
     "NOW HAUL ME SOME FISH!"))
 
 (define *fisher-man-completed-dialogue-lines*
@@ -2946,6 +3115,34 @@
     "YE GOT YER 4 FREE POWER CELLS"
     "TAKE THE WARP GATE BACK AND"
     "CATCH ME MORE FISH!!!"
+    ""))
+
+
+(define *fisher-man-refill-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    "ALL LURES HAVE BEEN REFILLED."
+    ""
+    ""
+    ""))
+
+(define *fisher-man-tutorial-lures-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "FISHERMAN GAVE YOU X5 LURES"
+    ""
+    ""
+    ""
+
+    ;; Page 1
+    "MAKE SURE TO COME BACK TO ME ANY TIME"
+    "YOU NEED MORE! THEY'RE ON THE HOUSE!"
+    "... ER... SHIP, RATHER."
     ""))
 
 ;; Ten one-page gameplay hints used only by the Village fisherman.
@@ -3114,6 +3311,12 @@
           (+
             (* (-> self dialogue-hint-index) 4)
             line-index)))
+
+      ((= (-> self dialogue-kind) 5)
+        (-> *fisher-man-refill-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 6)
+        (-> *fisher-man-tutorial-lures-dialogue-lines* data index))
 
       (else
         (-> *fisher-man-orb-reminder-dialogue-lines* data index)))))
@@ -3517,6 +3720,8 @@
   (set! (-> self dialogue-char-count) 0)
   (set! (-> self dialogue-char-timer) 0.0)
   (set! (-> self dialogue-grabbed?) #f)
+  (set! (-> self shop-offset) 150.0)
+  (set! (-> self shop-message-time) 0.0)
 
   (logclear! (-> self mask) (process-mask actor-pause))
 
@@ -3713,7 +3918,12 @@
               0
               *default-pool*)
 
-            (go idle))
+            (fisher-refill-lures!)
+            (set! (-> self dialogue-kind) 6)
+            (set! *fisher-man-dialogue-page-count* 2)
+            (set! (-> self dialogue-page) 0)
+            (set! (-> self dialogue-char-count) 0)
+            (set! (-> self dialogue-char-timer) 0.0))
 
           ((= (-> self dialogue-kind) 2)
             (send-event
@@ -3722,7 +3932,6 @@
               (pickup-type money)
               -10.0)
 
-            ;; For fuel-cell pickups, the numeric argument is the
             (send-event
               *target*
               'get-pickup
@@ -3757,10 +3966,25 @@
               0
               *default-pool*)
 
+            (fisher-refill-lures!)
+            (set! (-> self dialogue-kind) 5)
+            (set! *fisher-man-dialogue-page-count* 1)
+            (set! (-> self dialogue-page) 0)
+            (set! (-> self dialogue-char-count) 0)
+            (set! (-> self dialogue-char-timer) 0.0))
+
+          ((or
+              (= (-> self dialogue-kind) 5)
+              (= (-> self dialogue-kind) 6))
             (go idle))
 
           (else
-            (go idle))))
+            (fisher-refill-lures!)
+            (set! (-> self dialogue-kind) 5)
+            (set! *fisher-man-dialogue-page-count* 1)
+            (set! (-> self dialogue-page) 0)
+            (set! (-> self dialogue-char-count) 0)
+            (set! (-> self dialogue-char-timer) 0.0))))
 
       (when
         (cpad-pressed? 0 triangle)
@@ -3774,6 +3998,7 @@
         :num! (seek!))))
 
   :post transform-post)
+
 
 (defun spawn-fisher-man
   ((spawn-pos vector)

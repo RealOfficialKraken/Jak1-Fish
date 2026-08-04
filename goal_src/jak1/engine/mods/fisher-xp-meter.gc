@@ -56,6 +56,21 @@
         (-> *game-info* auto-save-count)))
     1))
 
+(defun fisher-lure-capacity ()
+  (if
+    (>= (fisher-current-level) *fisher-lure-capacity-unlock-level*)
+    *fisher-lure-level-12-capacity*
+    *fisher-lure-base-capacity*))
+
+(defun fisher-refill-lures! ()
+  (set! *fisher-lure-count* (fisher-lure-capacity))
+  (none))
+
+(defun fisher-lose-lure! ()
+  (when (> *fisher-lure-count* 0)
+    (-! *fisher-lure-count* 1))
+  (none))
+
 (defun fisher-xp-needed-for-level
   ((level int))
 
@@ -155,6 +170,9 @@
   ((suffix int))
 
   (cond
+    ;; The four named legendary fish ignore the normal XP cap and receive a
+    ;; flat 50% legendary bonus.
+    ((fisher-rare-fish? suffix) 1.50)
     ((= suffix 5) 2.0)
     ((= suffix 6) 4.0)
     (else 1.0)))
@@ -168,16 +186,22 @@
     (if
       (>= jak-level *fisher-level-cap*)
       0
-      (max
-        1
-        (the int
-          (+
-            (*
-              (the float (+ 15 (* (max 1 fish-level) 5)))
-              (fisher-xp-level-difference-multiplier fish-level jak-level)
-              (fisher-xp-suffix-multiplier suffix)
-              0.65)
-            0.5))))))
+      (let ((raw-xp
+            (max
+              10
+              (the int
+                (+
+                  (*
+                    (the float (+ 15 (* (max 1 fish-level) 5)))
+                    (fisher-xp-level-difference-multiplier fish-level jak-level)
+                    (fisher-xp-suffix-multiplier suffix)
+                    0.65)
+                  0.5)))))
+
+        (if
+          (fisher-rare-fish? suffix)
+          raw-xp
+          (min 215 raw-xp))))))
 
 (defun fisher-accepted-xp-amount
   ((amount int))

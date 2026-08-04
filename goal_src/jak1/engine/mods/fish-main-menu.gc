@@ -64,6 +64,21 @@
 
   (none))
 
+(defun main-menu-clear-fish! ()
+  ;; The agents live in *active-pool*, while their parent fish and rare child
+  ;; manipys live under *default-pool*.  Clear both ownership trees so a menu
+  ;; transition cannot leave a Precursor tower, Oracle statue, or orb child
+  ;; behind after its display fish is gone.
+  (kill-by-name "main-menu-precursor-towertop" *default-pool*)
+  (kill-by-name "main-menu-oracle-statue" *default-pool*)
+  (kill-by-name "main-menu-orb-a" *default-pool*)
+  (kill-by-name "main-menu-orb-b" *default-pool*)
+  (kill-by-name "main-menu-orb-c" *default-pool*)
+  (kill-by-name "main-menu-fish" *default-pool*)
+  (kill-by-name "main-menu-fish-agent" *active-pool*)
+  (set! *main-menu-fish-active-count* 0)
+  (none))
+
 (defun launch-main-mmenu ()
   (main-menu-remove-owned-settings!)
 
@@ -95,11 +110,10 @@
   (set-blackout-frames (seconds 2.0))
   (set! *main-menu-extra-blackout-set?* #t)
 
-  (kill-by-name "main-menu-fish-agent" *active-pool*)
-  (kill-by-name "main-menu-fish" *active-pool*)
-  (set! *main-menu-fish-active-count* 0)
-  (set! *main-menu-fish-target-count* (rand-vu-int-range 3 8))
+  (main-menu-clear-fish!)
+  (set! *main-menu-fish-target-count* *main-menu-fish-type-count*)
   (set! *main-menu-next-fish-spawn-time* 2.0)
+  (set! *main-menu-next-fish-type* 0)
   (set! *main-menu-next-fish-lower?* (rand-vu-percent? 0.5))
   (set! *main-menu-made-by-time* 0.0)
   (set! *main-menu-made-by-y* 112.0)
@@ -224,11 +238,150 @@
 
   (none))
 
+(defun main-menu-fish-species ((index int))
+  (cond
+    ((< index *fisher-species-count*) index)
+    ((= index 7) (the-as int (fisher-species largemouth-ecofish)))
+    ((= index 8) (the-as int (fisher-species poisonous-eelfish)))
+    (else (the-as int (fisher-species eco-drum)))))
+
+(defun main-menu-fish-suffix ((index int))
+  (cond
+    ((= index 7) 7)
+    ((= index 8) 8)
+    ((= index 9) 9)
+    ((= index 10) 10)
+    (else 2)))
+
 (defun main-menu-fish-skelgroup ((index int))
   (cond
-    ((= index 0) *catch-fisha-sgc*)
-    ((= index 1) *catch-fishb-sgc*)
-    (else *catch-fishc-sgc*)))
+    ((= index 7) *catch-fishb-sgc*)
+    ((= index 8) *catch-fishc-sgc*)
+    ((or (= index 9) (= index 10)) *catch-fisha-sgc*)
+    (else
+      (the-as skeleton-group
+        (->
+          (fisher-species-info-for
+            (main-menu-fish-species index))
+          skeleton)))))
+
+(defun main-menu-apply-fish-appearance!
+  ((fish-proc manipy) (index int))
+
+  (let* ((species (main-menu-fish-species index))
+      (suffix (main-menu-fish-suffix index))
+      (info (fisher-species-info-for species))
+      (base-scale
+        (fmax
+          0.30
+          (fmin 0.62 (* (-> info game-scale) 1.20))))
+      (x-scale 1.0)
+      (y-scale 1.0)
+      (z-scale 1.0)
+      (r (-> info color-r))
+      (g (-> info color-g))
+      (b (-> info color-b)))
+
+    (cond
+      ((= species (the-as int (fisher-species scout-fly)))
+        (set! base-scale 0.40))
+
+      ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+        (set! base-scale 0.30))
+
+      ((= suffix 7)
+        (set! base-scale 0.42)
+        (set! r 0.62)
+        (set! g 0.36)
+        (set! b 0.12))
+
+      ((= suffix 8)
+        (set! base-scale 0.42)
+        (set! r 1.00)
+        (set! g 0.56)
+        (set! b 0.06))
+
+      ((= suffix 9)
+        (set! base-scale 0.46)
+        (set! r 0.56)
+        (set! g 0.82)
+        (set! b 0.62)
+        (set! x-scale 0.13)
+        (set! y-scale 0.20)
+        (set! z-scale 2.35))
+
+      ((= suffix 10)
+        (set! base-scale 0.44)
+        (set! r 0.82)
+        (set! g 0.48)
+        (set! b 0.16)
+        (set! x-scale 1.18)
+        (set! y-scale 1.12)
+        (set! z-scale 1.18)))
+
+    (set-vector!
+      (-> fish-proc root scale)
+      (* base-scale x-scale)
+      (* base-scale y-scale)
+      (* base-scale z-scale)
+      1.0)
+
+    (set! (-> fish-proc draw color-mult r) r)
+    (set! (-> fish-proc draw color-mult g) g)
+    (set! (-> fish-proc draw color-mult b) b)
+    (set! (-> fish-proc draw color-mult a) 1.0))
+
+  (none))
+
+(defun main-menu-spawn-fish-attachments!
+  ((self main-menu-fish-agent) (fish-proc manipy))
+
+  (let ((suffix (main-menu-fish-suffix (-> self fish-index))))
+    (cond
+      ((= suffix 7)
+        (set! (-> self attachment-a)
+          (fisher-spawn-rare-attachment!
+            fish-proc
+            *towertop-sgc*
+            *fisher-precursor-attachment-offset-game*
+            0.020
+            "main-menu-precursor-towertop")))
+
+      ((= suffix 8)
+        (set! (-> self attachment-a)
+          (fisher-spawn-rare-attachment!
+            fish-proc
+            *oracle-sgc*
+            *fisher-oracle-attachment-offset-game*
+            0.13
+            "main-menu-oracle-statue")))
+
+      ((= suffix 10)
+        (set! (-> self attachment-a)
+          (fisher-spawn-rare-attachment!
+            fish-proc
+            *money-sgc*
+            *fisher-orb-attachment-offset-a-game*
+            0.50
+            "main-menu-orb-a"))
+
+        (set! (-> self attachment-b)
+          (fisher-spawn-rare-attachment!
+            fish-proc
+            *money-sgc*
+            *fisher-orb-attachment-offset-b-game*
+            0.46
+            "main-menu-orb-b"))
+
+        (set! (-> self attachment-c)
+          (fisher-spawn-rare-attachment!
+            fish-proc
+            *money-sgc*
+            *fisher-orb-attachment-offset-c-game*
+            0.48
+            "main-menu-orb-c")))))
+
+  (none))
 
 (defun main-menu-build-camera-basis! ()
   (when
@@ -272,8 +425,26 @@
   (none))
 
 (defun main-menu-fish-agent-remove! ((self main-menu-fish-agent))
+  ;; Rare display fish own independent attachment manipys.  Remove those
+  ;; children first so nothing remains in the menu after the parent exits.
+  (when (-> self attachment-a)
+    (let ((proc (ppointer->process (-> self attachment-a))))
+      (when proc (deactivate proc)))
+    (set! (-> self attachment-a) (the-as (pointer manipy) #f)))
+
+  (when (-> self attachment-b)
+    (let ((proc (ppointer->process (-> self attachment-b))))
+      (when proc (deactivate proc)))
+    (set! (-> self attachment-b) (the-as (pointer manipy) #f)))
+
+  (when (-> self attachment-c)
+    (let ((proc (ppointer->process (-> self attachment-c))))
+      (when proc (deactivate proc)))
+    (set! (-> self attachment-c) (the-as (pointer manipy) #f)))
+
   (when (-> self visual)
-    (deactivate (-> (-> self visual) 0))
+    (let ((proc (ppointer->process (-> self visual))))
+      (when proc (deactivate proc)))
     (set! (-> self visual) (the-as (pointer manipy) #f)))
 
   (when (> *main-menu-fish-active-count* 0)
@@ -419,6 +590,10 @@
     (direction float))
 
   (set! (-> self visual) (the-as (pointer manipy) #f))
+  (set! (-> self attachment-a) (the-as (pointer manipy) #f))
+  (set! (-> self attachment-b) (the-as (pointer manipy) #f))
+  (set! (-> self attachment-c) (the-as (pointer manipy) #f))
+  (set! (-> self fish-index) fish-index)
   (set! (-> self direction) direction)
   (set! (-> self speed) (rand-vu-float-range (meters 1.25) (meters 2.35)))
   (set! (-> self travel) start-travel)
@@ -455,18 +630,15 @@
                 (-> (-> self visual) 0 self))))
 
           (send-event fish-proc 'anim-mode 'loop)
-
-          (set-vector!
-            (-> fish-proc root scale)
-            0.45
-            0.45
-            0.45
-            1.0)
+          (fisher-randomize-manipy-anim-frame! fish-proc)
+          (main-menu-apply-fish-appearance! fish-proc fish-index)
 
           (send-event
             fish-proc
             'max-vis-dist
             (meters 999999.0))
+
+          (main-menu-spawn-fish-attachments! self fish-proc)
 
           (+! *main-menu-fish-active-count* 1)
 
@@ -557,9 +729,7 @@
 
       (process-spawn
         main-menu-fish-agent
-        (rand-vu-int-range
-          0
-          (- *main-menu-fish-type-count* 1))
+        *main-menu-next-fish-type*
         0.0
         spawn-height
         (rand-vu-float-range
@@ -568,6 +738,12 @@
         (if (rand-vu-percent? 0.5) 1.0 -1.0)
         :name "main-menu-fish-agent"
         *active-pool*)
+
+      (set!
+        *main-menu-next-fish-type*
+        (mod
+          (+ *main-menu-next-fish-type* 1)
+          *main-menu-fish-type-count*))
 
       (set!
         *main-menu-next-fish-lower?*
@@ -1072,9 +1248,7 @@
 (defun main-menu-finish-new-game-transition! ()
   (cond
     ((not *main-menu-transition-warp-requested?*)
-      (kill-by-name "main-menu-fish-agent" *active-pool*)
-      (kill-by-name "main-menu-fish" *active-pool*)
-      (set! *main-menu-fish-active-count* 0)
+      (main-menu-clear-fish!)
 
       (main-menu-restore-time-of-day!)
 
@@ -1218,9 +1392,7 @@
         (when
           (not *main-menu-transition-fish-cleared?*)
 
-          (kill-by-name "main-menu-fish-agent" *active-pool*)
-          (kill-by-name "main-menu-fish" *active-pool*)
-          (set! *main-menu-fish-active-count* 0)
+          (main-menu-clear-fish!)
           (set! *main-menu-transition-fish-cleared?* #t))
 
         (let* ((pan-time
@@ -1288,9 +1460,7 @@
   (when in-main-menu?
     (stop-main-music)
 
-    (kill-by-name "main-menu-fish-agent" *active-pool*)
-    (kill-by-name "main-menu-fish" *active-pool*)
-    (set! *main-menu-fish-active-count* 0)
+    (main-menu-clear-fish!)
 
     (when *target*
       (process-release? *target*)
@@ -1374,10 +1544,7 @@
   (set! jak-warp-out #f)
   (stop-main-music)
 
-  (kill-by-name "main-menu-fish-agent" *active-pool*)
-  (kill-by-name "main-menu-fish" *active-pool*)
-
-  (set! *main-menu-fish-active-count* 0)
+  (main-menu-clear-fish!)
 
   (set-setting!
     'music-volume

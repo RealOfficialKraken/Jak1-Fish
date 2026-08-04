@@ -11,9 +11,9 @@
 (define *fisher-stop-lure-unlock-level* 2)
 (define *fisher-stop-lure-active-seconds* 3.0)
 (define *fisher-stop-lure-cooldown-seconds* 20.0)
-(define *fisher-sink-lure-unlock-level* 5)
-(define *fisher-tug-line-unlock-level* 7)
-(define *fisher-fishing-clock-unlock-level* 10)
+(define *fisher-sink-lure-unlock-level* 4)
+(define *fisher-tug-line-unlock-level* 6)
+(define *fisher-fishing-clock-unlock-level* 8)
 (define *fisher-sink-lure-active-seconds* 3.5)
 (define *fisher-sink-lure-cooldown-seconds* 15.0)
 (define *fisher-tug-line-active-seconds* 2.0)
@@ -28,6 +28,13 @@
 (define *fisher-approach-acceleration* 3.50)
 (define *fisher-line-hp* 100.0)
 (define *fisher-line-broken?* #f)
+
+;; Persistent lure inventory for the current life.  A blackout/death or the
+;; fisherman shop refills this to the capacity unlocked by fishing level.
+(define *fisher-lure-count* 5)
+(define *fisher-lure-base-capacity* 5)
+(define *fisher-lure-level-12-capacity* 10)
+(define *fisher-lure-capacity-unlock-level* 12)
 (define *singlefish-session-id* 0)
 (define *singlefish-session-active?* #f)
 (define *fisher-in-debug?* #f)
@@ -75,11 +82,13 @@
 
 (define *main-menu-bubble-time* 0.0)
 
-(define *main-menu-fish-type-count* 3)
+(define *main-menu-fish-type-count* 11)
 
-(define *main-menu-fish-target-count* 9)
+(define *main-menu-fish-target-count* 11)
 
 (define *main-menu-fish-active-count* 0)
+
+(define *main-menu-next-fish-type* 0)
 
 (define *main-menu-next-fish-spawn-time* 2.0)
 
@@ -150,6 +159,10 @@
 ;;main menu fishing area type
 (deftype main-menu-fish-agent (process)
   ((visual       (pointer manipy))
+    (attachment-a (pointer manipy))
+    (attachment-b (pointer manipy))
+    (attachment-c (pointer manipy))
+    (fish-index    int)
     (direction    float)
     (speed        float)
     (travel       float)
@@ -180,10 +193,13 @@
     (dialogue-char-count   int)
     (dialogue-char-timer   float)
     (dialogue-grabbed?     symbol)
+    (shop-offset          float)
+    (shop-message-time    float)
   )
   (:states
     idle
     dialogue
+    shop
   )
 )
 
@@ -239,6 +255,7 @@
     (color-b              float)
     (depth-min            float)
     (depth-max            float)
+    (fight-chance         float)
     (fight-mode           int32)
     (fight-pull-speed     float)
     (fight-recover-min    float)
@@ -250,7 +267,8 @@
     (button-rise-speed    float)
     (button-gravity       float)
     (button-damage-scale  float)
-    (button-miss-scale    float)))
+    (button-miss-scale    float)
+    (snap-on-bite?        symbol)))
 
 (deftype fisher-zone-info (basic)
   ((level-min               int32)
@@ -403,6 +421,8 @@
     (fish-state                   symbol)
     (fish-message                 basic)
     (fish-message-time            float)
+    (skill-message                basic)
+    (skill-message-time           float)
     (fish-approach-speed          float)
     (buzzer-victory-pending?      symbol)
     (caught-buzzer-count          int)
@@ -534,6 +554,13 @@
 (defun-extern fisher-current-level int)
 (defun-extern fisher-draw-xp-meter! none)
 (defun-extern fisher-draw-skill-cooldowns! fisher-game none)
+(defun-extern fisher-camera-follow-lure! fisher-game none)
+(defun-extern fisher-update-camera-bubbles! fisher-game none)
+(defun-extern fisher-update-underwater-background! fisher-game none)
+(defun-extern fisher-current-level int)
+(defun-extern fisher-lure-capacity int)
+(defun-extern fisher-refill-lures! none)
+(defun-extern fisher-lose-lure! none)
 (defun-extern fisher-level-fight-multiplier int int float)
 (defun-extern fisher-level-worth-multiplier int int float)
 (defun-extern fisher-xp-level-difference-multiplier int int float)
@@ -619,6 +646,13 @@
 (defun-extern fisher-suffix-name int string)
 (defun-extern fisher-rare-fish? int symbol)
 (defun-extern fisher-spawn-rare-fish-attachments! manipy int symbol none)
+(defun-extern fisher-spawn-rare-attachment! manipy skeleton-group vector float string (pointer manipy))
+(defun-extern fisher-randomize-manipy-anim-frame! manipy none)
+(define-extern *fisher-precursor-attachment-offset-game* vector)
+(define-extern *fisher-oracle-attachment-offset-game* vector)
+(define-extern *fisher-orb-attachment-offset-a-game* vector)
+(define-extern *fisher-orb-attachment-offset-b-game* vector)
+(define-extern *fisher-orb-attachment-offset-c-game* vector)
 (defun-extern launch-main-mmenu none)
 (defun-extern main-menu-abort-for-blackout! none)
 (defun-extern main-menu-build-camera-basis! none)
