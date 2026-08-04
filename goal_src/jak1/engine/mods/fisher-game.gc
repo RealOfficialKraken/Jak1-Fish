@@ -373,13 +373,7 @@
             "FOR 3.5 SECONDS - 15 SECOND COOLDOWN."
             256
             (+ 181 menu-offset)
-            0.35)
-
-          (draw-fisher-large-font-scaled
-            "REELING OR A FISH BITE ENDS IT EARLY."
-            256
-            (+ 197 menu-offset)
-            0.32))
+            0.35))
 
         ((= skill-mask 4)
           (fisher-draw-level-up-title!
@@ -1926,7 +1920,8 @@
 )
 
 (defun fisher-draw-retail-line-segment!
-  ((world-start vector)
+  ((self fisher-game)
+    (world-start vector)
     (world-end vector)
     (color rgba))
 
@@ -1939,144 +1934,119 @@
           (new 'stack 'vector4w-2))
 
         (line-colors
-          (new 'stack 'vector4w-2)))
+          (new 'stack 'vector4w-2))
+
+        (projected-start
+          (new 'stack 'vector4w-2))
+
+        (start-x 32768)
+        (start-y 35584)
+        (start-z #x00ffffff)
+        (end-x 32768)
+        (end-y 32428)
+        (end-z #x00ffffff))
 
       (set! (-> world-start w) 1.0)
       (set! (-> world-end w) 1.0)
 
-      (when
-        (and
-          (transform-point-qword!
-            (-> screen-points vector 0)
-            world-start)
+      ;; Jak is always the real start of the line.  Do not replace him with a
+      ;; fixed screen point during the reel-camera zoom.  transform-point-qword!
+      ;; still writes the projected coordinates when the point is outside the
+      ;; visible frustum, so ignore its visibility result and clamp only the
+      ;; resulting screen point to the drawable edge.
+      (transform-point-qword!
+        (-> projected-start vector 0)
+        world-start)
 
-          (transform-point-qword!
-            (-> screen-points vector 1)
-            world-end))
+      (set! start-x (-> projected-start vector 0 x))
+      (set! start-y (-> projected-start vector 0 y))
+      (set! start-z (+ (-> projected-start vector 0 z) -8192))
 
-        (+! (-> screen-points vector 0 z) -8192)
-        (+! (-> screen-points vector 1 z) -8192)
+      (set! start-x (max 512 (min 65024 start-x)))
+      (set! start-y (max 512 (min 65024 start-y)))
 
-        (set! (-> screen-points vector 0 w) 1)
-        (set! (-> screen-points vector 1 w) 1)
+      (set! (-> line-colors vector 0 x) (the-as int (-> color r)))
+      (set! (-> line-colors vector 0 y) (the-as int (-> color g)))
+      (set! (-> line-colors vector 0 z) (the-as int (-> color b)))
+      (set! (-> line-colors vector 0 w) (the-as int (-> color a)))
+      (set! (-> line-colors vector 1 quad) (-> line-colors vector 0 quad))
 
-        (set!
-          (-> line-colors vector 0 x)
-          (the-as int (-> color r)))
+      (let ((delta-x (- end-x start-x))
+          (delta-y (- end-y start-y))
+          (delta-z (- end-z start-z)))
 
-        (set!
-          (-> line-colors vector 0 y)
-          (the-as int (-> color g)))
+        (dotimes (piece 4)
+          (set!
+            (-> screen-points vector 0 x)
+            (+ start-x (/ (* delta-x piece) 4)))
 
-        (set!
-          (-> line-colors vector 0 z)
-          (the-as int (-> color b)))
+          (set!
+            (-> screen-points vector 0 y)
+            (+ start-y (/ (* delta-y piece) 4)))
 
-        (set!
-          (-> line-colors vector 0 w)
-          (the-as int (-> color a)))
+          (set!
+            (-> screen-points vector 0 z)
+            (+ start-z (/ (* delta-z piece) 4)))
 
-        (set!
-          (-> line-colors vector 1 quad)
-          (-> line-colors vector 0 quad))
+          (set!
+            (-> screen-points vector 1 x)
+            (+ start-x (/ (* delta-x (+ piece 1)) 4)))
 
-        (with-dma-buffer-add-bucket
-          ((buf (-> (current-frame) global-buf))
-            (bucket-id subtitle))
+          (set!
+            (-> screen-points vector 1 y)
+            (+ start-y (/ (* delta-y (+ piece 1)) 4)))
 
-          (with-cnt-vif-block
-            (buf)
+          (set!
+            (-> screen-points vector 1 z)
+            (+ start-z (/ (* delta-z (+ piece 1)) 4)))
 
-            (dma-buffer-add-gif-tag
-              buf
-              (new 'static
-                'gif-tag64
-                :nloop 1
-                :eop 1
-                :pre 1
-                :nreg 4
-                :prim (gif-prim line))
-              (gs-reg-list
-                rgbaq
-                xyzf2
-                rgbaq
-                xyzf2))
+          (set! (-> screen-points vector 0 w) 1)
+          (set! (-> screen-points vector 1 w) 1)
 
-            (dma-buffer-add-uint128
-              buf
-              (-> line-colors quad 0)
-              (-> screen-points quad 0)
-              (-> line-colors quad 1)
-              (-> screen-points quad 1)))))))
+          (with-dma-buffer-add-bucket
+            ((buf (-> (current-frame) global-buf))
+              (bucket-id subtitle))
+
+            (with-cnt-vif-block
+              (buf)
+
+              (dma-buffer-add-gif-tag
+                buf
+                (new 'static
+                  'gif-tag64
+                  :nloop 1
+                  :eop 1
+                  :pre 1
+                  :nreg 4
+                  :prim (gif-prim line))
+                (gs-reg-list
+                  rgbaq
+                  xyzf2
+                  rgbaq
+                  xyzf2))
+
+              (dma-buffer-add-uint128
+                buf
+                (-> line-colors quad 0)
+                (-> screen-points quad 0)
+                (-> line-colors quad 1)
+                (-> screen-points quad 1))))))))
 
   (none))
 
 (defun fisher-draw-retail-line!
-  ((start vector)
+  ((self fisher-game)
+    (start vector)
     (end vector)
     (color rgba))
 
-  (let ((delta
-        (new 'stack-no-clear 'vector))
-
-      (point-1
-        (new 'stack-no-clear 'vector))
-
-      (point-2
-        (new 'stack-no-clear 'vector))
-
-      (point-3
-        (new 'stack-no-clear 'vector)))
-
-    ;; Construct four genuine world-space pieces:
-    ;;
-    ;; start -> 25% -> 50% -> 75% -> end
-    ;;
-    (vector-! delta end start)
-
-    (vector+float*!
-      point-1
-      start
-      delta
-      0.25)
-
-    (vector+float*!
-      point-2
-      start
-      delta
-      0.50)
-
-    (vector+float*!
-      point-3
-      start
-      delta
-      0.75)
-
-    (set! (-> start w) 1.0)
-    (set! (-> point-1 w) 1.0)
-    (set! (-> point-2 w) 1.0)
-    (set! (-> point-3 w) 1.0)
-    (set! (-> end w) 1.0)
-
-    (fisher-draw-retail-line-segment!
-      start
-      point-1
-      color)
-
-    (fisher-draw-retail-line-segment!
-      point-1
-      point-2
-      color)
-
-    (fisher-draw-retail-line-segment!
-      point-2
-      point-3
-      color)
-
-    (fisher-draw-retail-line-segment!
-      point-3
-      end
-      color))
+  ;; Project Jak once, then draw four contiguous pieces along the same
+  ;; Jak-to-center screen-space line.  The world end supplies depth only.
+  (fisher-draw-retail-line-segment!
+    self
+    start
+    end
+    color)
 
   (none))
 
@@ -4515,8 +4485,8 @@
     (set! (-> self fish-fight-time) 0.0)
     (set! (-> self fish-hook-time)
       (rand-vu-float-range
-        (-> info fight-recover-min)
-        (-> info fight-recover-max)))
+        (fmax 0.85 (-> info fight-recover-min))
+        (fmax 0.85 (-> info fight-recover-max))))
     (set! (-> self fish-fight-phase) (degrees 180.0))
     (fisher-clear-button-fight! self))
 
@@ -4840,8 +4810,8 @@
                         (set! (-> self fish-fighting?) #f)
                         (set! (-> self fish-hook-time)
                           (rand-vu-float-range
-                            (-> info fight-recover-min)
-                            (-> info fight-recover-max)))
+                            (fmax 0.85 (-> info fight-recover-min))
+                            (fmax 0.85 (-> info fight-recover-max))))
                         (set! (-> self fish-fight-phase) (degrees 180.0))))
 
                     (when
@@ -4875,8 +4845,8 @@
                         (else
                           (set! (-> self fish-hook-time)
                             (rand-vu-float-range
-                              (-> info fight-recover-min)
-                              (-> info fight-recover-max))))))))
+                              (fmax 0.85 (-> info fight-recover-min))
+                              (fmax 0.85 (-> info fight-recover-max)))))))))
 
                 ((or
                     (= (-> self fish-state) 'catch-enter)
@@ -5109,9 +5079,14 @@
   (none))
 
 (defun singlefish-end-session! ((self fisher-game))
-  ;; Leaving fishing only hides presentation.  Keep the persistent fishbox
-  ;; active so every resident continues swimming from its current position.
-  ;; Full distance/blackout cleanup is responsible for invalidating the box.
+  ;; Hide every resident immediately.  The fishing state's final frame does
+  ;; not run another pool-render pass after exit, so changing only the session
+  ;; flag left fish visible in the world until a later update.
+  (fisher-set-resident-fish-visible! self #f)
+
+  ;; Keep the persistent fishbox active so every resident continues swimming
+  ;; from its current position while hidden.  Distance/blackout cleanup still
+  ;; owns full invalidation of the box.
   (set! *singlefish-session-active?* #t)
   (set! (-> self hooked-fish) #f)
   (set! (-> self hooked-fish-slot) -1)
@@ -6065,11 +6040,13 @@
         (-> line-start y)
         (meters 3.25))
 
-      (vector-copy!
-        line-end
-        (-> self lure-pos))
+      ;; Draw to the visible hook/snake transform.  lure-pos is the
+      ;; simulation target and may advance before the rendered hook catches
+      ;; up, which made the line appear detached during casts and reels.
+      (fisher-hook-target! self line-end)
 
       (fisher-draw-retail-line!
+        self
         line-start
         line-end
         line-color)))

@@ -1165,27 +1165,28 @@
       (< hour 18.0))))
 
 (defun fisher-fire-canyon-cellfish-eligible? ((self fisher-game))
-  ;; Debug deliberately bypasses every normal eligibility restriction so the
-  ;; special fish can be tested regardless of cells, time, zone, or task state.
-  (or
-    *fisher-in-debug?*
-    (and
-      *target*
-      (fisher-existing-zone? self)
-      (fisher-daytime?)
-      (>=
-        (the int
-          (the float
-            (send-event
-              *target*
-              'query
-              'pickup
-              (pickup-type fuel-cell))))
-        20)
-      (not
-        (task-complete?
-          *game-info*
-          (game-task firecanyon-end))))))
+  ;; Completion is a hard gate, including debug mode.  Once this exact cell
+  ;; has been awarded, the Fire Canyon Cell Fish may never spawn again.
+  (and
+    (not
+      (task-complete?
+        *game-info*
+        (game-task firecanyon-end)))
+    (or
+      *fisher-in-debug?*
+      (and
+        *target*
+        (fisher-existing-zone? self)
+        (fisher-daytime?)
+        (>=
+          (the int
+            (the float
+              (send-event
+                *target*
+                'query
+                'pickup
+                (pickup-type fuel-cell))))
+          20)))))
 
 (defun fisher-add-fire-canyon-cellfish-slot! ((self fisher-game))
   (when
@@ -1263,6 +1264,122 @@
               (the-as (pointer manipy) #f)))))))
 
   (none))
+
+(defun fisher-buzzer-index-active? ((self fisher-game) (index int))
+  (dotimes (slot (-> self fish-count))
+    (when
+      (and
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species scout-fly)))
+        (= (fisher-fish-weight-tenths self slot) index))
+      (return #t)))
+  #f)
+
+(defun fisher-find-passive-buzzer-index
+  ((self fisher-game) (task game-task))
+
+  (let ((start (rand-vu-int-range 0 6))
+      (step 0)
+      (index 0))
+
+    (while (< step 7)
+      (set! index (mod (+ start step) 7))
+
+      (when
+        (and
+          (not (got-buzzer? *game-info* task index))
+          (not (fisher-buzzer-index-active? self index)))
+        (return index))
+
+      (+! step 1))
+
+    -1))
+
+(defun fisher-roll-passive-special-for-slot!
+  ((self fisher-game) (slot int))
+
+  ;; Every replacement begins as a normal zone fish.  This helper may then
+  ;; convert that exact new slot into any eligible passive special fish.
+  (when
+    (and
+      (fisher-fire-canyon-cellfish-eligible? self)
+      (not
+        (fisher-has-species?
+          self
+          (the-as int (fisher-species fire-canyon-cellfish))))
+      (rand-vu-percent?
+        (if *fisher-in-debug?* 1.0 *fisher-power-cell-fish-chance*)))
+
+    (fisher-set-fish-species!
+      self
+      slot
+      (the-as int (fisher-species fire-canyon-cellfish)))
+    (fisher-set-fish-suffix! self slot 2)
+    (fisher-set-fish-level!
+      self
+      slot
+      (fisher-roll-level-for-current-zone self))
+    (fisher-set-fish-weight-tenths!
+      self
+      slot
+      (rand-vu-int-range 100 140))
+    (fisher-set-fish-power-cell-task!
+      self
+      slot
+      (the-as int (game-task firecanyon-end)))
+    (return #t))
+
+  (let* ((buzzer-task (fisher-buzzer-task-for-location self))
+      (buzzer-collected (buzzer-count *game-info* buzzer-task))
+      (buzzer-index
+        (if
+          (and
+            (< buzzer-collected 7)
+            (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.50)))
+          (fisher-find-passive-buzzer-index self buzzer-task)
+          -1)))
+
+    (when (>= buzzer-index 0)
+      (fisher-set-fish-species!
+        self
+        slot
+        (the-as int (fisher-species scout-fly)))
+      (fisher-set-fish-power-cell-task! self slot 0)
+      (fisher-set-fish-suffix! self slot 2)
+      (fisher-set-fish-level!
+        self
+        slot
+        (fisher-roll-level-for-current-zone self))
+      (fisher-set-fish-weight-tenths! self slot buzzer-index)
+      (return #t)))
+
+  (when
+    (and
+      (or
+        (= (-> self location-id) 1)
+        (= (-> self location-id) 3)
+        (= (-> self location-id) 4))
+      (not (fisher-has-power-cell-fish? self))
+      (rand-vu-percent?
+        (if *fisher-in-debug?* 0.90 *fisher-power-cell-fish-chance*)))
+
+    (let ((task (fisher-find-missing-power-cell-task self)))
+      (when (> (the int task) 1)
+        (fisher-set-fish-power-cell-task! self slot (the int task))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (max
+            1
+            (the int
+              (+
+                (*
+                  (the float (fisher-fish-weight-tenths self slot))
+                  1.70)
+                0.5))))
+        (return #t))))
+
+  #f)
 
 (defun fisher-buzzer-task-for-location ((self fisher-game))
   (cond
@@ -2304,12 +2421,76 @@
       (when fish
         (let ((fish-proc (-> fish 0 self)))
           (when fish-proc
-            (send-event
-              fish-proc
-              'max-vis-dist
-              (if (and visible? (< i (-> self fish-count)))
-                (meters 999999.0)
-                (meters 0.0))))))))
+            (let ((show-this? (and visible? (< i (-> self fish-count)))))
+              ;; max-vis-dist alone is not a reliable visibility toggle for
+              ;; reused manipys.  Set the drawable hidden bit explicitly too,
+              ;; so every species is restored when casting and hidden on exit.
+              (cond
+                (show-this?
+                  (logclear!
+                    (-> (the-as manipy fish-proc) draw status)
+                    (draw-status hidden)))
+                (else
+                  (logior!
+                    (-> (the-as manipy fish-proc) draw status)
+                    (draw-status hidden))))
+
+              (send-event
+                fish-proc
+                'max-vis-dist
+                (if show-this?
+                  (meters 999999.0)
+                  (meters 0.0)))))))))
+
+  (none))
+
+(defun fisher-remove-completed-special-fish! ((self fisher-game))
+  ;; Persistent residents can outlive the moment their reward is completed.
+  ;; Remove any now-invalid special while the pool is hidden; the normal refill
+  ;; path will replace the empty slot and its hard gates prevent reassignment.
+  (let ((buzzer-task (fisher-buzzer-task-for-location self)))
+    (dotimes (slot (-> self fish-count))
+      (let ((species (fisher-fish-species self slot))
+          (cell-task (fisher-fish-power-cell-task self slot))
+          (remove? #f))
+
+        (when
+          (= species (the-as int (fisher-species scout-fly)))
+          (let ((index (fisher-fish-weight-tenths self slot)))
+            (when
+              (or
+                (>= (buzzer-count *game-info* buzzer-task) 7)
+                (< index 0)
+                (>= index 7)
+                (got-buzzer? *game-info* buzzer-task index))
+              (set! remove? #t))))
+
+        (when
+          (and
+            (= species
+              (the-as int (fisher-species fire-canyon-cellfish)))
+            (task-complete?
+              *game-info*
+              (game-task firecanyon-end)))
+          (set! remove? #t))
+
+        (when
+          (and
+            (> cell-task 1)
+            (task-complete?
+              *game-info*
+              (the-as game-task cell-task)))
+          (set! remove? #t))
+
+        (when remove?
+          (let ((fish (fisher-fish-pointer self slot)))
+            (when fish
+              (fisher-destroy-manipy! fish)))
+          (fisher-set-fish-pointer!
+            self
+            slot
+            (the-as (pointer manipy) #f))
+          (fisher-set-fish-power-cell-task! self slot 0)))))
 
   (none))
 
@@ -2346,8 +2527,8 @@
     (when (> new-count old-count)
       (dotimes (offset (- new-count old-count))
         (let ((slot (+ old-count offset)))
-          ;; Assign a species from the active zone table before randomizing the
-          ;; slot.  Blank slots otherwise contain integer zero: Eco Drum.
+          ;; Every newly activated resident starts as a normal zone fish, then
+          ;; gets the same passive special-fish opportunity as a caught slot.
           (fisher-set-fish-species!
             self
             slot
@@ -2355,6 +2536,7 @@
           (fisher-set-fish-power-cell-task! self slot 0)
           (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
           (fisher-randomize-fish-slot! self slot)
+          (fisher-roll-passive-special-for-slot! self slot)
 
           ;; If a resident process already exists in a hidden excess slot, its
           ;; old skeleton cannot be changed safely.  Deactivate it and replace
@@ -2390,6 +2572,9 @@
     (fisher-spawn-rendered-fish! self))
 
   (when (fisher-pool-fish-invisible? self)
+    ;; Completion gates apply to both new rolls and persistent residents.
+    (fisher-remove-completed-special-fish! self)
+
     ;; Debug mode must guarantee that the Fire Canyon Cell Fish exists even
     ;; when the persistent fishbox was created before debug was enabled or was
     ;; carried through a blackout/load transition.  The insertion replaces an
@@ -2430,7 +2615,17 @@
     (when
       (and (< i (-> self fish-count)) (not (fisher-fish-pointer self i)))
 
+      ;; A caught slot must not retain its old species forever.  Roll a
+      ;; fresh ordinary zone species first, then allow this exact replacement
+      ;; to become any currently eligible special fish.
+      (fisher-set-fish-species!
+        self
+        i
+        (fisher-table-species-for-new-slot self (-> self pool-golden?)))
+      (fisher-set-fish-power-cell-task! self i 0)
+      (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix))
       (fisher-randomize-fish-slot! self i)
+      (fisher-roll-passive-special-for-slot! self i)
 
       (fisher-set-fish-pointer!
         self

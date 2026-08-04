@@ -472,20 +472,3 @@
     (set! (-> dst w) 0.0))
 
   dst)
-
-(defun fisher-draw-retail-line!
-  ((line-start vector)
-    (line-end vector)
-    (line-color rgba))
-
-  ;; Restore the original continuous 3D debug-line renderer.
-  (add-debug-line
-    #t
-    (bucket-id debug-no-zbuf)
-    line-start
-    line-end
-    line-color
-    #f
-    line-color)
-
-  (none))

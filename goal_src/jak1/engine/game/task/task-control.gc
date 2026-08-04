@@ -4718,7 +4718,9 @@
                               :flags (task-flags has-entity)
                               :condition
                               (lambda :behavior process-taskable ((arg0 task-control))
-                                (>= (the int (the float (send-event *target* 'query 'pickup (pickup-type fuel-cell)))) 20)))
+                                (task-complete?
+                                  *game-info*
+                                  (game-task firecanyon-end))))
                          (new 'static
                               'task-cstage
                               :game-task (game-task firecanyon-assistant)
