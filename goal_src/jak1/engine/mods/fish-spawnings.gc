@@ -25,6 +25,18 @@
   :longest-edge (meters 4))
 
 
+(defun fisher-playfield-far-distance ((self fisher-game))
+  (if
+    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+    *fisher-sunken-far-distance*
+    (meters 55.5)))
+
+(defun fisher-playfield-max-depth ((self fisher-game))
+  (if
+    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+    *fisher-sunken-max-depth*
+    (meters 36.0)))
+
 (defun fisher-set-zone-species-range!
   ((zone fisher-zone-info)
    (index int)
@@ -190,6 +202,27 @@
     100 140 3.0 0.195 0.14 1.00 0.24 0.06
     (meters 30.0) (meters 33.0))
 
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species electric-grubfish))
+    "ELECTRIC GRUBFISH"
+    *catch-fisha-sgc*
+    30 60 1.8 0.66 0.42 0.10 0.62 1.00
+    (meters 10.0) (meters 15.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species electric-eelfish))
+    "ELECTRIC EELFISH"
+    *catch-fishc-sgc*
+    50 70 2.2 0.76 0.56 0.08 0.78 1.00
+    (meters 22.0) (meters 28.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species electric-lurker-shark))
+    "ELECTRIC LURKER SHARK"
+    *sharkey-sgc*
+    300 600 4.0 0.92 0.66 0.08 0.46 1.00
+    (meters 30.0) (meters 34.0))
+
   (dotimes (species *fisher-species-count*)
     (fisher-set-normal-fight-info!
       (fisher-species-info-for species)))
@@ -226,6 +259,45 @@
     0.0
     1.0)
 
+
+  ;; Hub 2 electric species.  Grubfish use normal reel fights, while the eel
+  ;; and shark use exact-size button waves.
+  (let ((grub (fisher-species-info-for (fisher-species electric-grubfish))))
+    (set! (-> grub fight-chance) 0.30)
+    (set! (-> grub fight-pull-speed) (meters 1.55))
+    (set! (-> grub fight-recover-min) 0.85)
+    (set! (-> grub fight-recover-max) 1.35))
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species electric-eelfish))
+    (meters 1.40)
+    0.85
+    1.25
+    0.32
+    2
+    2
+    0.22
+    0.32
+    150.0
+    160.0
+    0.0
+    1.0)
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species electric-lurker-shark))
+    (meters 1.75)
+    0.85
+    1.20
+    0.42
+    7
+    7
+    0.18
+    0.26
+    152.0
+    165.0
+    0.0
+    1.0)
+
   ;; Only species explicitly marked here steal the lure when their bite is
   ;; not hooked in time.  All other species keep the default #f value.
   (set!
@@ -233,6 +305,12 @@
     #t)
   (set!
     (-> (fisher-species-info-for (fisher-species poisonous-eelfish)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species electric-grubfish)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species electric-eelfish)) snap-on-bite?)
     #t)
   (set!
     (-> (fisher-species-info-for (fisher-species fire-canyon-cellfish)) snap-on-bite?)
@@ -269,6 +347,20 @@
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 0 (fisher-species largemouth-ecofish) 1 3 3 4)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 1 (fisher-species babak-ecofish) 1 1 1 2)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone misty-island)) 2 (fisher-species poisonous-eelfish) 5 6 6 10)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone village2-electric))
+    10 13 12 18 18 22 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village2-electric)) 0 (fisher-species electric-lurker-shark) 2 2 2 2)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village2-electric)) 1 (fisher-species electric-grubfish) 2 4 4 8)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village2-electric)) 2 (fisher-species electric-eelfish) 8 12 12 16)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone sunken-voltage))
+    13 16 11 14 16 21 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sunken-voltage)) 0 (fisher-species electric-lurker-shark) 1 1 1 1)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sunken-voltage)) 1 (fisher-species electric-grubfish) 6 8 9 12)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sunken-voltage)) 2 (fisher-species electric-eelfish) 4 5 6 8)
 
   (set! (-> (fisher-zone-info-for (fisher-zone sandover-dock)) fire-canyon-cellfish?) #t)
   (set! (-> (fisher-zone-info-for (fisher-zone jungle-pillar)) fire-canyon-cellfish?) #t)
@@ -1024,6 +1116,8 @@
 (defun fisher-power-cell-task-count-for-location ((self fisher-game))
   (cond
     ((= (-> self location-id) 4) 5)
+    ((= (-> self location-id) 5) 1)
+    ((= (-> self location-id) 6) 7)
     ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
     (else 0)))
 
@@ -1051,6 +1145,19 @@
         ((= index 2) (game-task misty-bike))
         ((= index 3) (game-task misty-bike-jump))
         (else (game-task misty-eco-challenge))))
+
+    ((= (-> self location-id) 5)
+      (game-task firecanyon-buzzer))
+
+    ((= (-> self location-id) 6)
+      (cond
+        ((= index 0) (game-task sunken-platforms))
+        ((= index 1) (game-task sunken-pipe))
+        ((= index 2) (game-task sunken-slide))
+        ((= index 3) (game-task sunken-sharks))
+        ((= index 4) (game-task sunken-top-of-helix))
+        ((= index 5) (game-task sunken-spinning-room))
+        (else (game-task sunken-room))))
 
     (else (game-task none))))
 
@@ -1092,7 +1199,9 @@
       (or
         (= (-> self location-id) 1)
         (= (-> self location-id) 3)
-        (= (-> self location-id) 4))
+        (= (-> self location-id) 4)
+        (= (-> self location-id) 5)
+        (= (-> self location-id) 6))
       (> (-> self fish-count) 0)
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
@@ -1107,7 +1216,18 @@
 
           (while (and (< step (-> self fish-count)) (< slot 0))
             (set! candidate (mod (+ start-slot step) (-> self fish-count)))
-            (when (!= (fisher-fish-species self candidate) 4)
+            (when
+              (and
+                (!= (fisher-fish-species self candidate) 4)
+                (not
+                  (and
+                    (or
+                      (= (-> self location-id)
+                        (the-as int (fisher-zone village2-electric)))
+                      (= (-> self location-id)
+                        (the-as int (fisher-zone sunken-voltage))))
+                    (= (fisher-fish-species self candidate)
+                      (the-as int (fisher-species electric-lurker-shark))))))
               (set! slot candidate))
             (+! step 1))
 
@@ -1143,6 +1263,11 @@
 
     ((= (-> self location-id) (the-as int (fisher-zone misty-island)))
       (the-as int (fisher-species poisonous-eelfish)))
+
+    ((or
+        (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+        (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+      (the-as int (fisher-species electric-eelfish)))
 
     (else
       (the-as int (fisher-species eco-drum)))))
@@ -1300,6 +1425,17 @@
 
   ;; Every replacement begins as a normal zone fish.  This helper may then
   ;; convert that exact new slot into any eligible passive special fish.
+  ;; Preserve the guaranteed Electric Lurker Shark in both Hub 2 electric
+  ;; pools instead of allowing a collectible conversion to replace it.
+  (when
+    (and
+      (or
+        (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+        (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+      (= (fisher-fish-species self slot)
+        (the-as int (fisher-species electric-lurker-shark))))
+    (return #f))
+
   (when
     (and
       (fisher-fire-canyon-cellfish-eligible? self)
@@ -1335,7 +1471,7 @@
         (if
           (and
             (< buzzer-collected 7)
-            (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.50)))
+            (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.33)))
           (fisher-find-passive-buzzer-index self buzzer-task)
           -1)))
 
@@ -1358,7 +1494,9 @@
       (or
         (= (-> self location-id) 1)
         (= (-> self location-id) 3)
-        (= (-> self location-id) 4))
+        (= (-> self location-id) 4)
+        (= (-> self location-id) 5)
+        (= (-> self location-id) 6))
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
         (if *fisher-in-debug?* 0.90 *fisher-power-cell-fish-chance*)))
@@ -1387,6 +1525,8 @@
     ((= (-> self location-id) 2) (game-task training-buzzer))
     ((= (-> self location-id) 3) (game-task beach-buzzer))
     ((= (-> self location-id) 4) (game-task misty-buzzer))
+    ((= (-> self location-id) 5) (game-task village2-buzzer))
+    ((= (-> self location-id) 6) (game-task sunken-buzzer))
     (else (game-task village1-buzzer))))
 
 (defun fisher-find-missing-buzzer-index
@@ -1422,17 +1562,9 @@
       (and
         (> remaining 0)
         (> (-> self fish-count) 0)
-        (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.50)))
+        (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.33)))
 
       (set! spawn-count 1)
-
-      (when
-        (and
-          (> remaining 1)
-          (> (-> self fish-count) 1)
-          (rand-vu-percent? (if *fisher-in-debug?* 0.75 0.35)))
-
-        (set! spawn-count 2))
 
       (set! first-index
         (fisher-find-missing-buzzer-index task start-index -1))
@@ -1628,6 +1760,92 @@
   (none))
 
 
+(defun fisher-configure-village2-table! ((self fisher-game))
+  (let* ((zone (fisher-zone-info-for (fisher-zone village2-electric)))
+      (golden? (fisher-golden-hour?))
+      (grub-count
+        (if golden?
+          (rand-vu-int-range 4 8)
+          (rand-vu-int-range 2 4)))
+      (eel-count
+        (if golden?
+          (rand-vu-int-range 12 16)
+          (rand-vu-int-range 8 12)))
+      (shark-count 2)
+      (slot 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min *fisher-max-fish-slots* (+ shark-count grub-count eel-count)))
+    (fisher-clear-power-cell-tasks! self)
+
+    (dotimes (i shark-count)
+      (when (< slot (-> self fish-count))
+        (fisher-set-fish-species!
+          self slot (the-as int (fisher-species electric-lurker-shark)))
+        (fisher-set-fish-suffix! self slot (fisher-roll-standard-fish-suffix))
+        (fisher-set-fish-level! self slot (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths! self slot (rand-vu-int-range 300 600))
+        (+! slot 1)))
+
+    (dotimes (i grub-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species electric-grubfish)))
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-configure-random-fish-slot!
+        self slot (the-as int (fisher-species electric-eelfish)))
+      (+! slot 1)))
+
+  (none))
+
+
+(defun fisher-configure-sunken-table! ((self fisher-game))
+  (let* ((zone (fisher-zone-info-for (fisher-zone sunken-voltage)))
+      (golden? (fisher-golden-hour?))
+      (grub-count
+        (if golden?
+          (rand-vu-int-range 9 12)
+          (rand-vu-int-range 6 8)))
+      (eel-count
+        (if golden?
+          (rand-vu-int-range 6 8)
+          (rand-vu-int-range 4 5)))
+      (shark-count 1)
+      (slot 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min *fisher-max-fish-slots* (+ shark-count grub-count eel-count)))
+    (fisher-clear-power-cell-tasks! self)
+
+    (dotimes (i shark-count)
+      (when (< slot (-> self fish-count))
+        (fisher-set-fish-species!
+          self slot (the-as int (fisher-species electric-lurker-shark)))
+        (fisher-set-fish-suffix! self slot (fisher-roll-standard-fish-suffix))
+        (fisher-set-fish-level! self slot (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths! self slot (rand-vu-int-range 300 600))
+        (+! slot 1)))
+
+    (dotimes (i grub-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species electric-grubfish)))
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-configure-random-fish-slot!
+        self slot (the-as int (fisher-species electric-eelfish)))
+      (+! slot 1)))
+
+  (none))
+
+
 (defun fisher-configure-zone-table! ((self fisher-game))
   ;; Build every ordinary population directly from fisher-zone-info.  The old
   ;; area-specific builders hardcoded species, and hidden growth randomized a
@@ -1707,8 +1925,56 @@
 
   (none))
 
+(defun fisher-count-live-species ((self fisher-game) (species int))
+  (let ((count 0))
+    (dotimes (slot (-> self fish-count))
+      (when
+        (and
+          (= (fisher-fish-species self slot) species)
+          (fisher-fish-pointer self slot))
+        (+! count 1)))
+    count))
+
 (defun fisher-table-species-for-new-slot
   ((self fisher-game) (golden? symbol))
+
+  ;; Sunken always maintains exactly one electric shark.  Replacement slots
+  ;; preserve the area's grubfish/eelfish population weighting.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+    (when
+      (<
+        (fisher-count-live-species
+          self
+          (the-as int (fisher-species electric-lurker-shark)))
+        1)
+      (return (the-as int (fisher-species electric-lurker-shark))))
+
+    (let ((grub-weight (if golden? 12 8))
+        (eel-weight (if golden? 8 5)))
+      (if
+        (< (rand-vu-int-range 0 (+ grub-weight eel-weight -1)) grub-weight)
+        (return (the-as int (fisher-species electric-grubfish)))
+        (return (the-as int (fisher-species electric-eelfish))))))
+
+  ;; Village2 always maintains exactly two electric sharks.  Ordinary
+  ;; replacement slots then alternate between grubfish and eelfish weights.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+    (when
+      (<
+        (fisher-count-live-species
+          self
+          (the-as int (fisher-species electric-lurker-shark)))
+        2)
+      (return (the-as int (fisher-species electric-lurker-shark))))
+
+    (let ((grub-weight (if golden? 8 4))
+        (eel-weight (if golden? 12 8)))
+      (if
+        (< (rand-vu-int-range 0 (+ grub-weight eel-weight -1)) grub-weight)
+        (return (the-as int (fisher-species electric-grubfish)))
+        (return (the-as int (fisher-species electric-eelfish))))))
 
   ;; Pick a configured species using the current table's maximum ranges as
   ;; weights.  This is used only when an invisible normal/golden transition
@@ -1733,7 +1999,13 @@
         (else (-> zone species 3))))))
 
 (defun fisher-configure-location-table! ((self fisher-game))
-  (fisher-configure-zone-table! self)
+  (cond
+    ((= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+      (fisher-configure-village2-table! self))
+    ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+      (fisher-configure-sunken-table! self))
+    (else
+      (fisher-configure-zone-table! self)))
 
   (fisher-add-buzzer-fish-slots! self)
   (fisher-add-power-cell-fish-slot! self)
@@ -2068,7 +2340,12 @@
 (defun fisher-randomize-fish-slot!
   ((self fisher-game) (slot int))
 
-  (fisher-set-fish-distance! self slot (rand-vu-float-range (meters 4.0) (meters 55.0)))
+  (fisher-set-fish-distance!
+    self
+    slot
+    (rand-vu-float-range
+      (meters 4.0)
+      (- (fisher-playfield-far-distance self) (meters 0.5))))
 
   (fisher-set-fish-lane! self slot (rand-vu-float-range (meters -1.35) (meters 1.35)))
 
@@ -2076,16 +2353,39 @@
         (fisher-species-info-for
           (fisher-fish-species self slot))))
 
-    (fisher-set-fish-depth!
-      self
-      slot
-      (rand-vu-float-range
-        (-> info depth-min)
-        (-> info depth-max))))
+    (cond
+      ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+        (cond
+          ((= (fisher-fish-species self slot)
+              (the-as int (fisher-species electric-grubfish)))
+            (fisher-set-fish-depth! self slot
+              (rand-vu-float-range (meters 10.0) (meters 15.0))))
+          ((= (fisher-fish-species self slot)
+              (the-as int (fisher-species electric-eelfish)))
+            (fisher-set-fish-depth! self slot
+              (rand-vu-float-range (meters 16.0) (meters 18.2))))
+          (else
+            (fisher-set-fish-depth! self slot
+              (rand-vu-float-range (meters 18.2) *fisher-sunken-max-depth*)))))
+      (else
+        (fisher-set-fish-depth!
+          self
+          slot
+          (rand-vu-float-range
+            (-> info depth-min)
+            (-> info depth-max))))))
 
   (fisher-set-fish-direction! self slot (if (rand-vu-percent? 0.5) 1.0 -1.0))
 
   (fisher-set-fish-speed! self slot (rand-vu-float-range (meters 0.75) (meters 1.55)))
+
+  (when
+    (= (fisher-fish-species self slot)
+      (the-as int (fisher-species electric-grubfish)))
+    (fisher-set-fish-speed!
+      self
+      slot
+      (* (fisher-fish-speed self slot) 1.5)))
 
   (fisher-set-fish-cooldown! self slot 0.0)
 
@@ -2895,7 +3195,14 @@
 
         (singlefish-vector-normalize-safe! side-axis 1.0)
 
-        (fisher-set-fish-distance! self slot (fmax (meters 3.5) (fmin (meters 55.5) (vector-dot from-origin (-> self playfield-axis)))))
+        (fisher-set-fish-distance!
+          self
+          slot
+          (fmax
+            (meters 3.5)
+            (fmin
+              (fisher-playfield-far-distance self)
+              (vector-dot from-origin (-> self playfield-axis)))))
 
         (fisher-set-fish-lane! self slot (fmax (meters -1.5) (fmin (meters 1.5) (vector-dot from-origin side-axis))))
 
@@ -3087,21 +3394,33 @@
       (set! (-> self caught-weight-tenths) weight)
       (set!
         (-> self caught-orb-value)
-        (let ((final-orb-value
+        (let* ((final-orb-value
+                (cond
+                  ((= species 3)
+                    (the int (+ (/ (the float raw-orb-value) 3.0) 0.5)))
+                  ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+                    (the int (+ (/ (the float raw-orb-value) 3.0) 0.5)))
+                  (else raw-orb-value)))
+
+            (uncapped-orb-value
               (cond
-                ((= species 3)
-                  (the int (+ (/ (the float raw-orb-value) 3.0) 0.5)))
-                ((= species (the-as int (fisher-species fire-canyon-cellfish)))
-                  (the int (+ (/ (the float raw-orb-value) 3.0) 0.5)))
-                (else raw-orb-value))))
-          (cond
-            ((= suffix 10) 90)
+                ((= suffix 10) 90)
 
-            ((= suffix 7) (+ (max 1 final-orb-value) 35))
-            ((= suffix 8) (+ (max 1 final-orb-value) 50))
+                ((= suffix 7) (+ (max 1 final-orb-value) 35))
+                ((= suffix 8) (+ (max 1 final-orb-value) 50))
 
-            ((>= levels-below 5) (max 0 final-orb-value))
-            (else (max 1 final-orb-value)))))
+                ((>= levels-below 5) (max 0 final-orb-value))
+                (else (max 1 final-orb-value)))))
+
+          ;; Ordinary fish are capped at 50 calculated orbs, then receive a
+          ;; fresh 1-8 orb pull bonus.  True rare fish retain their original
+          ;; uncapped payout and do not use this normal-fish cap.
+          (if
+            (fisher-rare-fish? suffix)
+            uncapped-orb-value
+            (+
+              (min 50 uncapped-orb-value)
+              (rand-vu-int-range 1 9)))))
       (set!
         (-> self caught-fish-xp)
         (fisher-accepted-xp-amount catch-xp))

@@ -560,6 +560,7 @@
   (set! (-> self location-id) location-id)
   (set! (-> self fish-data) *fisher-fish-runtime*)
   (set! (-> self button-fight-data) *fisher-button-fight-runtime*)
+  (set! (-> self voltage-data) *fisher-voltage-runtime*)
   (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
   (vector-copy! (-> self pos) vec)
   (vector-copy!
@@ -636,6 +637,37 @@
   (set! (-> self caught-buzzer-task) 0)
   (set! (-> self power-cell-victory-pending?) #f)
   (set! (-> self caught-power-cell-task) 0)
+  (set! (-> self electric-state) 'waiting)
+  (set! (-> self electric-timer)
+    (rand-vu-float-range
+      *fisher-electric-cycle-min-seconds*
+      *fisher-electric-cycle-max-seconds*))
+  (set! (-> self electric-slot) -1)
+  (set! (-> self electric-line-time) 0.0)
+  (set! (-> self electric-line-stun-time) 0.0)
+  (set! (-> self electric-stun-triggered?) #f)
+  ;; The electric effect launches the real blue-eco particle definitions
+  ;; directly.  Keep these legacy fields as true null controls; allocating four
+  ;; copies of the large vent group can overflow the fisher process heap.
+  (set! (-> self electric-charge-part)
+    (the-as sparticle-launch-control 0))
+  (set! (-> self electric-projectile-part)
+    (the-as sparticle-launch-control 0))
+  (set! (-> self electric-line-part-a)
+    (the-as sparticle-launch-control 0))
+  (set! (-> self electric-line-part-b)
+    (the-as sparticle-launch-control 0))
+  (vector-reset! (-> self electric-projectile-pos))
+  (vector-reset! (-> self electric-projectile-dir))
+  (set! (-> self voltage-time) 0.0)
+  (set! (-> self voltage-flash-time) 0.0)
+  (set! (-> self voltage-active?) #f)
+  (set! (-> self voltage-shots-remaining) 0)
+  (dotimes (voltage-slot *fisher-max-fish-slots*)
+    (set! (-> self voltage-data slot voltage-slot state) 0)
+    (set! (-> self voltage-data slot voltage-slot timer) 0.0)
+    (vector-reset! (-> self voltage-data slot voltage-slot position))
+    (vector-reset! (-> self voltage-data slot voltage-slot direction)))
   (set! (-> self fish-count) 0)
   (dotimes (slot-index *fisher-max-fish-slots*)
     (set! (-> self fish-data slot slot-index visual)
@@ -1420,6 +1452,75 @@
 
   dst)
 
+(defun fisher-village2-curtain-color!
+  ((dst vector))
+
+  (let ((hour
+          (if
+            *time-of-day-context*
+            (-> *time-of-day-context* time)
+            12.0))
+        (blend 0.0))
+
+    (cond
+      ((and (>= hour 4.0) (< hour 7.0))
+        (set! blend (/ (- hour 4.0) 3.0))
+        (set! (-> dst x) (+ 5.0 (* (- 18.0 5.0) blend)))
+        (set! (-> dst y) (+ 50.0 (* (- 73.0 50.0) blend)))
+        (set! (-> dst z) (+ 62.0 (* (- 77.0 62.0) blend))))
+
+      ((and (>= hour 7.0) (< hour 9.0))
+        (set! blend (/ (- hour 7.0) 2.0))
+        (set! (-> dst x) (+ 18.0 (* (- 23.0 18.0) blend)))
+        (set! (-> dst y) (+ 73.0 (* (- 80.0 73.0) blend)))
+        (set! (-> dst z) (+ 77.0 (* (- 90.0 77.0) blend))))
+
+      ((and (>= hour 9.0) (< hour 12.0))
+        (set! blend (/ (- hour 9.0) 3.0))
+        (set! (-> dst x) 23.0)
+        (set! (-> dst y) (+ 80.0 (* (- 84.0 80.0) blend)))
+        (set! (-> dst z) (+ 90.0 (* (- 92.0 90.0) blend))))
+
+      ((and (>= hour 12.0) (< hour 15.0))
+        (set! blend (/ (- hour 12.0) 3.0))
+        (set! (-> dst x) (+ 23.0 (* (- 21.0 23.0) blend)))
+        (set! (-> dst y) (+ 84.0 (* (- 77.0 84.0) blend)))
+        (set! (-> dst z) (+ 92.0 (* (- 85.0 92.0) blend))))
+
+      ((and (>= hour 15.0) (< hour 18.0))
+        (set! blend (/ (- hour 15.0) 3.0))
+        (set! (-> dst x) (+ 21.0 (* (- 20.0 21.0) blend)))
+        (set! (-> dst y) (+ 77.0 (* (- 72.0 77.0) blend)))
+        (set! (-> dst z) (+ 85.0 (* (- 80.0 85.0) blend))))
+
+      ((and (>= hour 18.0) (< hour 19.0))
+        (set! blend (- hour 18.0))
+        (set! (-> dst x) (+ 20.0 (* (- 9.0 20.0) blend)))
+        (set! (-> dst y) (+ 72.0 (* (- 50.0 72.0) blend)))
+        (set! (-> dst z) (+ 80.0 (* (- 65.0 80.0) blend))))
+
+      ((and (>= hour 19.0) (< hour 23.0))
+        (set! blend (/ (- hour 19.0) 4.0))
+        (set! (-> dst x) (+ 9.0 (* (- 2.0 9.0) blend)))
+        (set! (-> dst y) (+ 50.0 (* (- 38.0 50.0) blend)))
+        (set! (-> dst z) (+ 65.0 (* (- 58.0 65.0) blend))))
+
+      ((>= hour 23.0)
+        (set! blend (/ (- hour 23.0) 5.0))
+        (set! (-> dst x) (+ 2.0 (* (- 5.0 2.0) blend)))
+        (set! (-> dst y) (+ 38.0 (* (- 50.0 38.0) blend)))
+        (set! (-> dst z) (+ 58.0 (* (- 62.0 58.0) blend))))
+
+      (else
+        (set! blend (/ (+ hour 1.0) 5.0))
+        (set! (-> dst x) (+ 2.0 (* (- 5.0 2.0) blend)))
+        (set! (-> dst y) (+ 38.0 (* (- 50.0 38.0) blend)))
+        (set! (-> dst z) (+ 58.0 (* (- 62.0 58.0) blend)))))
+
+    (set! (-> dst w) 1.0))
+
+  dst)
+
 (defun fisher-background-color!
   ((dst vector))
 
@@ -1580,6 +1681,16 @@
       (vector-normalize! curtain-forward 1.0)
 
       (fisher-update-background-mist-color!)
+
+      ;; Village2's brighter cyan curtain was making the full-screen bigpuff
+      ;; overpower the electric projectile.  Keep all other areas unchanged,
+      ;; but force a much lower alpha for this water.
+      (when
+        (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+        (set!
+          (-> *part-id-table* 3572 init-specs 10 initial-valuef)
+          8.0))
+
       (fisher-set-particle-fishbox-rotation! self)
 
       ;;
@@ -2213,6 +2324,8 @@
   (set! (-> self tug-line-active?) #f)
   (set! (-> self tug-line-time) 0.0)
   (set! (-> self bubble-time) -2.0)
+  (set! (-> self electric-slot) -1)
+  (fisher-reset-electric-cycle! self)
 
   (none))
 
@@ -2544,7 +2657,7 @@
     (let ((axis (new 'stack-no-clear 'vector))
         (side-axis (new 'stack-no-clear 'vector))
         (near-distance (meters 3.5))
-        (far-distance (meters 55.5))
+        (far-distance (fisher-playfield-far-distance self))
         (half-width (meters 1.5))
         (top-height (- (-> self water-level) (meters 3.5)))
         (bottom-height (- (-> self water-level) (meters 35.5)))
@@ -2760,7 +2873,10 @@
   (let* ((owner
         (the-as fisher-game (-> self owner)))
 
-      (distance (rand-vu-float-range (meters 4.0) (meters 55.0)))
+      (distance
+        (rand-vu-float-range
+          (meters 4.0)
+          (- (fisher-playfield-far-distance owner) (meters 0.5))))
 
       (y-offset (rand-vu-float-range (meters 1.0) (meters 2.0)))
 
@@ -2793,12 +2909,19 @@
 
     (set! (-> self home-y) (fmax row-bottom (fmin row-top (+ row-center y-offset))))
 
+    (when
+      (= (-> owner location-id) (the-as int (fisher-zone sunken-voltage)))
+      (set! (-> self home-y)
+        (fmax
+          (- (-> owner water-level) (fisher-playfield-max-depth owner))
+          (-> self home-y))))
+
     (set! (-> self lane-offset) (rand-vu-float-range (meters -1.5) (meters 1.5)))
 
     (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
 
     (set! (-> self left-distance) (meters 3.5))
-    (set! (-> self right-distance) (meters 55.5))
+    (set! (-> self right-distance) (fisher-playfield-far-distance owner))
 
     (singlefish-vector-add-scaled-safe! (-> self root trans) (-> owner fishing-player-pos) (-> owner playfield-axis) distance)
 
@@ -3110,10 +3233,18 @@
     (set! (-> owner caught-weight-tenths) (-> self weight-tenths))
     (set!
       (-> owner caught-orb-value)
-      (if
-        (string= (-> self species-name) "Lurker Shark")
-        (max 1 (the int (+ (/ (the float (-> self orb-value)) 3.0) 0.5)))
-        (-> self orb-value)))
+      (let ((uncapped-orb-value
+            (if
+              (string= (-> self species-name) "Lurker Shark")
+              (max 1 (the int (+ (/ (the float (-> self orb-value)) 3.0) 0.5)))
+              (-> self orb-value))))
+
+        (if
+          (fisher-rare-fish? suffix)
+          uncapped-orb-value
+          (+
+            (min 50 uncapped-orb-value)
+            (rand-vu-int-range 1 9)))))
     (set! (-> owner caught-fish-xp) (fisher-accepted-xp-amount catch-xp))
 
     (set! (-> owner fish-state) 'catch-display)
@@ -3145,7 +3276,7 @@
       (top-y (- (-> owner water-level) (meters 3.0)))
 
       (bottom-y
-        (- (-> owner water-level) (meters 36.0)))
+        (- (-> owner water-level) (fisher-playfield-max-depth owner)))
 
       (reel-mult
         (if
@@ -3280,11 +3411,11 @@
         (set! (-> owner lure-pos y) saved-y)
         (set! horizontal-distance (meters 2.0)))
 
-      ((> horizontal-distance (meters 55.5))
-        (singlefish-vector-add-scaled-safe! (-> owner lure-pos) (-> owner fishing-player-pos) (-> owner playfield-axis) (meters 55.5))
+      ((> horizontal-distance (fisher-playfield-far-distance owner))
+        (singlefish-vector-add-scaled-safe! (-> owner lure-pos) (-> owner fishing-player-pos) (-> owner playfield-axis) (fisher-playfield-far-distance owner))
 
         (set! (-> owner lure-pos y) saved-y)
-        (set! horizontal-distance (meters 55.5))))
+        (set! horizontal-distance (fisher-playfield-far-distance owner))))
 
     (when (> (-> owner lure-pos y) top-y) (set! (-> owner lure-pos y) top-y))
 
@@ -3560,6 +3691,21 @@
               ((= (-> self caught-fish-species) 5) *catch-fishc-sgc*)
 
               ((= (-> self caught-fish-species) 6) *sharkey-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species electric-grubfish)))
+                *catch-fisha-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species electric-eelfish)))
+                *catch-fishc-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species electric-lurker-shark)))
+                *sharkey-sgc*)
 
               (else
                 *catch-fisha-sgc*))
@@ -4422,6 +4568,12 @@
       ((= (fisher-fish-species self slot) 1) (meters 10.5))
       ((= (fisher-fish-species self slot) 2) (meters 9.5))
       ((= (fisher-fish-species self slot) 5) (meters 10.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species electric-grubfish))) (meters 9.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species electric-eelfish))) (meters 10.5))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species electric-lurker-shark))) (meters 18.0))
       (else (meters 8.5)))))
 
 (defun fisher-update-lure! ((self fisher-game))
@@ -4430,7 +4582,7 @@
       (horizontal-distance 0.0)
       (saved-y 0.0)
       (top-y (- (-> self water-level) (meters 3.0)))
-      (bottom-y (- (-> self water-level) (meters 36.0)))
+      (bottom-y (- (-> self water-level) (fisher-playfield-max-depth self)))
       (current-speed -0.18)
       (bottom-current-speed -0.28)
       (reel-mult
@@ -4484,7 +4636,9 @@
       (fisher-show-lure-skill-message! self "SINK LURE"))
 
     (when
-      (cpad-hold? 0 x)
+      (and
+        (cpad-hold? 0 x)
+        (<= (-> self electric-line-stun-time) 0.0))
 
       (when
         (-> self lure-stop-active?)
@@ -4508,7 +4662,9 @@
         (set! (-> self lure-sink-time) 0.0)))
 
     (cond
-      ((cpad-hold? 0 x)
+      ((and
+          (cpad-hold? 0 x)
+          (<= (-> self electric-line-stun-time) 0.0))
         (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (- (* (meters 1.0) (-> self lure-reel-x-speed) reel-mult dt)))
 
         (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-reel-y-speed) reel-mult dt))
@@ -4591,9 +4747,9 @@
       )
 
       ((> horizontal-distance
-          (meters 55.5))
+          (fisher-playfield-far-distance self))
 
-        (vector+float*! (-> self lure-pos) (-> self fishing-player-pos) (-> self lure-cast-axis) (meters 55.5))
+        (vector+float*! (-> self lure-pos) (-> self fishing-player-pos) (-> self lure-cast-axis) (fisher-playfield-far-distance self))
 
         (set! (-> self lure-pos y) saved-y)
 
@@ -4657,6 +4813,9 @@
           ((= species 3) 260.0)
           ((= species (the-as int (fisher-species fire-canyon-cellfish))) 204.0)
           ((= species 5) 35.0)
+          ((= species (the-as int (fisher-species electric-grubfish))) 45.0)
+          ((= species (the-as int (fisher-species electric-eelfish))) 60.0)
+          ((= species (the-as int (fisher-species electric-lurker-shark))) 450.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
           (else 15.0))))
@@ -4681,6 +4840,9 @@
             105.0)
           ((= species 1) 52.0)
           ((= species 5) 38.0)
+          ((= species (the-as int (fisher-species electric-grubfish))) 42.0)
+          ((= species (the-as int (fisher-species electric-eelfish))) 48.0)
+          ((= species (the-as int (fisher-species electric-lurker-shark))) 128.0)
           (else 34.0)))
 
       (fish-level
@@ -4698,7 +4860,8 @@
       (if
         (or
           (= species (the-as int (fisher-species lurker-shark)))
-          (= species (the-as int (fisher-species fire-canyon-cellfish))))
+          (= species (the-as int (fisher-species fire-canyon-cellfish)))
+          (= species (the-as int (fisher-species electric-lurker-shark))))
         (fmax 1.15 level-mult)
         level-mult))))
 
@@ -5099,9 +5262,12 @@
                     (*
                       (fisher-fight-damage-per-second self slot)
                       (-> info button-miss-scale)
+                      10.0
                       dt)))))
 
-            ((cpad-hold? 0 x)
+            ((and
+                (cpad-hold? 0 x)
+                (<= (-> self electric-line-stun-time) 0.0))
               (fisher-damage-line!
                 (*
                   (fisher-fight-damage-per-second self slot)
@@ -5343,8 +5509,8 @@
                     (cond
                       ((<= distance (meters 3.5)) (set! distance (meters 3.5)) (fisher-set-fish-direction! self slot 1.0))
 
-                      ((>= distance (meters 55.5))
-                        (set! distance (meters 55.5))
+                      ((>= distance (fisher-playfield-far-distance self))
+                        (set! distance (fisher-playfield-far-distance self))
                         (fisher-set-fish-direction!
                           self
                           slot
@@ -5382,8 +5548,8 @@
                           slot
                           1.0))
 
-                      ((>= distance (meters 55.5))
-                        (set! distance (meters 55.5))
+                      ((>= distance (fisher-playfield-far-distance self))
+                        (set! distance (fisher-playfield-far-distance self))
 
                         (fisher-start-manipy-turn!
                           self
@@ -5672,6 +5838,8 @@
   (set! *fisher-line-hp-max* (+ 15.0 (* 85.0 (-> self cast-charge))))
 
   (fisher-reset-line-hp!)
+  (set! (-> self electric-slot) -1)
+  (fisher-reset-electric-cycle! self)
 
   (let ((cast-distance
         (+
@@ -6088,14 +6256,21 @@
       (let ((active-curtain-color
               (new 'stack-no-clear 'vector)))
 
-        (if
-          (=
-            (-> self location-id)
-            (the-as int (fisher-zone misty-island)))
-          (fisher-misty-curtain-color! active-curtain-color)
-          (set!
-            (-> active-curtain-color quad)
-            (-> *fisher-underwater-haze-color* quad)))
+        (cond
+          ((=
+              (-> self location-id)
+              (the-as int (fisher-zone misty-island)))
+            (fisher-misty-curtain-color! active-curtain-color))
+
+          ((=
+              (-> self location-id)
+              (the-as int (fisher-zone village2-electric)))
+            (fisher-village2-curtain-color! active-curtain-color))
+
+          (else
+            (set!
+              (-> active-curtain-color quad)
+              (-> *fisher-underwater-haze-color* quad))))
 
         (set!
           (-> curtain-color r)
@@ -6217,10 +6392,11 @@
   (cond
     ((-> self camera-underwater?)
       (fisher-force-underwater-background!)
-      (fisher-draw-background-curtain! self)
-
-      (fisher-submit-background-mist! self)
-      (fisher-submit-god-rays! self))
+      (when
+        (!= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+        (fisher-draw-background-curtain! self)
+        (fisher-submit-background-mist! self)
+        (fisher-submit-god-rays! self)))
 
     (else
       (set!
@@ -6509,6 +6685,15 @@
             (set! (-> line-color b) #x00)))
 
         (set! (-> line-color a) #xc0))
+
+      (when
+        (or
+          (= (-> self electric-state) 'line-charge)
+          (> (-> self electric-line-stun-time) 0.0))
+        (set! (-> line-color r) #x18)
+        (set! (-> line-color g) #xb8)
+        (set! (-> line-color b) #xff)
+        (set! (-> line-color a) #xe8))
 
       (vector-copy!
         line-start
@@ -7008,8 +7193,774 @@
 
   (none))
 
+(defun fisher-electric-species? ((species int))
+  (or
+    (= species (the-as int (fisher-species electric-grubfish)))
+    (= species (the-as int (fisher-species electric-eelfish)))
+    (= species (the-as int (fisher-species electric-lurker-shark)))))
+
+(defun fisher-reset-electric-cycle! ((self fisher-game))
+  (set! (-> self electric-state) 'waiting)
+  (set! (-> self electric-timer)
+    (rand-vu-float-range
+      *fisher-electric-cycle-min-seconds*
+      *fisher-electric-cycle-max-seconds*))
+  ;; Preserve the previous selected slot while waiting so the next cycle can
+  ;; prefer another fish instead of immediately choosing the same resident.
+  (set! (-> self electric-line-time) 0.0)
+  (set! (-> self electric-line-stun-time) 0.0)
+  (set! (-> self electric-stun-triggered?) #f)
+  ;; Electric particles are stateless direct launches, so there are no
+  ;; launch-control handles to kill here.
+  (vector-reset! (-> self electric-projectile-pos))
+  (vector-reset! (-> self electric-projectile-dir))
+  (none))
+
+(defun fisher-find-electric-slot ((self fisher-game))
+  (when (> (-> self fish-count) 0)
+    (let ((start (rand-vu-int-range 0 (- (-> self fish-count) 1)))
+        (step 0)
+        (slot 0)
+        (previous-slot (-> self electric-slot)))
+
+      ;; Prefer a different resident from the previous electrification cycle.
+      (while (< step (-> self fish-count))
+        (set! slot (mod (+ start step) (-> self fish-count)))
+        (when
+          (and
+            (!= slot previous-slot)
+            (!= slot (-> self hooked-fish-slot))
+            (fisher-electric-species? (fisher-fish-species self slot))
+            (fisher-fish-pointer self slot))
+          (return slot))
+        (+! step 1))
+
+      ;; Fallback only if every other eligible resident disappeared.
+      (when
+        (and
+          (>= previous-slot 0)
+          (< previous-slot (-> self fish-count))
+          (!= previous-slot (-> self hooked-fish-slot))
+          (fisher-electric-species?
+            (fisher-fish-species self previous-slot))
+          (fisher-fish-pointer self previous-slot))
+        (return previous-slot))))
+  -1)
+
+(defun fisher-submit-electric-particle!
+  ((self fisher-game) (pos vector) (channel int))
+
+  (when
+    (or
+      (-> self camera-underwater?)
+      (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+    ;; Camera-facing variants of the original blue-eco glow, starflash and
+    ;; lightning palette.  Re-submitting these short-lived particles keeps the
+    ;; effect locked to the moving fish/projectile without stretching it along
+    ;; a world-space vent orientation.
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3581)
+      pos)
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3582)
+      pos)
+
+    (cond
+      ((= channel 0)
+        ;; Charging fish: slightly calmer, one compact arc.
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3583)
+          pos))
+
+      ((= channel 1)
+        ;; Moving projectile: two compact arcs make the fast shot readable.
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3583)
+          pos)
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3583)
+          pos))
+
+      (else
+        ;; The two particles travelling along the fishing line.
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3583)
+          pos))))
+
+  (none))
+
+(defun fisher-point-near-segment?
+  ((point vector) (line-start vector) (line-end vector) (radius float))
+  (let ((line (new 'stack-no-clear 'vector))
+      (to-point (new 'stack-no-clear 'vector))
+      (closest (new 'stack-no-clear 'vector))
+      (denom 0.0)
+      (segment-t 0.0))
+    (vector-! line line-end line-start)
+    (vector-! to-point point line-start)
+    (set! denom (vector-dot line line))
+    (when (> denom 0.0001)
+      (set! segment-t
+        (fmax
+          0.0
+          (fmin
+            1.0
+            (/ (vector-dot to-point line) denom))))
+      (vector+float*! closest line-start line segment-t)
+      (return
+        (<=
+          (vector-vector-distance point closest)
+          radius))))
+  #f)
+
+(defun fisher-electric-line-points!
+  ((self fisher-game) (line-start vector) (line-end vector))
+  (vector-copy! line-start (target-pos 0))
+  (+! (-> line-start y) (meters 3.25))
+  (set! (-> line-start w) 1.0)
+  (fisher-hook-target! self line-end)
+  (set! (-> line-end w) 1.0)
+  (none))
+
+(defun fisher-electric-projectile-hits-visible-line?
+  ((self fisher-game) (previous-pos vector) (current-pos vector))
+
+  ;; The retail line is rendered from Jak's projected position to the fixed
+  ;; screen point (512, 506).  Treat the projectile as a visible sprite rather
+  ;; than an infinitely thin point: test the whole frame-to-frame sweep against
+  ;; a 42-pixel corridor surrounding that exact rendered segment.
+  (let ((projected
+          (new 'stack 'vector4w-2))
+
+      (projected-current
+          (new 'stack 'vector4w-2))
+
+      (line-world-start
+          (new 'stack-no-clear 'vector))
+
+      (line-start-x 0)
+      (line-start-y 0)
+      (line-end-x 512)
+      (line-end-y 506)
+      (projectile-old-x 0)
+      (projectile-old-y 0)
+      (projectile-new-x 0)
+      (projectile-new-y 0)
+      (projectile-mid-x 0)
+      (projectile-mid-y 0)
+      (line-dx 0)
+      (line-dy 0)
+      (shot-dx 0)
+      (shot-dy 0)
+      (offset-x 0)
+      (offset-y 0)
+      (denominator 0)
+      (line-time-numerator 0)
+      (shot-time-numerator 0)
+      (line-length-squared 0)
+      (hit-radius-squared (* 42 42))
+      (old-dot 0)
+      (new-dot 0)
+      (mid-dot 0)
+      (old-cross 0)
+      (new-cross 0)
+      (mid-cross 0)
+      (old-near? #f)
+      (new-near? #f)
+      (mid-near? #f)
+      (crosses? #f))
+
+    (vector-copy! line-world-start (target-pos 0))
+    (+! (-> line-world-start y) (meters 3.25))
+    (set! (-> line-world-start w) 1.0)
+
+    (transform-point-qword!
+      (-> projected vector 0)
+      line-world-start)
+
+    (transform-point-qword!
+      (-> projected vector 1)
+      previous-pos)
+
+    (transform-point-qword!
+      (-> projected-current vector 0)
+      current-pos)
+
+    (set!
+      line-start-x
+      (the int
+        (/
+          (max 512 (min 65024 (-> projected vector 0 x)))
+          64)))
+
+    (set!
+      line-start-y
+      (the int
+        (/
+          (max 512 (min 65024 (-> projected vector 0 y)))
+          64)))
+
+    (set! projectile-old-x
+      (the int (/ (-> projected vector 1 x) 64)))
+    (set! projectile-old-y
+      (the int (/ (-> projected vector 1 y) 64)))
+    (set! projectile-new-x
+      (the int (/ (-> projected-current vector 0 x) 64)))
+    (set! projectile-new-y
+      (the int (/ (-> projected-current vector 0 y) 64)))
+    (set! projectile-mid-x (/ (+ projectile-old-x projectile-new-x) 2))
+    (set! projectile-mid-y (/ (+ projectile-old-y projectile-new-y) 2))
+
+    (set! line-dx (- line-end-x line-start-x))
+    (set! line-dy (- line-end-y line-start-y))
+    (set! shot-dx (- projectile-new-x projectile-old-x))
+    (set! shot-dy (- projectile-new-y projectile-old-y))
+    (set! offset-x (- projectile-old-x line-start-x))
+    (set! offset-y (- projectile-old-y line-start-y))
+
+    ;; Exact swept-segment intersection.
+    (set! denominator
+      (- (* line-dx shot-dy) (* line-dy shot-dx)))
+    (set! line-time-numerator
+      (- (* offset-x shot-dy) (* offset-y shot-dx)))
+    (set! shot-time-numerator
+      (- (* offset-x line-dy) (* offset-y line-dx)))
+
+    (set! crosses?
+      (cond
+        ((> denominator 0)
+          (and
+            (>= line-time-numerator 0)
+            (<= line-time-numerator denominator)
+            (>= shot-time-numerator 0)
+            (<= shot-time-numerator denominator)))
+        ((< denominator 0)
+          (and
+            (<= line-time-numerator 0)
+            (>= line-time-numerator denominator)
+            (<= shot-time-numerator 0)
+            (>= shot-time-numerator denominator)))
+        (else #f)))
+
+    ;; Visible-width collision at the old, middle and new sweep positions.
+    (set! line-length-squared
+      (+ (* line-dx line-dx) (* line-dy line-dy)))
+
+    (when (> line-length-squared 0)
+      (let ((old-x (- projectile-old-x line-start-x))
+          (old-y (- projectile-old-y line-start-y))
+          (new-x (- projectile-new-x line-start-x))
+          (new-y (- projectile-new-y line-start-y))
+          (mid-x (- projectile-mid-x line-start-x))
+          (mid-y (- projectile-mid-y line-start-y)))
+
+        (set! old-dot (+ (* old-x line-dx) (* old-y line-dy)))
+        (set! new-dot (+ (* new-x line-dx) (* new-y line-dy)))
+        (set! mid-dot (+ (* mid-x line-dx) (* mid-y line-dy)))
+
+        (set! old-cross (- (* old-x line-dy) (* old-y line-dx)))
+        (set! new-cross (- (* new-x line-dy) (* new-y line-dx)))
+        (set! mid-cross (- (* mid-x line-dy) (* mid-y line-dx)))
+
+        (set! old-near?
+          (and
+            (>= old-dot 0)
+            (<= old-dot line-length-squared)
+            (<= (* old-cross old-cross)
+                (* hit-radius-squared line-length-squared))))
+
+        (set! new-near?
+          (and
+            (>= new-dot 0)
+            (<= new-dot line-length-squared)
+            (<= (* new-cross new-cross)
+                (* hit-radius-squared line-length-squared))))
+
+        (set! mid-near?
+          (and
+            (>= mid-dot 0)
+            (<= mid-dot line-length-squared)
+            (<= (* mid-cross mid-cross)
+                (* hit-radius-squared line-length-squared)))))
+
+    (or crosses? old-near? mid-near? new-near?))))
+
+(defun fisher-finish-voltage-shot! ((self fisher-game) (slot int))
+  (when (!= (-> self voltage-data slot slot state) 4)
+    (set! (-> self voltage-data slot slot state) 4)
+    (when (> (-> self voltage-shots-remaining) 0)
+      (-! (-> self voltage-shots-remaining) 1)))
+  (none))
+
+(defun fisher-reset-voltage-cycle! ((self fisher-game))
+  (set! (-> self voltage-time) 0.0)
+  (set! (-> self voltage-flash-time) 0.0)
+  (set! (-> self voltage-active?) #f)
+  (set! (-> self voltage-shots-remaining) 0)
+  (dotimes (slot *fisher-max-fish-slots*)
+    (set! (-> self voltage-data slot slot state) 0)
+    (set! (-> self voltage-data slot slot timer) 0.0)
+    (vector-reset! (-> self voltage-data slot slot position))
+    (vector-reset! (-> self voltage-data slot slot direction)))
+  (none))
+
+(defun fisher-start-voltage-surge! ((self fisher-game))
+  (set! (-> self voltage-time) *fisher-voltage-fill-seconds*)
+  (set! (-> self voltage-flash-time) 0.0)
+  (set! (-> self voltage-active?) #t)
+  (set! (-> self voltage-shots-remaining) 0)
+
+  (dotimes (slot *fisher-max-fish-slots*)
+    (set! (-> self voltage-data slot slot state) 0)
+    (set! (-> self voltage-data slot slot timer) 0.0))
+
+  (dotimes (slot (-> self fish-count))
+    (when (fisher-fish-pointer self slot)
+      ;; Every resident participates, including a rare fish that replaced one
+      ;; of the normal electric species.
+      (set! (-> self voltage-data slot slot state) 1)
+      (set! (-> self voltage-data slot slot timer)
+        (rand-vu-float-range 0.0 *fisher-voltage-shot-spread-seconds*))
+      (+! (-> self voltage-shots-remaining) 1)))
+
+  (when (<= (-> self voltage-shots-remaining) 0)
+    (fisher-reset-voltage-cycle! self))
+  (none))
+
+(defun fisher-update-sunken-line-charge! ((self fisher-game) (dt float))
+  (when (> (-> self electric-line-stun-time) 0.0)
+    (-! (-> self electric-line-stun-time) dt)
+    (when (< (-> self electric-line-stun-time) 0.0)
+      (set! (-> self electric-line-stun-time) 0.0)))
+
+  (cond
+    ((= (-> self electric-state) 'line-charge)
+      (+! (-> self electric-line-time) dt)
+
+      (let ((line-start (new 'stack-no-clear 'vector))
+          (line-end (new 'stack-no-clear 'vector))
+          (midpoint (new 'stack-no-clear 'vector))
+          (to-start (new 'stack-no-clear 'vector))
+          (to-end (new 'stack-no-clear 'vector))
+          (particle-a (new 'stack-no-clear 'vector))
+          (particle-b (new 'stack-no-clear 'vector))
+          (progress
+            (fmin
+              1.0
+              (/ (-> self electric-line-time)
+                *fisher-electric-line-travel-seconds*))))
+
+        (fisher-electric-line-points! self line-start line-end)
+        (vector+! midpoint line-start line-end)
+        (vector-float*! midpoint midpoint 0.5)
+        (vector-! to-start line-start midpoint)
+        (vector-! to-end line-end midpoint)
+        (vector+float*! particle-a midpoint to-start progress)
+        (vector+float*! particle-b midpoint to-end progress)
+        (fisher-submit-electric-particle! self particle-a 2)
+        (fisher-submit-electric-particle! self particle-b 3))
+
+      (when
+        (and
+          (not (-> self electric-stun-triggered?))
+          (-> self casted?)
+          (= (-> self cast-state) 'line-active)
+          (not (-> self fish-fighting?))
+          (not (-> self button-fight-data active?))
+          (cpad-hold? 0 x))
+        (cpad-clear! 0 x)
+        (set! (-> self electric-stun-triggered?) #t)
+        (set! (-> self electric-line-stun-time)
+          *fisher-electric-line-stun-seconds*)
+        (fisher-show-lure-skill-message! self "LINE IS STUNNED!"))
+
+      (when
+        (>= (-> self electric-line-time)
+          *fisher-electric-line-travel-seconds*)
+        (cond
+          ((-> self electric-stun-triggered?)
+            (set! (-> self electric-state) 'stunned))
+          (else
+            (set! (-> self electric-state) 'waiting)
+            (set! (-> self electric-line-time) 0.0)))))
+
+    ((= (-> self electric-state) 'stunned)
+      (when (<= (-> self electric-line-stun-time) 0.0)
+        (set! (-> self electric-state) 'waiting)
+        (set! (-> self electric-line-time) 0.0)
+        (set! (-> self electric-stun-triggered?) #f))))
+  (none))
+
+(defun fisher-update-voltage-surge! ((self fisher-game))
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+    (let ((dt (-> *display* seconds-per-frame)))
+      (fisher-update-sunken-line-charge! self dt)
+
+      (cond
+        ((-> self voltage-active?)
+          (+! (-> self voltage-flash-time) dt)
+
+          (dotimes (slot *fisher-max-fish-slots*)
+            (let ((state (-> self voltage-data slot slot state)))
+              (cond
+                ((= state 1)
+                  (-! (-> self voltage-data slot slot timer) dt)
+                  (when (<= (-> self voltage-data slot slot timer) 0.0)
+                    (set! (-> self voltage-data slot slot state) 2)
+                    (set! (-> self voltage-data slot slot timer)
+                      *fisher-electric-charge-seconds*)
+                    (play-sound-file
+                      "zapping.mp3"
+                      (the int (-> *setting-control* current sfx-volume)))))
+
+                ((= state 2)
+                  (let ((fish (fisher-fish-pointer self slot)))
+                    (cond
+                      ((not fish)
+                        (fisher-finish-voltage-shot! self slot))
+                      (else
+                        (let ((fish-proc (-> fish 0 self)))
+                          (cond
+                            ((not fish-proc)
+                              (fisher-finish-voltage-shot! self slot))
+                            (else
+                              (fisher-submit-electric-particle!
+                                self
+                                (-> (the-as manipy fish-proc) root trans)
+                                0)
+                              (-! (-> self voltage-data slot slot timer) dt)
+                              (when
+                                (<= (-> self voltage-data slot slot timer) 0.0)
+                                (vector-copy!
+                                  (-> self voltage-data slot slot position)
+                                  (-> (the-as manipy fish-proc) root trans))
+                                (vector-float*!
+                                  (-> self voltage-data slot slot direction)
+                                  (-> self playfield-axis)
+                                  (fisher-fish-direction self slot))
+                                (set! (-> self voltage-data slot slot direction y) 0.0)
+                                (set! (-> self voltage-data slot slot direction w) 0.0)
+                                (vector-normalize!
+                                  (-> self voltage-data slot slot direction)
+                                  1.0)
+                                (set! (-> self voltage-data slot slot state) 3)
+                                (play-sound-file
+                                  "zap-blast.mp3"
+                                  (the int (-> *setting-control* current sfx-volume)))))))))))
+
+                ((= state 3)
+                  (let ((previous-pos (new 'stack-no-clear 'vector))
+                      (from-jak (new 'stack-no-clear 'vector))
+                      (distance 0.0))
+                    (vector-copy!
+                      previous-pos
+                      (-> self voltage-data slot slot position))
+                    (vector+float*!
+                      (-> self voltage-data slot slot position)
+                      (-> self voltage-data slot slot position)
+                      (-> self voltage-data slot slot direction)
+                      (* *fisher-electric-projectile-speed* dt))
+                    (fisher-submit-electric-particle!
+                      self
+                      (-> self voltage-data slot slot position)
+                      1)
+                    (vector-!
+                      from-jak
+                      (-> self voltage-data slot slot position)
+                      (-> self fishing-player-pos))
+                    (set! distance
+                      (vector-dot from-jak (-> self playfield-axis)))
+
+                    (cond
+                      ((and
+                          (-> self casted?)
+                          (= (-> self cast-state) 'line-active)
+                          (fisher-electric-projectile-hits-visible-line?
+                            self
+                            previous-pos
+                            (-> self voltage-data slot slot position)))
+                        (fisher-finish-voltage-shot! self slot)
+                        (play-sound-file
+                          "zap-impact.mp3"
+                          (the int (-> *setting-control* current sfx-volume)))
+                        (when
+                          (and
+                            (!= (-> self electric-state) 'line-charge)
+                            (!= (-> self electric-state) 'stunned))
+                          (set! (-> self electric-state) 'line-charge)
+                          (set! (-> self electric-line-time) 0.0)
+                          (set! (-> self electric-stun-triggered?) #f)))
+
+                      ((or
+                          (<= distance (meters 3.5))
+                          (>= distance (fisher-playfield-far-distance self)))
+                        (fisher-finish-voltage-shot! self slot))))))))
+
+          (when (<= (-> self voltage-shots-remaining) 0)
+            (fisher-reset-voltage-cycle! self)))
+
+        (else
+          (+! (-> self voltage-time) dt)
+          (when (>= (-> self voltage-time) *fisher-voltage-fill-seconds*)
+            (fisher-start-voltage-surge! self))))))
+  (none))
+
+(defun fisher-draw-voltage-meter! ((self fisher-game))
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+    (let* ((ratio
+            (if
+              (-> self voltage-active?)
+              1.0
+              (fmax
+                0.0
+                (fmin
+                  1.0
+                  (/ (-> self voltage-time) *fisher-voltage-fill-seconds*)))))
+        (fill-height (the int (* 116.0 ratio)))
+        (fill-y (the int (- 414.0 fill-height)))
+        (flash-on?
+          (and
+            (-> self voltage-active?)
+            (> (sin (* (-> self voltage-flash-time) (degrees 720.0))) 0.0)))
+        (fill-color
+          (if
+            flash-on?
+            (new 'static 'rgba :r #xe0 :g #xff :b #xff :a #xe0)
+            (new 'static 'rgba :r #x18 :g #xa8 :b #xe8 :a #xd0))))
+
+      (draw-fisher-large-font-scaled "FISH VOLTAGE" 445 278 0.31)
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+        (draw-sprite2d-xy
+          buf 455 286 34 134
+          (new 'static 'rgba :r #x00 :g #x00 :b #x00 :a #xa0))
+        (draw-sprite2d-xy
+          buf 459 290 26 126
+          (new 'static 'rgba :r #x08 :g #x18 :b #x28 :a #xc0))
+        (when (> fill-height 0)
+          (draw-sprite2d-xy buf 464 fill-y 16 fill-height fill-color)
+          (draw-sprite2d-xy
+            buf 462 (- fill-y 2) 20 4
+            (new 'static 'rgba :r #xa0 :g #xe8 :b #xff :a #xd0))))))
+  (none))
+
+(defun fisher-update-electric-system! ((self fisher-game))
+  (when
+    (=
+      (-> self location-id)
+      (the-as int (fisher-zone village2-electric)))
+
+    (let ((dt (-> *display* seconds-per-frame)))
+      (when (> (-> self electric-line-stun-time) 0.0)
+        (-! (-> self electric-line-stun-time) dt)
+        (when (< (-> self electric-line-stun-time) 0.0)
+          (set! (-> self electric-line-stun-time) 0.0)))
+
+      (when
+        (and
+          (-> self casted?)
+          (= (-> self cast-state) 'line-active))
+
+        (cond
+      ((= (-> self electric-state) 'waiting)
+        (-! (-> self electric-timer) dt)
+        (when (<= (-> self electric-timer) 0.0)
+          (let ((slot (fisher-find-electric-slot self)))
+            (cond
+              ((>= slot 0)
+                (set! (-> self electric-slot) slot)
+                (set! (-> self electric-state) 'charging)
+                (set! (-> self electric-timer) 0.0)
+                (play-sound-file
+                  "zapping.mp3"
+                  (the int (-> *setting-control* current sfx-volume))))
+              (else
+                (set! (-> self electric-timer) 1.0))))))
+
+      ((= (-> self electric-state) 'charging)
+        (let* ((slot (-> self electric-slot))
+            (fish
+              (if
+                (and (>= slot 0) (< slot (-> self fish-count)))
+                (fisher-fish-pointer self slot)
+                (the-as (pointer manipy) #f))))
+          (cond
+            ((or
+                (not fish)
+                (= slot (-> self hooked-fish-slot))
+                (not (fisher-electric-species?
+                  (fisher-fish-species self slot))))
+              (fisher-reset-electric-cycle! self))
+
+            (else
+              (+! (-> self electric-timer) dt)
+              (let ((fish-proc (-> fish 0 self)))
+                (when fish-proc
+                  (let ((charge-pos
+                        (new 'stack-no-clear 'vector)))
+                    (vector-copy!
+                      charge-pos
+                      (-> (the-as manipy fish-proc) root trans))
+                    (fisher-submit-electric-particle!
+                      self
+                      charge-pos
+                      0))
+
+                  (when
+                    (>=
+                      (-> self electric-timer)
+                      *fisher-electric-charge-seconds*)
+                    (vector-copy!
+                      (-> self electric-projectile-pos)
+                      (-> (the-as manipy fish-proc) root trans))
+                    (vector-float*!
+                      (-> self electric-projectile-dir)
+                      (-> self playfield-axis)
+                      (fisher-fish-direction self slot))
+                    (set! (-> self electric-projectile-dir y) 0.0)
+                    (set! (-> self electric-projectile-dir w) 0.0)
+                    (vector-normalize!
+                      (-> self electric-projectile-dir)
+                      1.0)
+                    (set! (-> self electric-state) 'projectile)
+                    (set! (-> self electric-timer) 0.0)
+                    (play-sound-file
+                      "zap-blast.mp3"
+                      (the int (-> *setting-control* current sfx-volume))))))))))
+
+      ((= (-> self electric-state) 'projectile)
+        (let ((previous-pos (new 'stack-no-clear 'vector))
+            (line-start (new 'stack-no-clear 'vector))
+            (line-end (new 'stack-no-clear 'vector))
+            (from-jak (new 'stack-no-clear 'vector))
+            (distance 0.0))
+
+          (vector-copy!
+            previous-pos
+            (-> self electric-projectile-pos))
+
+          (vector+float*!
+            (-> self electric-projectile-pos)
+            (-> self electric-projectile-pos)
+            (-> self electric-projectile-dir)
+            (* *fisher-electric-projectile-speed* dt))
+
+          (fisher-submit-electric-particle!
+            self
+            (-> self electric-projectile-pos)
+            1)
+
+          (fisher-electric-line-points! self line-start line-end)
+          (vector-!
+            from-jak
+            (-> self electric-projectile-pos)
+            (-> self fishing-player-pos))
+          (set! distance (vector-dot from-jak (-> self playfield-axis)))
+
+          (cond
+            ((or
+                ;; Swept screen-space collision against the exact line that
+                ;; is drawn from Jak to the fixed center anchor.
+                (fisher-electric-projectile-hits-visible-line?
+                  self
+                  previous-pos
+                  (-> self electric-projectile-pos))
+
+                ;; Retain the old world-space proximity check as a fallback.
+                (fisher-point-near-segment?
+                  (-> self electric-projectile-pos)
+                  line-start
+                  line-end
+                  (meters 0.65)))
+              (set! (-> self electric-state) 'line-charge)
+              (set! (-> self electric-line-time) 0.0)
+              (set! (-> self electric-stun-triggered?) #f)
+              (play-sound-file
+                "zap-impact.mp3"
+                (the int (-> *setting-control* current sfx-volume))))
+
+            ((or
+                (<= distance (meters 3.5))
+                (>= distance (fisher-playfield-far-distance self)))
+              (fisher-reset-electric-cycle! self)))))
+
+      ((= (-> self electric-state) 'line-charge)
+        (+! (-> self electric-line-time) dt)
+
+        (let ((line-start (new 'stack-no-clear 'vector))
+            (line-end (new 'stack-no-clear 'vector))
+            (midpoint (new 'stack-no-clear 'vector))
+            (to-start (new 'stack-no-clear 'vector))
+            (to-end (new 'stack-no-clear 'vector))
+            (particle-a (new 'stack-no-clear 'vector))
+            (particle-b (new 'stack-no-clear 'vector))
+            (progress
+              (fmin
+                1.0
+                (/ (-> self electric-line-time)
+                  *fisher-electric-line-travel-seconds*))))
+
+          (fisher-electric-line-points! self line-start line-end)
+          (vector+! midpoint line-start line-end)
+          (vector-float*! midpoint midpoint 0.5)
+          (vector-! to-start line-start midpoint)
+          (vector-! to-end line-end midpoint)
+          (vector+float*! particle-a midpoint to-start progress)
+          (vector+float*! particle-b midpoint to-end progress)
+          (fisher-submit-electric-particle! self particle-a 2)
+          (fisher-submit-electric-particle! self particle-b 3))
+
+        (when
+          (and
+            (not (-> self electric-stun-triggered?))
+            (not (-> self fish-fighting?))
+            (not (-> self button-fight-data active?))
+            (or
+              (= (-> self fish-state) 'free)
+              (= (-> self fish-state) 'reeling))
+            (cpad-hold? 0 x))
+          (cpad-clear! 0 x)
+          (set! (-> self electric-stun-triggered?) #t)
+          (set! (-> self electric-line-stun-time)
+            *fisher-electric-line-stun-seconds*)
+          (fisher-show-lure-skill-message! self "LINE IS STUNNED!"))
+
+        (when
+          (>=
+            (-> self electric-line-time)
+            *fisher-electric-line-travel-seconds*)
+          (cond
+            ((-> self electric-stun-triggered?)
+              (set! (-> self electric-state) 'stunned))
+            (else
+              (fisher-reset-electric-cycle! self)))))
+
+      ((= (-> self electric-state) 'stunned)
+        (when (<= (-> self electric-line-stun-time) 0.0)
+          (fisher-reset-electric-cycle! self)))
+
+          (else
+            (fisher-reset-electric-cycle! self)))))
+
+    )
+
+  (none))
+
 (defun fisher-update-casting! ((self fisher-game))
   (fisher-update-ability-cooldowns! self)
+  (fisher-update-voltage-surge! self)
+  (fisher-update-electric-system! self)
+  (fisher-draw-voltage-meter! self)
   (fisher-handle-fish-input! self)
   (fisher-draw-playfield-debug! self)
 

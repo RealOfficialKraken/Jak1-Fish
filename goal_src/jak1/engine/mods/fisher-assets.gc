@@ -237,6 +237,65 @@
     (:timer (seconds 5.5) (seconds 3.5))
     (:flags (bit2 bit3))))
 
+
+;; Camera-facing blue eco used by the Village2 electric-fish mechanic.  These
+;; copy the original blue-eco glow/lightning palette, but remain compact and
+;; billboard toward the active camera instead of using the stretched vent
+;; particle orientation.
+(defpart 3581
+  :init-specs
+  ((:texture (middot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.72))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:scale-y :copy scale-x)
+    (:r 32.0)
+    (:g 32.0)
+    (:b 192.0)
+    (:a 92.0)
+    (:fade-a -4.6)
+    (:timer (seconds 0.08))
+    (:flags (bit2 bit3 bit14))))
+
+(defpart 3582
+  :init-specs
+  ((:texture (starflash effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.54))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 96.0)
+    (:g 96.0)
+    (:b 224.0)
+    (:a 112.0)
+    (:rotvel-z (degrees -1.2) (degrees 2.4))
+    (:fade-a -5.6)
+    (:timer (seconds 0.08))
+    (:flags (bit2 bit3 bit14))))
+
+(defpart 3583
+  :init-specs
+  ((:texture (lightning effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.48) (meters 0.68))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.10) (meters 0.16))
+    (:r 96.0)
+    (:g 112.0)
+    (:b 255.0)
+    (:a 118.0)
+    (:fade-a -6.0)
+    (:timer (seconds 0.075))
+    (:flags (bit2 bit3 bit14))))
+
 (defskelgroup *sharkey-sgc*
   sharkey
   sharkey-lod0-jg
@@ -505,3 +564,4 @@
     (set! (-> dst w) 0.0))
 
   dst)
+

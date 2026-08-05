@@ -77,7 +77,10 @@
   (if
     (>= level *fisher-level-cap*)
     0
-    (* (max 1 level) 100)))
+    (*
+      (max 1 level)
+      100
+      (if (>= level 10) 3 1))))
 
 (defun fisher-roll-level-in-range
   ((min-level int) (max-level int))

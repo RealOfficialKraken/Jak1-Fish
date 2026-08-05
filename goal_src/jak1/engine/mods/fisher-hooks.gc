@@ -18,6 +18,8 @@
 (define *fisher-pool-center-training* (new 'static 'vector :x (meters -1332.0715) :y (meters 1.1072) :z (meters 922.7199) :w 1.0))
 (define *fisher-pool-center-beach* (new 'static 'vector :x (meters -293.0688) :y (meters 1.7276) :z (meters -272.6693) :w 1.0))
 (define *fisher-pool-center-misty* (new 'static 'vector :x (meters 103.0522) :y (meters 1.7121) :z (meters 992.6285) :w 1.0))
+(define *fisher-pool-center-village2* (new 'static 'vector :x (meters 457.0053) :y (meters 1.9815) :z (meters -1679.8937) :w 1.0))
+(define *fisher-pool-center-sunken* (new 'static 'vector :x (meters 856.0955) :y (meters -143.8908) :z (meters -1761.6607) :w 1.0))
 
 (defun fisher-pool-center-for-location ((location-id int))
   (cond
@@ -26,6 +28,8 @@
     ((= location-id 2) *fisher-pool-center-training*)
     ((= location-id 3) *fisher-pool-center-beach*)
     ((= location-id 4) *fisher-pool-center-misty*)
+    ((= location-id 5) *fisher-pool-center-village2*)
+    ((= location-id 6) *fisher-pool-center-sunken*)
     (else (the-as vector #f))))
 
 (defun fisher-player-near-location? ((location-id int) (max-distance meters))
@@ -201,7 +205,55 @@
         (degrees -180.8659)
         (degrees 80.3413))
 
-      (set! *fisher-active-location-id* 4)))
+      (set! *fisher-active-location-id* 4))
+
+    ((= level-name 'village2)
+      (spawn-fisher-game
+        5
+        (new 'static 'vector
+          :x (meters 457.0053)
+          :y (meters 1.9815)
+          :z (meters -1679.8937)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 459.0087)
+          :y (meters 1.6446)
+          :z (meters -1681.7923)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 442.2429)
+          :y (meters 3.8808)
+          :z (meters -1683.7934)
+          :w 1.0)
+        (meters 0.0)
+        (degrees 93.1936)
+        (degrees 183.1936))
+
+      (set! *fisher-active-location-id* 5))
+
+    ((= level-name 'sunken)
+      (spawn-fisher-game
+        6
+        (new 'static 'vector
+          :x (meters 864.7252)
+          :y (meters -143.8908)
+          :z (meters -1745.0090)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 861.6857)
+          :y (meters -143.8908)
+          :z (meters -1748.0885)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 857.1578)
+          :y (meters -140.3054)
+          :z (meters -1756.3848)
+          :w 1.0)
+        (meters -146.7338)
+        (degrees 48.6245)
+        (degrees 139.5418))
+
+      (set! *fisher-active-location-id* 6)))
 
   (none))
 
@@ -215,7 +267,9 @@
         ((= (-> inside name) 'jungle) (set! wanted-location-id 1))
         ((= (-> inside name) 'training) (set! wanted-location-id 2))
         ((= (-> inside name) 'beach) (set! wanted-location-id 3))
-        ((= (-> inside name) 'misty) (set! wanted-location-id 4))))
+        ((= (-> inside name) 'misty) (set! wanted-location-id 4))
+        ((= (-> inside name) 'village2) (set! wanted-location-id 5))
+        ((= (-> inside name) 'sunken) (set! wanted-location-id 6))))
 
     ;; Hysteresis prevents repeated spawning right on the boundary.
     (when

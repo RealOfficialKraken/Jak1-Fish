@@ -251,11 +251,7 @@
   (none))
 
 (defmethod init-from-entity! ((this qbert-plat) (arg0 entity-actor))
-  (logior! (-> this mask) (process-mask platform))
-  (rigid-body-platform-method-30 this)
-  (process-drawable-from-entity! this arg0)
-  (rigid-body-platform-method-31 this)
-  (go qbert-plat-wait-for-master)
+  (go qbert-plat-on-die) ;; kill qberts for my fishing area (THE CELL DONT MATTA)
   (none))
 
 (defmethod plat-state-set? ((this qbert-plat-master) (arg0 uint))
