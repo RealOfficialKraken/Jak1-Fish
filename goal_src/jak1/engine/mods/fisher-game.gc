@@ -70,6 +70,7 @@
 (define *fisher-level-up-window-time* 0.0)
 (define *fisher-level-up-window-offset* 150.0)
 (define *fisher-power-cell-reward-active?* #f)
+(define *fisher-power-cell-camera-active?* #f)
 (define *fisher-session-active?* #f)
 (define *fisher-button-world-down*
   (new 'static 'vector :x 0.0 :y -1.0 :z 0.0 :w 0.0))
@@ -86,6 +87,14 @@
   (new 'static 'rgba :r #xb8 :g #x38 :b #x78 :a #xe8)
 )
 
+(define *fisher-rip-line-cooldown-color*
+  (new 'static 'rgba :r #xe8 :g #x58 :b #x28 :a #xe8)
+)
+
+(define *fisher-heal-line-cooldown-color*
+  (new 'static 'rgba :r #x38 :g #xe8 :b #x78 :a #xe8)
+)
+
 (defun fisher-level-up-window-active? ()
   (!= *fisher-level-up-window-state* 'hidden)
 )
@@ -95,6 +104,20 @@
     *fisher-level-up-window-pending?*
     *fisher-level-up-window-request?*
     (fisher-level-up-window-active?)))
+
+(defun fisher-modal-ui-active? ((self fisher-game))
+  ;; Keep compact fishing HUD elements out of the way whenever the XP meter
+  ;; and skill cooldowns yield to a catch, lore, rare-fish, or level-up card.
+  (or
+    (= (-> self cast-state) 'catch-transition)
+    (= (-> self cast-state) 'power-cell-ui-wait)
+    (fisher-level-up-blocking?)
+    (= (-> self fish-state) 'catch-enter)
+    (= (-> self fish-state) 'catch-display)
+    (= (-> self fish-state) 'catch-exit)
+    (= (-> self fish-state) 'rare-enter)
+    (= (-> self fish-state) 'rare-display)
+    (= (-> self fish-state) 'rare-exit)))
 
 (defun fisher-reset-level-up-window! ()
   (set! *fisher-level-up-window-state* 'hidden)
@@ -391,7 +414,7 @@
 
         ((= skill-mask 4)
           (fisher-draw-level-up-title!
-            "SKILL UNLOCKED: TUG LINE"
+            "SKILL UNLOCKED: FAST REEL"
             256
             (+ 140 menu-offset)
             0.46)
@@ -439,6 +462,50 @@
             (+ 181 menu-offset)
             0.32))
 
+        ((= skill-mask 16)
+          (fisher-draw-level-up-title!
+            "SKILL UNLOCKED: TUG LINE"
+            256
+            (+ 140 menu-offset)
+            0.46)
+
+          (draw-fisher-large-font-scaled
+            "PRESS <PAD_CIRCLE> DURING A FISH FIGHT"
+            256
+            (+ 160 menu-offset)
+            0.34)
+
+          (draw-fisher-large-font-scaled
+            "TO END IT AND BLOCK FIGHTS FOR 4 SECONDS."
+            256
+            (+ 178 menu-offset)
+            0.31)
+
+          (draw-fisher-large-font-scaled
+            "35 SECOND COOLDOWN."
+            256
+            (+ 197 menu-offset)
+            0.34))
+
+        ((= skill-mask 32)
+          (fisher-draw-level-up-title!
+            "SKILL UNLOCKED: HEAL LINE"
+            256
+            (+ 140 menu-offset)
+            0.46)
+
+          (draw-fisher-large-font-scaled
+            "PRESS <PAD_R2> TO RESTORE 65 LINE HP."
+            256
+            (+ 160 menu-offset)
+            0.34)
+
+          (draw-fisher-large-font-scaled
+            "26 SECOND COOLDOWN."
+            256
+            (+ 181 menu-offset)
+            0.36))
+
         ((> skill-mask 0)
           ;; This compact combined card also handles debug/REPL XP grants that
           (fisher-draw-level-up-title!
@@ -478,10 +545,26 @@
               0.32)
 
             (fisher-draw-reel-hint-text
-              " TUG LINE: 2X REEL FOR 2 SECONDS."
+              " FAST REEL: 2X REEL FOR 2 SECONDS."
               94
               (+ 191 menu-offset)
-              0.30))))
+              0.30))
+
+          (when
+            (nonzero? (logand skill-mask 16))
+            (draw-fisher-large-font-scaled
+              "<PAD_CIRCLE> TUG LINE: END A FISH'S FIGHTING"
+              256
+              (+ 207 menu-offset)
+              0.27))
+
+          (when
+            (nonzero? (logand skill-mask 32))
+            (draw-fisher-large-font-scaled
+              "<PAD_R2> HEAL LINE: RESTORE 65 HP / 26 SEC."
+              256
+              (+ 220 menu-offset)
+              0.25))))
 
       (draw-fisher-large-font-scaled
         "PRESS <PAD_X> TO CONTINUE"
@@ -561,6 +644,7 @@
   (set! (-> self fish-data) *fisher-fish-runtime*)
   (set! (-> self button-fight-data) *fisher-button-fight-runtime*)
   (set! (-> self voltage-data) *fisher-voltage-runtime*)
+  (set! (-> self yellow-data) *fisher-yellow-runtime*)
   (set! (-> self stored-music-vol) (-> *setting-control* current sfx-volume))
   (vector-copy! (-> self pos) vec)
   (vector-copy!
@@ -605,6 +689,16 @@
   (set! (-> self lure-fall-speed) 1.25)
   (set! (-> self lure-reel-x-speed) 4.0)
   (set! (-> self lure-reel-y-speed) 3.0)
+
+  ;; Black sludge resists both sinking and reeling.  Seventy percent of the
+  ;; ordinary speeds preserves the existing controls while making the lure
+  ;; visibly drag through the pool.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+    (set! (-> self lure-fall-speed) (* (-> self lure-fall-speed) 0.70))
+    (set! (-> self lure-reel-x-speed) (* (-> self lure-reel-x-speed) 0.70))
+    (set! (-> self lure-reel-y-speed) (* (-> self lure-reel-y-speed) 0.70)))
+
   (set! (-> self lure-x-velocity) 0.0)
   (set! (-> self reel-hint-time) 0.0)
   (fisher-reset-level-up-window!)
@@ -619,6 +713,9 @@
   (set! (-> self tug-line-active?) #f)
   (set! (-> self tug-line-time) 0.0)
   (set! (-> self tug-line-cooldown) 0.0)
+  (set! (-> self rip-line-cooldown) 0.0)
+  (set! (-> self heal-line-cooldown) 0.0)
+  (set! (-> self lure-destroyed?) #f)
   (set! (-> self lure-y-velocity) 0.0)
   (set! (-> self bubble-time) -2.0)
   (set! (-> self underwater-wave-time) 0.0)
@@ -668,6 +765,15 @@
     (set! (-> self voltage-data slot voltage-slot timer) 0.0)
     (vector-reset! (-> self voltage-data slot voltage-slot position))
     (vector-reset! (-> self voltage-data slot voltage-slot direction)))
+  (set! (-> self yellow-data state) 'waiting)
+  (set! (-> self yellow-data timer)
+    (rand-vu-float-range
+      *fisher-yellow-cycle-min-seconds*
+      *fisher-yellow-cycle-max-seconds*))
+  (set! (-> self yellow-data slot) -1)
+  (set! (-> self yellow-data projectile-time) 0.0)
+  (vector-reset! (-> self yellow-data position))
+  (vector-reset! (-> self yellow-data direction))
   (set! (-> self fish-count) 0)
   (dotimes (slot-index *fisher-max-fish-slots*)
     (set! (-> self fish-data slot slot-index visual)
@@ -1319,7 +1425,7 @@
         0.55)
 
       (fisher-draw-reel-hint-text
-        " TUG LINE"
+        " FAST REEL"
         25
         150
         0.55))
@@ -1521,6 +1627,13 @@
 
   dst)
 
+(defun fisher-swamp-curtain-color!
+  ((dst vector))
+
+  ;; Black sludge is intentionally time-of-day independent.
+  (set-vector! dst 20.0 22.0 22.0 1.0)
+  dst)
+
 (defun fisher-background-color!
   ((dst vector))
 
@@ -1656,6 +1769,12 @@
     (-> *part-id-table* 3572 init-specs 10 initial-valuef)
     (-> *fisher-underwater-haze-color* z))
 
+  ;; Reset the full-screen mist opacity before any location-specific override.
+  ;; This prevents the very dim Swamp value from leaking into another pool.
+  (set!
+    (-> *part-id-table* 3572 init-specs 11 initial-valuef)
+    22.0)
+
   (none))
 
 (defun fisher-submit-background-mist!
@@ -1682,14 +1801,32 @@
 
       (fisher-update-background-mist-color!)
 
-      ;; Village2's brighter cyan curtain was making the full-screen bigpuff
-      ;; overpower the electric projectile.  Keep all other areas unchanged,
-      ;; but force a much lower alpha for this water.
-      (when
-        (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
-        (set!
-          (-> *part-id-table* 3572 init-specs 10 initial-valuef)
-          8.0))
+      (cond
+        ;; Village2's cyan water needs a quieter sheet behind the electric eco.
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone village2-electric)))
+          (set!
+            (-> *part-id-table* 3572 init-specs 11 initial-valuef)
+            8.0))
+
+        ;; The Swamp bigpuff is always black and extremely dim, independent
+        ;; of the time-of-day haze and the fixed #141616 curtain color.
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone swamp-sludge)))
+          (set!
+            (-> *part-id-table* 3572 init-specs 8 initial-valuef)
+            0.0)
+          (set!
+            (-> *part-id-table* 3572 init-specs 9 initial-valuef)
+            0.0)
+          (set!
+            (-> *part-id-table* 3572 init-specs 10 initial-valuef)
+            0.0)
+          (set!
+            (-> *part-id-table* 3572 init-specs 11 initial-valuef)
+            5.0)))
 
       (fisher-set-particle-fishbox-rotation! self)
 
@@ -2232,6 +2369,17 @@
   (none)
 )
 
+(defun fisher-force-swamp-underwater-background! ()
+  ;; Match the black-sludge curtain exactly and keep it independent of time.
+  (dotimes (i 12)
+    (set! (-> sky-base-polygons i col x) 20.0)
+    (set! (-> sky-base-polygons i col y) 22.0)
+    (set! (-> sky-base-polygons i col z) 22.0)
+    (set! (-> sky-base-polygons i col w) 128.0))
+
+  (fisher-force-underwater-horizon! 20.0 22.0 22.0)
+  (none))
+
 (defun fisher-update-camera-water! ((self fisher-game))
   (cond
     ((and
@@ -2326,6 +2474,8 @@
   (set! (-> self bubble-time) -2.0)
   (set! (-> self electric-slot) -1)
   (fisher-reset-electric-cycle! self)
+  (fisher-reset-yellow-cycle! self)
+  (set! (-> self lure-destroyed?) #f)
 
   (none))
 
@@ -2335,6 +2485,7 @@
   ;; lure position long enough for the camera to follow it back to the normal
   ;; reeling point, then blend smoothly to the before-cast camera.
   (when (!= (-> self cast-state) 'lure-stolen-return)
+    (set! (-> self lure-destroyed?) #f)
     (fisher-lose-lure!)
     (fisher-clear-button-fight! self)
     (set! (-> self cast-state) 'lure-stolen-return)
@@ -2405,7 +2556,11 @@
             (step (* (meters 15.0) dt)))
 
           ;; This is the normal reel-in point immediately in front of Jak.
-          (vector+float*! return-pos (-> self fishing-player-pos) (-> self playfield-axis) (meters 1.55))
+          (vector+float*!
+            return-pos
+            (-> self fishing-player-pos)
+            (-> self playfield-axis)
+            (meters 1.55))
           (+! (-> return-pos y) (meters 1.15))
           (set! (-> return-pos w) 1.0)
 
@@ -2419,7 +2574,11 @@
               (set! (-> self cast-time) 0.0))
             (else
               (vector-normalize! to-return 1.0)
-              (vector+float*! (-> self lure-pos) (-> self lure-pos) to-return step)))
+              (vector+float*!
+                (-> self lure-pos)
+                (-> self lure-pos)
+                to-return
+                step)))
 
           (fisher-camera-follow-lure! self)
           (fisher-update-underwater-background! self)
@@ -2430,9 +2589,12 @@
         (fisher-update-camera-bubbles! self)
 
         (when (fisher-camera-lure-stolen-return! self)
-          (fisher-reset-cast! self)
-          (set! (-> self fish-message) "LURE STOLEN")
-          (set! (-> self fish-message-time) 1.75)))))
+          (let ((destroyed? (-> self lure-destroyed?)))
+            (fisher-reset-cast! self)
+            (set!
+              (-> self fish-message)
+              (if destroyed? "LURE DESTROYED" "LURE STOLEN"))
+            (set! (-> self fish-message-time) 1.75))))))
 
   (none))
 
@@ -3320,7 +3482,9 @@
         (set! (-> owner lure-pos y) (+ (-> self fight-base-y) (* (meters 0.55) (sin (-> self fight-phase)))))
 
         (when
-          (cpad-hold? 0 x)
+          (and
+            (not *fisher-in-debug?*)
+            (cpad-hold? 0 x))
 
           (let* ((fish-level
                 (-> self level))
@@ -3707,6 +3871,21 @@
                   (the-as int (fisher-species electric-lurker-shark)))
                 *sharkey-sgc*)
 
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species swamp-guppie)))
+                *catch-fisha-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species sludge-crappie)))
+                *catch-fishb-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species black-lurker-shark)))
+                *sharkey-sgc*)
+
               (else
                 *catch-fisha-sgc*))
             #f
@@ -3969,7 +4148,8 @@
 
           (unless carrier?
             (fisher-add-power-cell-fish-slot! self)
-            (fisher-add-fire-canyon-cellfish-slot! self))
+            (fisher-add-fire-canyon-cellfish-slot! self)
+            (fisher-add-mountain-pass-cellfish-slots! self))
 
           (fisher-start-xp-gain-animation!
             xp-start
@@ -4168,6 +4348,11 @@
     ((= (fisher-fish-species self (-> self hooked-fish-slot)) 2) (meters 0.48))
 
     ((= (fisher-fish-species self (-> self hooked-fish-slot)) 3) (meters 1.20))
+
+    ((=
+        (fisher-fish-species self (-> self hooked-fish-slot))
+        (the-as int (fisher-species black-lurker-shark)))
+      (meters 0.70))
 
     (else
       (meters 0.42))))
@@ -4398,6 +4583,56 @@
       (when (<= (-> self tug-line-cooldown) 0.0)
         (set! (-> self tug-line-cooldown) 0.0)))
 
+    (when (> (-> self rip-line-cooldown) 0.0)
+      (-! (-> self rip-line-cooldown) dt)
+
+      (when (<= (-> self rip-line-cooldown) 0.0)
+        (set! (-> self rip-line-cooldown) 0.0)))
+
+    (when (> (-> self heal-line-cooldown) 0.0)
+      (-! (-> self heal-line-cooldown) dt)
+
+      (when (<= (-> self heal-line-cooldown) 0.0)
+        (set! (-> self heal-line-cooldown) 0.0)))
+
+    (when
+      (and
+        (>= (fisher-current-level) *fisher-heal-line-unlock-level*)
+        (-> self casted?)
+        (= (-> self cast-state) 'line-active)
+        (< *fisher-line-hp* *fisher-line-hp-max*)
+        (<= (-> self heal-line-cooldown) 0.0)
+        (cpad-pressed? 0 r2))
+
+      (cpad-clear! 0 r2)
+      (set!
+        *fisher-line-hp*
+        (fmin *fisher-line-hp-max* (+ *fisher-line-hp* *fisher-heal-line-amount*)))
+      (set! *fisher-line-broken?* #f)
+      (set! (-> self heal-line-cooldown) *fisher-heal-line-cooldown-seconds*)
+      (play-sound-file "bwoop.wav" (the int (-> *setting-control* current sfx-volume)))
+      (fisher-show-lure-skill-message! self "HEAL LINE"))
+
+    (when
+      (and
+        (>= (fisher-current-level) *fisher-rip-line-unlock-level*)
+        (= (-> self fish-state) 'reeling)
+        (>= (-> self hooked-fish-slot) 0)
+        (-> self fish-fighting?)
+        (not (-> self button-fight-data active?))
+        (<= (-> self rip-line-cooldown) 0.0)
+        (cpad-pressed? 0 circle))
+
+      (cpad-clear! 0 circle)
+      (set! (-> self fish-fighting?) #f)
+      (set! (-> self fish-fight-time) 0.0)
+      (set! (-> self fish-hook-time) *fisher-rip-line-suppress-seconds*)
+      (set! (-> self fish-fight-phase) (degrees 180.0))
+      (fisher-clear-button-fight! self)
+      (set! (-> self rip-line-cooldown) *fisher-rip-line-cooldown-seconds*)
+      (play-sound-file "bwoop.wav" (the int (-> *setting-control* current sfx-volume)))
+      (fisher-show-lure-skill-message! self "TUG LINE"))
+
     (when
       (and
         (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
@@ -4487,6 +4722,8 @@
     (let* ((level (fisher-current-level))
         (skill-count
           (cond
+            ((>= level *fisher-heal-line-unlock-level*) 5)
+            ((>= level *fisher-rip-line-unlock-level*) 4)
             ((>= level *fisher-tug-line-unlock-level*) 3)
             ((>= level *fisher-sink-lure-unlock-level*) 2)
             (else 1)))
@@ -4516,7 +4753,25 @@
               1.0
               (/
                 (-> self tug-line-cooldown)
-                *fisher-tug-line-cooldown-seconds*)))))
+                *fisher-tug-line-cooldown-seconds*))))
+        (rip-ready-ratio
+          (if
+            (<= *fisher-rip-line-cooldown-seconds* 0.0)
+            1.0
+            (-
+              1.0
+              (/
+                (-> self rip-line-cooldown)
+                *fisher-rip-line-cooldown-seconds*))))
+        (heal-ready-ratio
+          (if
+            (<= *fisher-heal-line-cooldown-seconds* 0.0)
+            1.0
+            (-
+              1.0
+              (/
+                (-> self heal-line-cooldown)
+                *fisher-heal-line-cooldown-seconds*)))))
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf))
@@ -4555,7 +4810,25 @@
           2
           skill-count
           tug-ready-ratio
-          *fisher-tug-line-cooldown-color*))))
+          *fisher-tug-line-cooldown-color*))
+
+      (when
+        (>= level *fisher-rip-line-unlock-level*)
+
+        (fisher-draw-cooldown-segment!
+          3
+          skill-count
+          rip-ready-ratio
+          *fisher-rip-line-cooldown-color*))
+
+      (when
+        (>= level *fisher-heal-line-unlock-level*)
+
+        (fisher-draw-cooldown-segment!
+          4
+          skill-count
+          heal-ready-ratio
+          *fisher-heal-line-cooldown-color*))))
 
   (none))
 
@@ -4574,6 +4847,12 @@
         (the-as int (fisher-species electric-eelfish))) (meters 10.5))
       ((= (fisher-fish-species self slot)
         (the-as int (fisher-species electric-lurker-shark))) (meters 18.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species swamp-guppie))) (meters 7.5))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species sludge-crappie))) (meters 8.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species black-lurker-shark))) (meters 10.5))
       (else (meters 8.5)))))
 
 (defun fisher-update-lure! ((self fisher-game))
@@ -4816,6 +5095,9 @@
           ((= species (the-as int (fisher-species electric-grubfish))) 45.0)
           ((= species (the-as int (fisher-species electric-eelfish))) 60.0)
           ((= species (the-as int (fisher-species electric-lurker-shark))) 450.0)
+          ((= species (the-as int (fisher-species swamp-guppie))) 15.0)
+          ((= species (the-as int (fisher-species sludge-crappie))) 25.0)
+          ((= species (the-as int (fisher-species black-lurker-shark))) 80.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
           (else 15.0))))
@@ -4843,6 +5125,9 @@
           ((= species (the-as int (fisher-species electric-grubfish))) 42.0)
           ((= species (the-as int (fisher-species electric-eelfish))) 48.0)
           ((= species (the-as int (fisher-species electric-lurker-shark))) 128.0)
+          ((= species (the-as int (fisher-species swamp-guppie))) 40.0)
+          ((= species (the-as int (fisher-species sludge-crappie))) 30.0)
+          ((= species (the-as int (fisher-species black-lurker-shark))) 72.0)
           (else 34.0)))
 
       (fish-level
@@ -4861,7 +5146,8 @@
         (or
           (= species (the-as int (fisher-species lurker-shark)))
           (= species (the-as int (fisher-species fire-canyon-cellfish)))
-          (= species (the-as int (fisher-species electric-lurker-shark))))
+          (= species (the-as int (fisher-species electric-lurker-shark)))
+          (= species (the-as int (fisher-species black-lurker-shark))))
         (fmax 1.15 level-mult)
         level-mult))))
 
@@ -5266,6 +5552,7 @@
                       dt)))))
 
             ((and
+                (not *fisher-in-debug?*)
                 (cpad-hold? 0 x)
                 (<= (-> self electric-line-stun-time) 0.0))
               (fisher-damage-line!
@@ -6113,7 +6400,13 @@
           (* (meters 360.0) u)))
 
       (base-y
-        (+ (-> self water-level)
+        (+
+          (if
+            (=
+              (-> self location-id)
+              (the-as int (fisher-zone swamp-sludge)))
+            (-> curtain-center y)
+            (-> self water-level))
           (meters -0.75)
           (* (meters -118.5) v)))
 
@@ -6139,9 +6432,14 @@
           (* (degrees 46.0) (the float row))))
 
       (forward-wave
-        (+
-          (* (meters 0.90) (sin wave-angle-a))
-          (* (meters 0.38) (sin wave-angle-b))))
+        (if
+          (=
+            (-> self location-id)
+            (the-as int (fisher-zone swamp-sludge)))
+          0.0
+          (+
+            (* (meters 0.90) (sin wave-angle-a))
+            (* (meters 0.38) (sin wave-angle-b)))))
 
       (vertical-wave
         (+
@@ -6238,19 +6536,48 @@
         curtain-side
         1.0)
 
-      (vector+float*!
-        curtain-center
-        (-> self fisher-cam)
-        curtain-forward
-        (meters 92.0))
+      (cond
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone swamp-sludge)))
+          ;; Place the Swamp curtain by camera depth, not along the fish
+          ;; playfield.  It sits seven meters behind the standard 92 m wall.
+          (vector+float*!
+            curtain-center
+            (-> self fisher-cam)
+            curtain-forward
+            (meters 32.0))
 
-      (vector+float*!
-        curtain-center
-        curtain-center
-        (-> self playfield-axis)
-        (meters 27.75))
+          (vector+float*!
+            curtain-center
+            curtain-center
+            (-> self playfield-axis)
+            (meters 27.75)))
 
-      (set! (-> curtain-center y) (-> self water-level))
+        (else
+          (vector+float*!
+            curtain-center
+            (-> self fisher-cam)
+            curtain-forward
+            (meters 92.0))
+
+          (vector+float*!
+            curtain-center
+            curtain-center
+            (-> self playfield-axis)
+            (meters 27.75))))
+
+      (cond
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone swamp-sludge)))
+          ;; Raise the Swamp curtain another seven meters above its prior
+          ;; five-meter vertical offset.
+          (set!
+            (-> curtain-center y)
+            (+ (-> self water-level) (meters 12.0))))
+        (else
+          (set! (-> curtain-center y) (-> self water-level))))
       (set! (-> curtain-center w) 1.0)
 
       (let ((active-curtain-color
@@ -6266,6 +6593,11 @@
               (-> self location-id)
               (the-as int (fisher-zone village2-electric)))
             (fisher-village2-curtain-color! active-curtain-color))
+
+          ((=
+              (-> self location-id)
+              (the-as int (fisher-zone swamp-sludge)))
+            (fisher-swamp-curtain-color! active-curtain-color))
 
           (else
             (set!
@@ -6391,12 +6723,25 @@
 
   (cond
     ((-> self camera-underwater?)
-      (fisher-force-underwater-background!)
+      (cond
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone swamp-sludge)))
+          (fisher-force-swamp-underwater-background!))
+
+        (else
+          (fisher-force-underwater-background!)))
+
+      ;; Sunken deliberately exposes the real level background.
       (when
         (!= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
         (fisher-draw-background-curtain! self)
         (fisher-submit-background-mist! self)
-        (fisher-submit-god-rays! self)))
+
+        ;; Black sludge has no sun shafts.
+        (when
+          (!= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+          (fisher-submit-god-rays! self))))
 
     (else
       (set!
@@ -6882,6 +7227,20 @@
   (none))
 
 (defun fisher-draw-fish-status! ((self fisher-game))
+  (when
+    (and
+      (>= (fisher-current-level) *fisher-rip-line-unlock-level*)
+      (= (-> self fish-state) 'reeling)
+      (-> self fish-fighting?)
+      (not (-> self button-fight-data active?))
+      (<= (-> self rip-line-cooldown) 0.0))
+
+    (fisher-draw-reel-hint-text
+      "<PAD_CIRCLE> TUG LINE"
+      10
+      138
+      0.52))
+
   (when (> (-> self fish-message-time) 0.0)
     (when
       (-> self fish-message)
@@ -6962,6 +7321,16 @@
 
     ((= (-> self caught-fish-suffix) 10)
       (format *fish-ui-str* "PRECURSOR ORB-HUNTER"))
+
+    ((and
+        (= (-> self caught-fish-species)
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (or
+          (= (-> self caught-power-cell-task)
+            (the-as int (game-task ogre-boss)))
+          (= (-> self caught-power-cell-task)
+            (the-as int (game-task ogre-end)))))
+      (format *fish-ui-str* "MOUNTAIN PASS CELL FISH"))
 
     ((= (-> self caught-fish-species) 4)
       (format *fish-ui-str* "SCOUT FLY"))
@@ -7190,6 +7559,249 @@
         256
         (+ 200 menu-offset)
         0.46)))
+
+  (none))
+
+(defun fisher-swamp-species? ((species int))
+  (or
+    (= species (the-as int (fisher-species swamp-guppie)))
+    (= species (the-as int (fisher-species sludge-crappie)))
+    (= species (the-as int (fisher-species black-lurker-shark)))))
+
+(defun fisher-reset-yellow-cycle! ((self fisher-game))
+  (let ((data (-> self yellow-data)))
+    (set! (-> data state) 'waiting)
+    (set! (-> data timer)
+      (rand-vu-float-range
+        *fisher-yellow-cycle-min-seconds*
+        *fisher-yellow-cycle-max-seconds*))
+    (set! (-> data slot) -1)
+    (set! (-> data projectile-time) 0.0)
+    (vector-reset! (-> data position))
+    (vector-reset! (-> data direction)))
+  (none))
+
+(defun fisher-find-yellow-slot ((self fisher-game))
+  ;; Choose the closest resident that is already facing the lure. Turning
+  ;; fish are excluded so the shot never begins from a contradictory pose.
+  (let ((best-slot -1)
+      (best-distance (meters 999999.0))
+      (to-lure (new 'stack-no-clear 'vector))
+      (forward (new 'stack-no-clear 'vector)))
+
+    (dotimes (slot (-> self fish-count))
+      (when
+        (and
+          (!= slot (-> self hooked-fish-slot))
+          (fisher-swamp-species? (fisher-fish-species self slot))
+          (<= (fisher-fish-turn-time self slot) 0.0))
+
+        (let ((fish (fisher-fish-pointer self slot)))
+          (when fish
+            (let ((fish-proc
+                  (the-as manipy (-> fish 0 self))))
+              (when fish-proc
+                (singlefish-vector-sub-safe!
+                  to-lure
+                  (-> self lure-pos)
+                  (-> fish-proc root trans))
+
+                (let ((distance (singlefish-vector-length-safe to-lure)))
+                  (set! (-> to-lure y) 0.0)
+                  (set! (-> to-lure w) 0.0)
+
+                  (when
+                    (> (singlefish-vector-length-safe to-lure) (meters 0.001))
+                    (singlefish-vector-normalize-safe! to-lure 1.0)
+                    (singlefish-vector-scale-safe!
+                      forward
+                      (-> self playfield-axis)
+                      (fisher-fish-direction self slot))
+                    (set! (-> forward y) 0.0)
+                    (set! (-> forward w) 0.0)
+                    (singlefish-vector-normalize-safe! forward 1.0)
+
+                    (when
+                      (and
+                        (>= (vector-dot forward to-lure) 0.8191520)
+                        (< distance best-distance))
+                      (set! best-distance distance)
+                      (set! best-slot slot))))))))))
+
+    best-slot))
+
+(defun fisher-submit-yellow-particle!
+  ((self fisher-game) (pos vector) (channel int))
+
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+      (-> self camera-underwater?))
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3590)
+      pos)
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3591)
+      pos)
+
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3592)
+      pos)
+
+    (when (= channel 1)
+      (launch-particles
+        :system *sp-particle-system-3d*
+        (-> *part-id-table* 3592)
+        pos)))
+
+  (none))
+
+(defun fisher-update-yellow-system! ((self fisher-game))
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+
+    (let ((data (-> self yellow-data))
+        (dt (-> *display* seconds-per-frame)))
+
+      (cond
+        ((or
+            (not (-> self casted?))
+            (!= (-> self cast-state) 'line-active))
+          ;; Keep a waiting countdown parked while no hook is in the sludge,
+          ;; but cancel an in-progress charge/projectile immediately.
+          (when (!= (-> data state) 'waiting)
+            (fisher-reset-yellow-cycle! self)))
+
+        ((= (-> data state) 'waiting)
+          (-! (-> data timer) dt)
+          (when (<= (-> data timer) 0.0)
+            (let ((slot (fisher-find-yellow-slot self)))
+              (cond
+                ((>= slot 0)
+                  (set! (-> data slot) slot)
+                  (set! (-> data state) 'charging)
+                  (set! (-> data timer) 0.0)
+                  ;; Reproduce the native yellow-eco pickup response with a
+                  ;; zero-duration powerup instead of using a blue zap sound.
+                  (when *target*
+                    (send-event
+                      *target*
+                      'powerup
+                      (pickup-type eco-yellow)
+                      0.0))
+                  (sound-play "y-eco-pickup"))
+
+                (else
+                  ;; No resident is facing the lure yet.  Retry soon without
+                  ;; discarding the 45-second cycle that just elapsed.
+                  (set! (-> data timer) 0.25))))))
+
+        ((= (-> data state) 'charging)
+          (let* ((slot (-> data slot))
+              (fish
+                (if
+                  (and (>= slot 0) (< slot (-> self fish-count)))
+                  (fisher-fish-pointer self slot)
+                  (the-as (pointer manipy) #f))))
+
+            (cond
+              ((or
+                  (not fish)
+                  (= slot (-> self hooked-fish-slot))
+                  (not (fisher-swamp-species?
+                    (fisher-fish-species self slot))))
+                (fisher-reset-yellow-cycle! self))
+
+              (else
+                (let ((fish-proc
+                      (the-as manipy (-> fish 0 self))))
+                  (cond
+                    ((not fish-proc)
+                      (fisher-reset-yellow-cycle! self))
+
+                    (else
+                      (vector-copy!
+                        (-> data position)
+                        (-> fish-proc root trans))
+                      (fisher-submit-yellow-particle!
+                        self
+                        (-> data position)
+                        0)
+                      (+! (-> data timer) dt)
+
+                      (when
+                        (>= (-> data timer) *fisher-yellow-charge-seconds*)
+                        (let ((hook-pos (new 'stack-no-clear 'vector)))
+                          (fisher-hook-target! self hook-pos)
+                          (singlefish-vector-sub-safe!
+                            (-> data direction)
+                            hook-pos
+                            (-> data position))
+                          (set! (-> data direction w) 0.0)
+
+                          (cond
+                            ((>
+                                (singlefish-vector-length-safe
+                                  (-> data direction))
+                                (meters 0.001))
+                              (singlefish-vector-normalize-safe!
+                                (-> data direction)
+                                1.0)
+                              (set! (-> data state) 'projectile)
+                              (set! (-> data projectile-time) 0.0)
+                              (sound-play "yellow-fire"))
+
+                            (else
+                              (fisher-reset-yellow-cycle! self))))))))))))
+
+        ((= (-> data state) 'projectile)
+          (let ((previous-pos (new 'stack-no-clear 'vector))
+              (hook-pos (new 'stack-no-clear 'vector))
+              (from-jak (new 'stack-no-clear 'vector))
+              (distance 0.0))
+
+            (vector-copy! previous-pos (-> data position))
+            (vector+float*!
+              (-> data position)
+              (-> data position)
+              (-> data direction)
+              (* *fisher-yellow-projectile-speed* dt))
+            (+! (-> data projectile-time) dt)
+
+            (fisher-submit-yellow-particle!
+              self
+              (-> data position)
+              1)
+
+            (fisher-hook-target! self hook-pos)
+            (vector-! from-jak (-> data position) (-> self fishing-player-pos))
+            (set! distance (vector-dot from-jak (-> self playfield-axis)))
+
+            (cond
+              ((fisher-point-near-segment?
+                  hook-pos
+                  previous-pos
+                  (-> data position)
+                  *fisher-yellow-hook-hit-radius*)
+                (fisher-begin-lure-stolen-return! self)
+                (set! (-> self lure-destroyed?) #t)
+                (set! (-> self fish-message) "LURE DESTROYED")
+                (set! (-> self fish-message-time) 1.75)
+                (fisher-reset-yellow-cycle! self))
+
+              ((or
+                  (<= distance (meters 3.5))
+                  (>= distance (fisher-playfield-far-distance self))
+                  (>= (-> data projectile-time) 8.0))
+                (fisher-reset-yellow-cycle! self)))))
+
+        (else
+          (fisher-reset-yellow-cycle! self)))))
 
   (none))
 
@@ -7960,6 +8572,7 @@
   (fisher-update-ability-cooldowns! self)
   (fisher-update-voltage-surge! self)
   (fisher-update-electric-system! self)
+  (fisher-update-yellow-system! self)
   (fisher-draw-voltage-meter! self)
   (fisher-handle-fish-input! self)
   (fisher-draw-playfield-debug! self)
@@ -8094,20 +8707,19 @@
     ;; Cooldown bars share the lower foreground space with catch, power-cell,
     ;; lore, and level-up cards.  Hide them until those cards are gone.
     (when
-      (and
-        (not (fisher-level-up-blocking?))
-        (not (= (-> self fish-state) 'catch-enter))
-        (not (= (-> self fish-state) 'catch-display))
-        (not (= (-> self fish-state) 'catch-exit))
-        (not (= (-> self fish-state) 'rare-enter))
-        (not (= (-> self fish-state) 'rare-display))
-        (not (= (-> self fish-state) 'rare-exit)))
+      (not (fisher-modal-ui-active? self))
       (fisher-draw-skill-cooldowns! self)))
 
   (fisher-draw-fish-status! self)
   (fisher-draw-lure-skill-message! self)
   (fisher-draw-button-fight! self)
-  (fisher-draw-lure-count)
+
+  ;; The lure inventory occupies the same compact HUD layer as the XP meter
+  ;; and cooldown bars, so it must disappear during every modal fishing card.
+  (when
+    (not (fisher-modal-ui-active? self))
+    (fisher-draw-lure-count))
+
   (fisher-draw-fishing-clock!)
   (none))
 
@@ -8135,6 +8747,127 @@
 
   (none)
 )
+
+(define *fisher-power-cell-camera-base-back*
+  (new 'static 'vector))
+
+(define *fisher-power-cell-camera-orbit-back*
+  (new 'static 'vector))
+
+(define *fisher-power-cell-camera-pos*
+  (new 'static 'vector))
+
+(define *fisher-power-cell-camera-look-pos*
+  (new 'static 'vector))
+
+(define *fisher-power-cell-camera-forward*
+  (new 'static 'vector))
+
+(defun fisher-power-cell-camera-controller ()
+  ;; Three-stage fishing reward camera:
+  ;;   0.0 - 2.5 sec: orbit from directly behind Jak to directly in front.
+  ;;   2.5 - 6.3 sec: hold the front view while easing slightly backward.
+  ;;   6.3+ sec: quickly shoot farther back for a wide Jak-and-Daxter finish.
+  (let ((elapsed 0.0)
+        (orbit-duration 2.5)
+        (zoom-duration 3.8)
+        (shot-duration 0.42)
+        (orbit-progress 0.0)
+        (zoom-progress 0.0)
+        (shot-progress 0.0)
+        (ease 0.0)
+        (orbit-angle 0.0)
+        (camera-distance (meters 6.35))
+        (camera-height (meters 2.45)))
+
+    (when *camera*
+      (send-event *camera* 'change-state cam-fixed 0))
+
+    (while (and *fisher-power-cell-camera-active?* *target* *camera*)
+      (+! elapsed (-> *display* seconds-per-frame))
+
+      ;; Build the initial direction from Jak's current facing.  Forward is
+      ;; (sin yaw, 0, cos yaw), so its negation is directly behind him.
+      (let ((jak-yaw (y-angle (-> *target* control))))
+        (set! (-> *fisher-power-cell-camera-base-back* x) (- (sin jak-yaw)))
+        (set! (-> *fisher-power-cell-camera-base-back* y) 0.0)
+        (set! (-> *fisher-power-cell-camera-base-back* z) (- (cos jak-yaw)))
+        (set! (-> *fisher-power-cell-camera-base-back* w) 0.0)
+        (vector-normalize! *fisher-power-cell-camera-base-back* 1.0))
+
+      (cond
+        ;; Rotate from Jak's back to his front over 2.5 seconds.
+        ((< elapsed orbit-duration)
+          (set! orbit-progress (fmin 1.0 (/ elapsed orbit-duration)))
+          (set! ease (fisher-smoothstep orbit-progress))
+          (set! orbit-angle (degrees (* 180.0 ease)))
+          (set! camera-distance (meters 6.35))
+          (set! camera-height
+            (meters (+ 2.45 (* 0.30 (sin (* (degrees 180.0) ease)))))))
+
+        ;; Hold the frontal angle and pull out gently for 3.8 seconds.
+        ((< elapsed (+ orbit-duration zoom-duration))
+          (set! zoom-progress
+            (fmin 1.0 (/ (- elapsed orbit-duration) zoom-duration)))
+          (set! ease (fisher-smoothstep zoom-progress))
+          (set! orbit-angle (degrees 180.0))
+          (set! camera-distance
+            (meters (+ 6.35 (* 1.65 ease))))
+          (set! camera-height
+            (meters (+ 2.45 (* 0.30 ease)))))
+
+        ;; Finish with a fast backward camera shot wide enough to include
+        ;; Jak and Daxter without changing the frontal composition.
+        (else
+          (set! shot-progress
+            (fmin 1.0 (/ (- elapsed (+ orbit-duration zoom-duration)) shot-duration)))
+          (set! ease (fisher-smoothstep shot-progress))
+          (set! orbit-angle (degrees 180.0))
+          (set! camera-distance
+            (meters (+ 8.0 (* 4.0 ease))))
+          (set! camera-height
+            (meters (+ 2.75 (* 0.85 ease))))))
+
+      (vector-rotate-y!
+        *fisher-power-cell-camera-orbit-back*
+        *fisher-power-cell-camera-base-back*
+        orbit-angle)
+      (vector-normalize! *fisher-power-cell-camera-orbit-back* 1.0)
+
+      (vector+float*!
+        *fisher-power-cell-camera-pos*
+        (-> *target* control trans)
+        *fisher-power-cell-camera-orbit-back*
+        camera-distance)
+      (+! (-> *fisher-power-cell-camera-pos* y) camera-height)
+      (set! (-> *fisher-power-cell-camera-pos* w) 1.0)
+
+      ;; Aim between Jak's chest and Daxter on his shoulder.  Raising the look
+      ;; target slightly during the final shot keeps both characters framed.
+      (vector-copy! *fisher-power-cell-camera-look-pos* (-> *target* control trans))
+      (+! (-> *fisher-power-cell-camera-look-pos* y)
+        (meters (+ 1.60 (* 0.30 shot-progress))))
+      (set! (-> *fisher-power-cell-camera-look-pos* w) 1.0)
+
+      (when (> (-> *camera* num-slaves) 0)
+        (let ((cam-slave (-> *camera* slave 0 0)))
+          (set! (-> cam-slave saved-pt quad) (-> *fisher-power-cell-camera-pos* quad))
+          (set! (-> cam-slave trans quad) (-> *fisher-power-cell-camera-pos* quad))
+          (vector-!
+            *fisher-power-cell-camera-forward*
+            *fisher-power-cell-camera-look-pos*
+            *fisher-power-cell-camera-pos*)
+          (vector-normalize! *fisher-power-cell-camera-forward* 1.0)
+          (forward-down->inv-matrix
+            (-> cam-slave tracking inv-mat)
+            *fisher-power-cell-camera-forward*
+            (-> *camera* local-down))))
+
+      (suspend))
+
+    (when *camera*
+      (send-event *camera* 'change-state *camera-base-mode* (seconds 0.45))))
+  (none))
 
 (defbehavior fisher-buzzer-power-cell-reward fuel-cell ((task int))
 
@@ -8174,6 +8907,9 @@
         (the-as float -99.0))
       (suspend))
 
+    ;; Match the vanilla fuel-cell root setup exactly.  The victory animation
+    ;; itself raises and closes the cell; lifting this root also offsets Jak's
+    ;; cloned victory animation and makes him float.
     (move-to-point! (-> self root) (-> *target* control trans))
     (set-yaw-angle-clear-roll-pitch!
       (-> self root)
@@ -8189,6 +8925,22 @@
     (update-transforms! (-> self root))
     (ja-post)
 
+    ;; The reward process is only the hidden animation owner.  Vanilla power
+    ;; cell rewards spawn a second visible fuel-cell that clones joint 3 from
+    ;; the process playing the victory spool.  That clone state also calls
+    ;; animate every frame, which is what keeps the starburst particles alive.
+    (set! (-> self draw bounds w) 32768.0)
+    (logior! (-> self skel status) (janim-status inited))
+    (logior! (-> self draw status) (draw-status hidden))
+
+    (process-spawn
+      fuel-cell
+      :init fuel-cell-init-as-clone
+      (process->handle self)
+      task
+      :name "fisher-visible-power-cell"
+      :to self)
+
     (spool-push
       *art-control*
       (-> self victory-anim name)
@@ -8202,8 +8954,6 @@
       (pickup-type fuel-cell)
       (the float task))
 
-    (set! (-> self draw bounds w) 32768.0)
-    (logior! (-> self skel status) (janim-status inited))
     (send-event *target* 'blend-shape #t)
 
     (add-setting! 'music-volume 'rel
@@ -8213,15 +8963,31 @@
     (add-setting! 'ambient-volume 'rel
       (-> *setting-control* current ambient-volume-movie) 0)
 
-    (process-spawn othercam self 10 #f #t :to self)
+    (set! *fisher-power-cell-camera-active?* #t)
+    (process-spawn-function
+      process
+      fisher-power-cell-camera-controller
+      :name "fisher-power-cell-camera"
+      :to *active-pool*)
 
     (auto-save-command 'auto-save 0 0 *default-pool*)
 
+    ;; The hidden owner drives the complete victory spool.  Jak clones this
+    ;; owner, and fisher-visible-power-cell independently clones owner joint 3.
     (ja-play-spooled-anim
       (-> self victory-anim)
       (the-as art-joint-anim fuel-cell-idle-ja)
       (the-as art-joint-anim #f)
       (the-as (function process-drawable symbol) false-func))
+
+    ;; The visible clone exits when clone-anim returns at the end of the spool.
+    ;; The hidden owner never renders or emits particles itself.
+    (set! (-> self state-object) #f)
+    (when (nonzero? (-> self part))
+      (kill-and-free-particles (-> self part)))
+    (logior! (-> self draw status) (draw-status skip-bones hidden))
+
+    (set! *fisher-power-cell-camera-active?* #f)
 
     (remove-setting! 'music-volume)
     (remove-setting! 'sfx-volume)
@@ -8235,12 +9001,14 @@
     (suspend)
     (suspend))
 
+  (set! *fisher-power-cell-camera-active?* #f)
   (set! *fisher-power-cell-reward-active?* #f)
 
   (when *fisher-game*
     (let ((game (the-as fisher-game (-> *fisher-game* 0))))
       (fisher-add-power-cell-fish-slot! game)
-      (fisher-add-fire-canyon-cellfish-slot! game)))
+      (fisher-add-fire-canyon-cellfish-slot! game)
+      (fisher-add-mountain-pass-cellfish-slots! game)))
 
   (deactivate self)
   (none))

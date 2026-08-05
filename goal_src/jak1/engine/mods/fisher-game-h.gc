@@ -14,12 +14,18 @@
 (define *fisher-sink-lure-unlock-level* 5)
 (define *fisher-tug-line-unlock-level* 7)
 (define *fisher-fishing-clock-unlock-level* 10)
+(define *fisher-rip-line-unlock-level* 12)
+(define *fisher-heal-line-unlock-level* 14)
 (define *fisher-sink-lure-active-seconds* 3.5)
 (define *fisher-sink-lure-cooldown-seconds* 15.0)
 (define *fisher-tug-line-active-seconds* 2.0)
 (define *fisher-tug-line-cooldown-seconds* 35.0)
 (define *fisher-tug-line-reel-multiplier* 2.0)
-(define *fisher-cooldown-skill-count* 3)
+(define *fisher-rip-line-suppress-seconds* 4.0)
+(define *fisher-rip-line-cooldown-seconds* 35.0)
+(define *fisher-heal-line-amount* 65.0)
+(define *fisher-heal-line-cooldown-seconds* 26.0)
+(define *fisher-cooldown-skill-count* 5)
 (define *fisher-line-hp-max* 100.0)
 (define *fisher-power-cell-fish-chance* 0.10)
 (define *fisher-poison-eelfish-dps* 2.0)
@@ -27,10 +33,15 @@
 (define *fisher-electric-cycle-max-seconds* 16.0)
 (define *fisher-electric-charge-seconds* 2.0)
 (define *fisher-electric-projectile-speed* (meters 20.0))
-(define *fisher-electric-line-travel-seconds* 0.85)
+(define *fisher-electric-line-travel-seconds* 0.45)
 (define *fisher-electric-line-stun-seconds* 2.0)
 (define *fisher-voltage-fill-seconds* 30.0)
 (define *fisher-voltage-shot-spread-seconds* 0.70)
+(define *fisher-yellow-cycle-min-seconds* 45.0)
+(define *fisher-yellow-cycle-max-seconds* 45.0)
+(define *fisher-yellow-charge-seconds* 0.55)
+(define *fisher-yellow-projectile-speed* (meters 12.0))
+(define *fisher-yellow-hook-hit-radius* (meters 0.70))
 (define *fisher-sunken-far-distance* (meters 51.5))
 (define *fisher-sunken-max-depth* (meters 19.25))
 (define *fisher-approach-speed-min* 4.35)
@@ -246,7 +257,10 @@
   (fire-canyon-cellfish 6)
   (electric-grubfish 7)
   (electric-eelfish 8)
-  (electric-lurker-shark 9))
+  (electric-lurker-shark 9)
+  (swamp-guppie 10)
+  (sludge-crappie 11)
+  (black-lurker-shark 12))
 
 (defenum fisher-zone
   (sandover-dock 0)
@@ -255,7 +269,8 @@
   (sentinel-pontoon 3)
   (misty-island 4)
   (village2-electric 5)
-  (sunken-voltage 6))
+  (sunken-voltage 6)
+  (swamp-sludge 7))
 
 (deftype fisher-species-info (basic)
   ((name                 string)
@@ -300,14 +315,14 @@
     (shark-chance           float)
     (fire-canyon-cellfish?  symbol)))
 
-(define *fisher-species-count* 10)
-(define *fisher-zone-count* 7)
+(define *fisher-species-count* 13)
+(define *fisher-zone-count* 8)
 
 (deftype fisher-species-table (basic)
-  ((entry fisher-species-info 10 :inline)))
+  ((entry fisher-species-info 13 :inline)))
 
 (deftype fisher-zone-table (basic)
-  ((entry fisher-zone-info 7 :inline)))
+  ((entry fisher-zone-info 8 :inline)))
 
 (define *fisher-species-table* (new 'global 'fisher-species-table))
 (define *fisher-zone-table* (new 'global 'fisher-zone-table))
@@ -382,6 +397,17 @@
 (define *fisher-voltage-runtime*
   (new 'global 'fisher-voltage-runtime))
 
+(deftype fisher-yellow-runtime (basic)
+  ((state           symbol)
+    (timer           float)
+    (slot            int32)
+    (projectile-time float)
+    (position        vector :inline)
+    (direction       vector :inline)))
+
+(define *fisher-yellow-runtime*
+  (new 'global 'fisher-yellow-runtime))
+
 ;;the master type for the minigame
 
 (deftype fisher-game (process)
@@ -436,6 +462,9 @@
     (tug-line-active?             symbol)
     (tug-line-time                float)
     (tug-line-cooldown            float)
+    (rip-line-cooldown            float)
+    (heal-line-cooldown           float)
+    (lure-destroyed?               symbol)
     (lure-snake                   (pointer manipy))
     (lure-snake-angle             vector :inline)
     (lure-snake-angular-speed     vector :inline)
@@ -494,6 +523,7 @@
     (voltage-active?              symbol)
     (voltage-shots-remaining      int)
     (voltage-data                 fisher-voltage-runtime)
+    (yellow-data                  fisher-yellow-runtime)
     (catch-transition-time        float)
     (catch-menu-offset            float)
     (sandover-eco-count           int)
@@ -580,9 +610,18 @@
 ;; Cross-file fishing state.
 (define-extern *fisher-background-cloud-session-active?* symbol)
 (define-extern *fisher-power-cell-reward-active?* symbol)
+(define-extern *fisher-power-cell-camera-active?* symbol)
 (define-extern *fisher-session-active?* symbol)
 
 
+
+;; Vanilla fuel-cell clone behavior used by the fishing reward presentation.
+(define-extern fuel-cell type)
+
+(define-extern fuel-cell-init-as-clone
+  (function handle int none :behavior fuel-cell))
+
+(defun-extern fisher-power-cell-camera-controller none)
 (defun-extern runs-on-fly-pickup none)
 (defun-extern draw-fisher-small-font-scaled string int int float none)
 (defun-extern draw-fisher-large-font-scaled string int int float none)
@@ -634,6 +673,8 @@
 (defun-extern fisher-debug-line! vector vector rgba none)
 (defun-extern fisher-misty-curtain-color! vector vector)
 (defun-extern fisher-village2-curtain-color! vector vector)
+(defun-extern fisher-swamp-curtain-color! vector vector)
+(defun-extern fisher-force-swamp-underwater-background! none)
 (defun-extern fisher-electric-species? int symbol)
 (defun-extern fisher-playfield-far-distance fisher-game float)
 (defun-extern fisher-playfield-max-depth fisher-game float)
@@ -644,6 +685,14 @@
 (defun-extern fisher-electric-line-points! fisher-game vector vector none)
 (defun-extern fisher-electric-projectile-hits-visible-line? fisher-game vector vector symbol)
 (defun-extern fisher-update-electric-system! fisher-game none)
+(defun-extern fisher-swamp-species? int symbol)
+(defun-extern fisher-reset-yellow-cycle! fisher-game none)
+(defun-extern fisher-find-yellow-slot fisher-game int)
+(defun-extern fisher-submit-yellow-particle! fisher-game vector int none)
+(defun-extern fisher-update-yellow-system! fisher-game none)
+(defun-extern fisher-begin-lure-stolen-return! fisher-game none)
+(defun-extern fisher-camera-lure-stolen-return! fisher-game symbol)
+(defun-extern fisher-update-lure-stolen-return! fisher-game none)
 (defun-extern fisher-finish-voltage-shot! fisher-game int none)
 (defun-extern fisher-reset-voltage-cycle! fisher-game none)
 (defun-extern fisher-start-voltage-surge! fisher-game none)
@@ -669,6 +718,7 @@
 (defun-extern fisher-update-button-fight! fisher-game symbol)
 (defun-extern fisher-draw-button-fight! fisher-game none)
 (defun-extern fisher-add-fire-canyon-cellfish-slot! fisher-game none)
+(defun-extern fisher-add-mountain-pass-cellfish-slots! fisher-game none)
 (defun-extern fisher-default-species-for-location fisher-game int)
 (defun-extern fisher-fish-weight-damage-multiplier fisher-game int float)
 (defun-extern fisher-fish-distance fisher-game int float)
@@ -686,6 +736,7 @@
 (defun-extern fisher-initialize-definition-tables! none)
 (defun-extern fisher-configure-village2-table! fisher-game none)
 (defun-extern fisher-configure-sunken-table! fisher-game none)
+(defun-extern fisher-configure-swamp-table! fisher-game none)
 (defun-extern fisher-count-live-species fisher-game int int)
 (defun-extern fisher-fish-species fisher-game int int)
 (defun-extern fisher-fish-speed fisher-game int float)

@@ -20,6 +20,7 @@
 (define *fisher-pool-center-misty* (new 'static 'vector :x (meters 103.0522) :y (meters 1.7121) :z (meters 992.6285) :w 1.0))
 (define *fisher-pool-center-village2* (new 'static 'vector :x (meters 457.0053) :y (meters 1.9815) :z (meters -1679.8937) :w 1.0))
 (define *fisher-pool-center-sunken* (new 'static 'vector :x (meters 856.0955) :y (meters -143.8908) :z (meters -1761.6607) :w 1.0))
+(define *fisher-pool-center-swamp* (new 'static 'vector :x (meters 571.2822) :y (meters 0.3981) :z (meters -2116.4223) :w 1.0))
 
 (defun fisher-pool-center-for-location ((location-id int))
   (cond
@@ -30,6 +31,7 @@
     ((= location-id 4) *fisher-pool-center-misty*)
     ((= location-id 5) *fisher-pool-center-village2*)
     ((= location-id 6) *fisher-pool-center-sunken*)
+    ((= location-id 7) *fisher-pool-center-swamp*)
     (else (the-as vector #f))))
 
 (defun fisher-player-near-location? ((location-id int) (max-distance meters))
@@ -211,9 +213,9 @@
       (spawn-fisher-game
         5
         (new 'static 'vector
-          :x (meters 457.0053)
-          :y (meters 1.9815)
-          :z (meters -1679.8937)
+          :x (meters 463.4709)
+          :y (meters 1.8)
+          :z (meters -1681.8885)
           :w 1.0)
         (new 'static 'vector
           :x (meters 459.0087)
@@ -253,7 +255,33 @@
         (degrees 48.6245)
         (degrees 139.5418))
 
-      (set! *fisher-active-location-id* 6)))
+      (set! *fisher-active-location-id* 6))
+
+    ((= level-name 'swamp)
+      (spawn-fisher-game
+        7
+        (new 'static 'vector
+          :x (meters 571.2822)
+          :y (meters 0.3981)
+          :z (meters -2116.4223)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 565.9341)
+          :y (meters 0.7270)
+          :z (meters -2117.7124)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 584.0574)
+          :y (meters 2.5893)
+          :z (meters -2123.1799)
+          :w 1.0)
+        ;; No separate sludge height was supplied; the level's sludge surface
+        ;; is treated as world Y = 0, matching the nearby net/player vectors.
+        (meters 0.0)
+        (degrees -53.2123)
+        (degrees 36.7877))
+
+      (set! *fisher-active-location-id* 7)))
 
   (none))
 
@@ -269,7 +297,8 @@
         ((= (-> inside name) 'beach) (set! wanted-location-id 3))
         ((= (-> inside name) 'misty) (set! wanted-location-id 4))
         ((= (-> inside name) 'village2) (set! wanted-location-id 5))
-        ((= (-> inside name) 'sunken) (set! wanted-location-id 6))))
+        ((= (-> inside name) 'sunken) (set! wanted-location-id 6))
+        ((= (-> inside name) 'swamp) (set! wanted-location-id 7))))
 
     ;; Hysteresis prevents repeated spawning right on the boundary.
     (when
@@ -370,9 +399,13 @@
       (when
         (and
           *fisher-man*
-          (!=
-            current-level
-            (-> *fisher-man* 0 level-name)))
+          (or
+            (!=
+              current-level
+              (-> *fisher-man* 0 level-name))
+            (and
+              (= current-level 'ogre)
+              (task-complete? *game-info* (game-task ogre-end)))))
 
         (kill-by-name "fisher-man" *active-pool*)
         (set! *fisher-man* #f))
@@ -398,7 +431,22 @@
                 :z (meters 54.4226)
                 :w 1.0)
               1
-              'village1))))))
+              'village1))
+
+          ((and
+              (= current-level 'ogre)
+              (not
+                (task-complete?
+                  *game-info*
+                  (game-task ogre-end))))
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 206.9792)
+                :y (meters 40.3659)
+                :z (meters -1999.4272)
+                :w 1.0)
+              2
+              'ogre))))))
 
   ;; ensure orb-placer is spawned/killed as requested, debug menu is updated
   (when *debug-segment* (orb-placer-maintenance))

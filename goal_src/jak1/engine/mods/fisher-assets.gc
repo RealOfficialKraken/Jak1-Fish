@@ -296,6 +296,63 @@
     (:timer (seconds 0.075))
     (:flags (bit2 bit3 bit14))))
 
+;; Camera-facing yellow eco used by the Boggy Swamp sludge pool.  The compact
+;; glow/flash/arc trio mirrors the blue-eco projectile without introducing a
+;; world-oriented vent sheet.
+(defpart 3590
+  :init-specs
+  ((:texture (middot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.95))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:scale-y :copy scale-x)
+    (:r 255.0)
+    (:g 208.0)
+    (:b 24.0)
+    (:a 96.0)
+    (:fade-a -4.8)
+    (:timer (seconds 0.08))
+    (:flags (bit2 bit3 bit14))))
+
+(defpart 3591
+  :init-specs
+  ((:texture (starflash effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.72))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 255.0)
+    (:g 236.0)
+    (:b 64.0)
+    (:a 116.0)
+    (:rotvel-z (degrees -1.2) (degrees 2.4))
+    (:fade-a -5.8)
+    (:timer (seconds 0.08))
+    (:flags (bit2 bit3 bit14))))
+
+(defpart 3592
+  :init-specs
+  ((:texture (lightning effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.65) (meters 0.90))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.14) (meters 0.22))
+    (:r 255.0)
+    (:g 216.0)
+    (:b 24.0)
+    (:a 122.0)
+    (:fade-a -6.2)
+    (:timer (seconds 0.075))
+    (:flags (bit2 bit3 bit14))))
+
 (defskelgroup *sharkey-sgc*
   sharkey
   sharkey-lod0-jg

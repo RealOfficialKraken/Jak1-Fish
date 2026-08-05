@@ -328,7 +328,21 @@
           (< starting-level *fisher-fishing-clock-unlock-level*)
           (>= level *fisher-fishing-clock-unlock-level*))
 
-        (+! *fisher-level-up-window-skill-mask* 8)))
+        (+! *fisher-level-up-window-skill-mask* 8))
+
+      (when
+        (and
+          (< starting-level *fisher-rip-line-unlock-level*)
+          (>= level *fisher-rip-line-unlock-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 16))
+
+      (when
+        (and
+          (< starting-level *fisher-heal-line-unlock-level*)
+          (>= level *fisher-heal-line-unlock-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 32)))
 
     (max 0 awarded-xp)))
 
@@ -460,7 +474,21 @@
                 (< old-level *fisher-fishing-clock-unlock-level*)
                 (>= new-level *fisher-fishing-clock-unlock-level*))
 
-              (+! *fisher-level-up-window-skill-mask* 8)))))))
+              (+! *fisher-level-up-window-skill-mask* 8))
+
+            (when
+              (and
+                (< old-level *fisher-rip-line-unlock-level*)
+                (>= new-level *fisher-rip-line-unlock-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 16))
+
+            (when
+              (and
+                (< old-level *fisher-heal-line-unlock-level*)
+                (>= new-level *fisher-heal-line-unlock-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 32)))))))
 
   (none))
 

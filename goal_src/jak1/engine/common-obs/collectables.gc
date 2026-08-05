@@ -1115,10 +1115,6 @@
       (if (-> self state-object) (spawn (-> self part) (-> self root root-prim prim-core world-sphere)))))
 
 (defmethod initialize ((this fuel-cell))
-  ;; The fishing Scout Fly reward initializes a fuel-cell process and then
-  ;; suspends while presenting the standard victory sequence. The original
-  ;; 512-byte backup stack overflows before that first suspend, so reserve a
-  ;; larger stack for all fuel-cell processes.
   (stack-size-set! (-> this main-thread) 2048)
   (let ((s5-0 (new 'process 'collide-shape-moving this (collide-list-enum hit-by-player))))
     (set! (-> s5-0 dynam) (copy *standard-dynamics* 'process))

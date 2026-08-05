@@ -140,6 +140,20 @@
       (suspend)
       (b! #t cfg-0 :delay (nop!))
       (label cfg-77)
+      ;; Mountain Pass's zoomer remains hidden until both fish-awarded cells
+      ;; are complete: Defeat Klaww and Reach the End of Mountain Pass.
+      (let ((inside (if *level* (level-get-target-inside *level*))))
+        (when
+          (and
+            inside
+            (= (-> inside name) 'ogre)
+            (not
+              (and
+                (task-complete? *game-info* (game-task ogre-boss))
+                (task-complete? *game-info* (game-task ogre-end)))))
+          (racer-effect)
+          (suspend)
+          (goto cfg-0)))
       (if (and *target* (logtest? (-> *target* control root-prim prim-core action) (collide-action racer)))
         (go-virtual wait-for-return)
         (go-virtual idle))))

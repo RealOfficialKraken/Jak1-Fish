@@ -10,6 +10,9 @@
 
 (define-extern *ogreboss* ogreboss)
 
+;; Fishing mod skeleton used for the Ogre boss projectile replacement.
+(define-extern *catch-fisha-sgc* skeleton-group)
+
 ;; DECOMP BEGINS
 
 (defskelgroup *ogreboss-sg*
@@ -172,14 +175,9 @@
     (sound-play "ogre-explode" :position (the-as symbol arg0))
     (process-spawn part-tracker :init part-tracker-init group-ogreboss-missile-impact -1 #f #f #f arg0 :to *entity-pool*)
     (activate! *camera-smush-control* (the-as float 819.2) 37 600 (the-as float 1.0) (the-as float 0.995))
-    (let ((gp-2 (manipy-spawn arg0 (-> pp entity) *ogreboss-shoot-boulder-break-sg* #f :to pp)))
-      (quaternion-axis-angle! (-> (the-as manipy (-> gp-2 0)) root quat)
-                              (the-as float 0.0)
-                              (the-as float 1.0)
-                              (the-as float 0.0)
-                              (* 65536.0 (rand-vu)))
-      (send-event (ppointer->process gp-2) 'anim-mode 'play1)
-      (the-as handle (ppointer->handle gp-2)))))
+    ;; The projectile is now a fish, so keep the original explosion sound,
+    ;; particles, and camera shake without spawning rock fragments.
+    (the-as handle #f)))
 
 (defun ogreboss-missile-scale-explosion ((arg0 handle))
   (let* ((gp-0 (handle->process arg0))
@@ -296,7 +294,10 @@
   (set! (-> self dest-pos quad) (-> arg0 dest quad))
   (set! (-> self root quat vec quad) (-> self parent-override 0 root quat vec quad))
   (vector-identity! (-> self root scale))
-  (initialize-skeleton self *ogreboss-shoot-boulder-sg* '())
+  ;; Replace the thrown boulder visual with a giant fisha.  Collision,
+  ;; trajectory, damage, and pickup behavior remain the original missile's.
+  (initialize-skeleton self *catch-fisha-sgc* '())
+  (set-vector! (-> self root scale) 2.25 2.25 2.25 1.0)
   (logior! (-> self mask) (process-mask enemy projectile))
   (logclear! (-> self mask) (process-mask actor-pause))
   (set! (-> self draw shadow-ctrl) *ogreboss-missile-shadow-control*)
@@ -317,6 +318,41 @@
   (go ogreboss-missile-idle)
   (none))
 
+(defun ogreboss-spawn-fisha-overlay ((owner process-drawable) (scale float))
+  (let ((fish
+          (manipy-spawn
+            (-> owner root trans)
+            (-> owner entity)
+            *catch-fisha-sgc*
+            #f
+            :to owner)))
+    (cond
+      (fish
+       (let ((fish-proc (ppointer->process fish)))
+         (send-event fish-proc 'anim-mode 'loop)
+         (send-event fish-proc 'max-vis-dist (meters 999999.0))
+         (set! (-> (the-as manipy fish-proc) root trans quad)
+               (-> owner root trans quad))
+         (set! (-> (the-as manipy fish-proc) root quat vec quad)
+               (-> owner root quat vec quad))
+         (set-vector! (-> (the-as manipy fish-proc) root scale)
+                      scale scale scale 1.0)
+         (process->handle fish-proc)))
+      (else (the-as handle #f)))))
+
+(defun ogreboss-update-fisha-overlay ((owner process-drawable) (fish-handle handle))
+  (let ((fish-proc (handle->process fish-handle)))
+    (when fish-proc
+      (set! (-> (the-as manipy fish-proc) root trans quad)
+            (-> owner draw origin quad))
+      ;; Lower the visible Stage 2/3 fish by 10 meters while leaving the
+      ;; original boulder animation owner and collision at the authored height.
+      (-! (-> (the-as manipy fish-proc) root trans y) (meters 5))
+      (set! (-> (the-as manipy fish-proc) root quat vec quad)
+            (-> owner root quat vec quad))))
+  0
+  (none))
+
 (deftype ogreboss-super-boulder (process-drawable)
   ((root            collide-shape-moving :override)
    (parent-override (pointer process-drawable) :overlay-at parent)
@@ -330,6 +366,7 @@
    (lava            entity-actor)
    (sound-id        sound-id)
    (hit-boss        symbol)
+   (fish-visual     handle)
    (tumble-quat     quaternion :inline))
   (:states
    ogreboss-super-boulder-die
@@ -398,7 +435,10 @@
         (spawn (-> self part) (-> self node-list data 3 bone transform vector 3))
         (sound-play "ogre-rock" :id (-> self sound-id) :position (the-as symbol (-> self joint transform)))
         (suspend)))
-  :post transform-post)
+  :post
+    (behavior ()
+      (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))))
 
 (defbehavior ogreboss-super-boulder-impact-effect ogreboss-super-boulder ()
   (sound-play "ogre-boulder" :position (the-as symbol (-> self draw origin)))
@@ -447,7 +487,10 @@
         (suspend)
         (ja :num! (seek!)))
       (go ogreboss-super-boulder-land))
-  :post transform-post)
+  :post
+    (behavior ()
+      (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))))
 
 (defstate ogreboss-super-boulder-hit (ogreboss-super-boulder)
   :event ogreboss-super-boulder-event-handler
@@ -456,7 +499,10 @@
       (set! (-> self hit-boss) #t)
       (ogreboss-super-boulder-play-hit-anim)
       (go ogreboss-super-boulder-land))
-  :post transform-post)
+  :post
+    (behavior ()
+      (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))))
 
 (defstate ogreboss-super-boulder-die (ogreboss-super-boulder)
   :event ogreboss-super-boulder-event-handler
@@ -469,7 +515,10 @@
       (while (-> self child)
         (suspend))
       (cleanup-for-death self))
-  :post transform-post)
+  :post
+    (behavior ()
+      (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))))
 
 (defstate ogreboss-super-boulder-land (ogreboss-super-boulder)
   :event ogreboss-super-boulder-event-handler
@@ -489,6 +538,7 @@
   :post
     (behavior ()
       (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))
       0))
 
 (defstate ogreboss-super-boulder-roll (ogreboss-super-boulder)
@@ -533,6 +583,7 @@
   :post
     (behavior ()
       (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))
       0))
 
 (defmethod relocate ((this ogreboss-super-boulder) (offset int))
@@ -544,8 +595,11 @@
     (behavior ()
       (clear-collide-with-as (-> self root))
       (ja-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))
       (loop
-        (suspend))))
+        (suspend)
+        (ja-post)
+        (ogreboss-update-fisha-overlay self (-> self fish-visual)))))
 
 (defbehavior ogreboss-super-boulder-init-by-other ogreboss-super-boulder ((arg0 vector) (arg1 float) (arg2 entity-actor))
   (set! (-> self entity) arg2)
@@ -568,7 +622,17 @@
   (set! (-> self root trans quad) (-> self parent-override 0 root trans quad))
   (set! (-> self root quat vec quad) (-> self parent-override 0 root quat vec quad))
   (vector-identity! (-> self root scale))
+  ;; Replace the growing/rolling super boulder visual with a giant fisha.
+  ;; All original joint motion, collision, growth, rolling, and bridge logic remain.
+  ;; Keep the original super-boulder skeleton as the hidden animation owner.
+  ;; Its authored joint animation drives collision, growth, rolling, bridge
+  ;; interaction, and boss-hit timing.  A giant fisha follows joint 3 visually.
   (initialize-skeleton self *ogreboss-super-boulder-sg* '())
+  ;; Do not set draw-status hidden here: hidden drawables skip joint evaluation,
+  ;; which would stop growth/roll motion, collision-joint updates, and anim sounds.
+  ;; Keep the animation owner active and make only its boulder mesh invisible.
+  (set-vector! (-> self draw color-mult) 0.0 0.0 0.0 0.0)
+  (set! (-> self fish-visual) (ogreboss-spawn-fisha-overlay self 3.5))
   ;; og:preserve-this PAL patch here
   (logclear! (-> self mask) (process-mask actor-pause enemy))
   (set! (-> self lava) (entity-actor-lookup (-> self entity) 'water-actor 0))
@@ -593,6 +657,7 @@
    (side-dir        vector :inline)
    (side-pos        float)
    (dest-pos        float)
+   (fish-visual     handle)
    (boulder-type    int8))
   (:states
    ogreboss-bounce-boulder-idle))
@@ -638,6 +703,7 @@
     (behavior ()
       (vector+*! (-> self root trans) (-> self src-pos) (-> self side-dir) (-> self side-pos))
       (transform-post)
+      (ogreboss-update-fisha-overlay self (-> self fish-visual))
       (find-ground-and-draw-shadow (-> self root root-prim prim-core world-sphere)
                                    (the-as vector #f)
                                    (the-as float 49152.0)
@@ -677,7 +743,17 @@
                   ((= arg0 2) 20480.0)
                   (else 0.0))))
   (vector-x-quaternion! (-> self side-dir) (-> self root quat))
+  ;; Replace the Stage 2 bouncing boulder visual with a giant fisha.
+  ;; Its original side motion, collision, and attack behavior remain unchanged.
+  ;; Keep the original bounce-boulder skeleton hidden so its authored
+  ;; bridge-travel animation, collision joint, and animation events still run.
+  ;; The visible giant fisha follows the animated boulder joint.
   (initialize-skeleton self *ogreboss-bounce-boulder-sg* '())
+  ;; Keep joint animation active. draw-status hidden would prevent the bridge
+  ;; travel animation, collision joint, and rolling sound events from updating.
+  ;; Hide only the original boulder mesh through a zero color multiplier.
+  (set-vector! (-> self draw color-mult) 0.0 0.0 0.0 0.0)
+  (set! (-> self fish-visual) (ogreboss-spawn-fisha-overlay self 2.75))
   (logclear! (-> self mask) (process-mask actor-pause))
   (set! (-> self draw origin-joint-index) (the-as uint 3))
   (set-vector! (-> self draw color-emissive) 0.125 0.0625 0.0 0.0)

@@ -223,6 +223,27 @@
     300 600 4.0 0.92 0.66 0.08 0.46 1.00
     (meters 30.0) (meters 34.0))
 
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species swamp-guppie))
+    "SWAMP GUPPIE"
+    *catch-fisha-sgc*
+    10 20 1.6 0.46 0.22 1.00 0.82 0.06
+    (meters 8.0) (meters 14.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species sludge-crappie))
+    "SLUDGE CRAPPIE"
+    *catch-fishb-sgc*
+    20 30 1.8 0.48 0.23 1.00 1.00 1.00
+    (meters 17.0) (meters 24.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species black-lurker-shark))
+    "BLACK LURKER SHARK"
+    *sharkey-sgc*
+    60 100 2.8 0.52 0.25 0.035 0.040 0.040
+    (meters 27.0) (meters 33.0))
+
   (dotimes (species *fisher-species-count*)
     (fisher-set-normal-fight-info!
       (fisher-species-info-for species)))
@@ -298,6 +319,23 @@
     0.0
     1.0)
 
+  ;; The small black shark keeps the ordinary Lurker Shark's short button
+  ;; sequence, scaled to its lower weight.
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species black-lurker-shark))
+    (meters 1.20)
+    0.90
+    1.35
+    0.28
+    1
+    3
+    0.24
+    0.38
+    145.0
+    155.0
+    0.0
+    1.0)
+
   ;; Only species explicitly marked here steal the lure when their bite is
   ;; not hooked in time.  All other species keep the default #f value.
   (set!
@@ -314,6 +352,9 @@
     #t)
   (set!
     (-> (fisher-species-info-for (fisher-species fire-canyon-cellfish)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species swamp-guppie)) snap-on-bite?)
     #t)
 
   (fisher-set-zone-info!
@@ -361,6 +402,13 @@
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sunken-voltage)) 0 (fisher-species electric-lurker-shark) 1 1 1 1)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sunken-voltage)) 1 (fisher-species electric-grubfish) 6 8 9 12)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sunken-voltage)) 2 (fisher-species electric-eelfish) 4 5 6 8)
+
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone swamp-sludge))
+    14 17 11 13 17 21 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone swamp-sludge)) 0 (fisher-species black-lurker-shark) 1 1 1 1)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone swamp-sludge)) 1 (fisher-species swamp-guppie) 5 6 8 10)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone swamp-sludge)) 2 (fisher-species sludge-crappie) 5 6 8 10)
 
   (set! (-> (fisher-zone-info-for (fisher-zone sandover-dock)) fire-canyon-cellfish?) #t)
   (set! (-> (fisher-zone-info-for (fisher-zone jungle-pillar)) fire-canyon-cellfish?) #t)
@@ -806,8 +854,8 @@
           12.0)))
 
     (or
-      (and (>= hour 4.0) (< hour 6.0))
-      (and (>= hour 18.0) (< hour 23.0)))))
+      (>= hour 18.0)
+      (< hour 6.0))))
 
 (defun fisher-green-sun-hour? ()
   (let ((hour
@@ -941,7 +989,14 @@
 (defun fisher-species-name
   ((self fisher-game) (species int))
 
-  (-> (fisher-species-info-for species) name))
+  (if
+    (and
+      (= species (the-as int (fisher-species fire-canyon-cellfish)))
+      (or
+        (= (-> self caught-power-cell-task) (the-as int (game-task ogre-boss)))
+        (= (-> self caught-power-cell-task) (the-as int (game-task ogre-end)))))
+    "MOUNTAIN PASS CELL FISH"
+    (-> (fisher-species-info-for species) name)))
 
 (defun fisher-suffix-value-multiplier ((suffix int))
   (cond
@@ -1116,8 +1171,12 @@
 (defun fisher-power-cell-task-count-for-location ((self fisher-game))
   (cond
     ((= (-> self location-id) 4) 5)
-    ((= (-> self location-id) 5) 1)
-    ((= (-> self location-id) 6) 7)
+    ;; Every Hub 2 fishing pool also shares the two Basin reward cells:
+    ;; rolling-lake and rolling-buzzer.  rolling-buzzer is awarded directly
+    ;; as a power-cell fish; it does not add Basin Scout Fly fish here.
+    ((= (-> self location-id) 5) 3)
+    ((= (-> self location-id) 6) 9)
+    ((= (-> self location-id) 7) 9)
     ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
     (else 0)))
 
@@ -1147,7 +1206,10 @@
         (else (game-task misty-eco-challenge))))
 
     ((= (-> self location-id) 5)
-      (game-task firecanyon-buzzer))
+      (cond
+        ((= index 0) (game-task firecanyon-buzzer))
+        ((= index 1) (game-task rolling-lake))
+        (else (game-task rolling-buzzer))))
 
     ((= (-> self location-id) 6)
       (cond
@@ -1157,7 +1219,22 @@
         ((= index 3) (game-task sunken-sharks))
         ((= index 4) (game-task sunken-top-of-helix))
         ((= index 5) (game-task sunken-spinning-room))
-        (else (game-task sunken-room))))
+        ((= index 6) (game-task sunken-room))
+        ((= index 7) (game-task rolling-lake))
+        (else (game-task rolling-buzzer))))
+
+    ;; swamp-billy is Protect Farthy's Snacks and is deliberately excluded.
+    ((= (-> self location-id) 7)
+      (cond
+        ((= index 0) (game-task swamp-arm))
+        ((= index 1) (game-task swamp-battle))
+        ((= index 2) (game-task swamp-flutflut))
+        ((= index 3) (game-task swamp-tether-1))
+        ((= index 4) (game-task swamp-tether-2))
+        ((= index 5) (game-task swamp-tether-3))
+        ((= index 6) (game-task swamp-tether-4))
+        ((= index 7) (game-task rolling-lake))
+        (else (game-task rolling-buzzer))))
 
     (else (game-task none))))
 
@@ -1189,8 +1266,13 @@
 
 (defun fisher-has-power-cell-fish? ((self fisher-game))
   (dotimes (slot (-> self fish-count))
-    (when (> (fisher-fish-power-cell-task self slot) 1)
-      (return #t)))
+    (let ((task (fisher-fish-power-cell-task self slot)))
+      (when
+        (and
+          (> task 1)
+          (!= task (the-as int (game-task ogre-boss)))
+          (!= task (the-as int (game-task ogre-end))))
+        (return #t))))
   #f)
 
 (defun fisher-add-power-cell-fish-slot! ((self fisher-game))
@@ -1201,7 +1283,8 @@
         (= (-> self location-id) 3)
         (= (-> self location-id) 4)
         (= (-> self location-id) 5)
-        (= (-> self location-id) 6))
+        (= (-> self location-id) 6)
+        (= (-> self location-id) 7))
       (> (-> self fish-count) 0)
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
@@ -1219,15 +1302,22 @@
             (when
               (and
                 (!= (fisher-fish-species self candidate) 4)
+                (<= (fisher-fish-power-cell-task self candidate) 1)
                 (not
-                  (and
-                    (or
+                  (or
+                    (and
+                      (or
+                        (= (-> self location-id)
+                          (the-as int (fisher-zone village2-electric)))
+                        (= (-> self location-id)
+                          (the-as int (fisher-zone sunken-voltage))))
+                      (= (fisher-fish-species self candidate)
+                        (the-as int (fisher-species electric-lurker-shark))))
+                    (and
                       (= (-> self location-id)
-                        (the-as int (fisher-zone village2-electric)))
-                      (= (-> self location-id)
-                        (the-as int (fisher-zone sunken-voltage))))
-                    (= (fisher-fish-species self candidate)
-                      (the-as int (fisher-species electric-lurker-shark))))))
+                        (the-as int (fisher-zone swamp-sludge)))
+                      (= (fisher-fish-species self candidate)
+                        (the-as int (fisher-species black-lurker-shark)))))))
               (set! slot candidate))
             (+! step 1))
 
@@ -1246,6 +1336,100 @@
                       1.70)
                     0.5)))))))))
 
+  (none))
+
+(defun fisher-mountain-pass-cellfish-location? ((self fisher-game))
+  (or
+    (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+    (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))))
+
+(defun fisher-has-power-cell-task? ((self fisher-game) (task game-task))
+  (dotimes (slot (-> self fish-count))
+    (when
+      (= (fisher-fish-power-cell-task self slot) (the int task))
+      (return #t)))
+  #f)
+
+(defun fisher-mountain-pass-cellfish-eligible? ((self fisher-game))
+  (and
+    (fisher-mountain-pass-cellfish-location? self)
+    *target*
+    (>=
+      (the int
+        (the float
+          (send-event
+            *target*
+            'query
+            'pickup
+            (pickup-type fuel-cell))))
+      45)))
+
+(defun fisher-add-one-mountain-pass-cellfish!
+  ((self fisher-game) (task game-task))
+
+  (when
+    (and
+      (> (-> self fish-count) 0)
+      (not (task-complete? *game-info* task))
+      (not (fisher-has-power-cell-task? self task)))
+
+    (let ((step 0)
+        (slot -1)
+        (candidate 0))
+
+      ;; Mountain Pass Cell Fish coexist with every shark.  Replace only a
+      ;; normal non-collectible resident, never a Scout Fly, another cell
+      ;; carrier, or a Hub 2 shark.  Search from the front of the active table
+      ;; so both guaranteed fish survive normal/golden population reductions.
+      (while (and (< step (-> self fish-count)) (< slot 0))
+        (set! candidate step)
+        (when
+          (and
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species scout-fly)))
+            (<= (fisher-fish-power-cell-task self candidate) 1)
+            (not
+              (or
+                (= (fisher-fish-species self candidate)
+                  (the-as int (fisher-species electric-lurker-shark)))
+                (= (fisher-fish-species self candidate)
+                  (the-as int (fisher-species black-lurker-shark))))))
+          (set! slot candidate))
+        (+! step 1))
+
+      (when (>= slot 0)
+        (fisher-set-fish-species!
+          self
+          slot
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (rand-vu-int-range 100 140))
+        (fisher-set-fish-power-cell-task! self slot (the int task))
+
+        (let ((old-fish (fisher-fish-pointer self slot)))
+          (when old-fish
+            (fisher-destroy-manipy! old-fish)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (the-as (pointer manipy) #f)))))))
+
+  (none))
+
+(defun fisher-add-mountain-pass-cellfish-slots! ((self fisher-game))
+  (when (fisher-mountain-pass-cellfish-eligible? self)
+    ;; One fish awards Defeat Klaww; the other awards Reach the End of
+    ;; Mountain Pass.  Both are guaranteed while their task is missing.
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-boss))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end)))
   (none))
 
 (defun fisher-existing-zone? ((self fisher-game))
@@ -1268,6 +1452,9 @@
         (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
         (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
       (the-as int (fisher-species electric-eelfish)))
+
+    ((= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+      (the-as int (fisher-species sludge-crappie)))
 
     (else
       (the-as int (fisher-species eco-drum)))))
@@ -1428,12 +1615,17 @@
   ;; Preserve the guaranteed Electric Lurker Shark in both Hub 2 electric
   ;; pools instead of allowing a collectible conversion to replace it.
   (when
-    (and
-      (or
-        (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
-        (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
-      (= (fisher-fish-species self slot)
-        (the-as int (fisher-species electric-lurker-shark))))
+    (or
+      (and
+        (or
+          (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+          (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species electric-lurker-shark))))
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species black-lurker-shark)))))
     (return #f))
 
   (when
@@ -1465,29 +1657,35 @@
       (the-as int (game-task firecanyon-end)))
     (return #t))
 
-  (let* ((buzzer-task (fisher-buzzer-task-for-location self))
-      (buzzer-collected (buzzer-count *game-info* buzzer-task))
-      (buzzer-index
-        (if
-          (and
-            (< buzzer-collected 7)
-            (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.33)))
-          (fisher-find-passive-buzzer-index self buzzer-task)
-          -1)))
+  ;; Training awards all four of its cells through the Fisherman's
+  ;; ten-orb quest.  Never convert a replacement resident into a Scout Fly
+  ;; while fishing in the training lagoon.
+  (when
+    (!= (-> self location-id) (the-as int (fisher-zone training-lagoon)))
 
-    (when (>= buzzer-index 0)
-      (fisher-set-fish-species!
-        self
-        slot
-        (the-as int (fisher-species scout-fly)))
-      (fisher-set-fish-power-cell-task! self slot 0)
-      (fisher-set-fish-suffix! self slot 2)
-      (fisher-set-fish-level!
-        self
-        slot
-        (fisher-roll-level-for-current-zone self))
-      (fisher-set-fish-weight-tenths! self slot buzzer-index)
-      (return #t)))
+    (let* ((buzzer-task (fisher-buzzer-task-for-location self))
+        (buzzer-collected (buzzer-count *game-info* buzzer-task))
+        (buzzer-index
+          (if
+            (and
+              (< buzzer-collected 7)
+              (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.33)))
+            (fisher-find-passive-buzzer-index self buzzer-task)
+            -1)))
+
+      (when (>= buzzer-index 0)
+        (fisher-set-fish-species!
+          self
+          slot
+          (the-as int (fisher-species scout-fly)))
+        (fisher-set-fish-power-cell-task! self slot 0)
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths! self slot buzzer-index)
+        (return #t))))
 
   (when
     (and
@@ -1496,7 +1694,8 @@
         (= (-> self location-id) 3)
         (= (-> self location-id) 4)
         (= (-> self location-id) 5)
-        (= (-> self location-id) 6))
+        (= (-> self location-id) 6)
+        (= (-> self location-id) 7))
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
         (if *fisher-in-debug?* 0.90 *fisher-power-cell-fish-chance*)))
@@ -1527,6 +1726,7 @@
     ((= (-> self location-id) 4) (game-task misty-buzzer))
     ((= (-> self location-id) 5) (game-task village2-buzzer))
     ((= (-> self location-id) 6) (game-task sunken-buzzer))
+    ((= (-> self location-id) 7) (game-task swamp-buzzer))
     (else (game-task village1-buzzer))))
 
 (defun fisher-find-missing-buzzer-index
@@ -1560,6 +1760,9 @@
 
     (when
       (and
+        ;; Training never owns Scout Fly fish.  The ten-orb Fisherman quest
+        ;; directly awards all four training cells instead.
+        (!= (-> self location-id) (the-as int (fisher-zone training-lagoon)))
         (> remaining 0)
         (> (-> self fish-count) 0)
         (rand-vu-percent? (if *fisher-in-debug?* 0.90 0.33)))
@@ -1571,22 +1774,36 @@
 
       (when (>= first-index 0)
         (let ((slot (- (-> self fish-count) 1)))
-          (fisher-set-fish-species! self slot 4)
-          (fisher-set-fish-power-cell-task! self slot 0)
-          (fisher-set-fish-suffix! self slot 2)
-          (fisher-set-fish-level!
-            self
-            slot
-            (fisher-roll-level-for-current-zone self))
-          (fisher-set-fish-weight-tenths! self slot first-index)
+          ;; Do not let a Scout Fly insertion overwrite either Mountain Pass
+          ;; Cell Fish, a local cell carrier, or a protected Hub 2 shark.
+          (while
+            (and
+              (>= slot 0)
+              (or
+                (> (fisher-fish-power-cell-task self slot) 1)
+                (= (fisher-fish-species self slot)
+                  (the-as int (fisher-species electric-lurker-shark)))
+                (= (fisher-fish-species self slot)
+                  (the-as int (fisher-species black-lurker-shark)))))
+            (-! slot 1))
 
-          (let ((old-fish (fisher-fish-pointer self slot)))
-            (when old-fish
-              (fisher-destroy-manipy! old-fish)
-              (fisher-set-fish-pointer!
-                self
-                slot
-                (the-as (pointer manipy) #f))))))
+          (when (>= slot 0)
+            (fisher-set-fish-species! self slot 4)
+            (fisher-set-fish-power-cell-task! self slot 0)
+            (fisher-set-fish-suffix! self slot 2)
+            (fisher-set-fish-level!
+              self
+              slot
+              (fisher-roll-level-for-current-zone self))
+            (fisher-set-fish-weight-tenths! self slot first-index)
+
+            (let ((old-fish (fisher-fish-pointer self slot)))
+              (when old-fish
+                (fisher-destroy-manipy! old-fish)
+                (fisher-set-fish-pointer!
+                  self
+                  slot
+                  (the-as (pointer manipy) #f)))))))
 
       (when (= spawn-count 2)
         (set! second-index
@@ -1846,6 +2063,50 @@
   (none))
 
 
+(defun fisher-configure-swamp-table! ((self fisher-game))
+  (let* ((zone (fisher-zone-info-for (fisher-zone swamp-sludge)))
+      (golden? (fisher-golden-hour?))
+      (guppie-count
+        (if golden?
+          (rand-vu-int-range 8 10)
+          (rand-vu-int-range 5 6)))
+      (crappie-count
+        (if golden?
+          (rand-vu-int-range 8 10)
+          (rand-vu-int-range 5 6)))
+      (shark-count 1)
+      (slot 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min *fisher-max-fish-slots* (+ shark-count guppie-count crappie-count)))
+    (fisher-clear-power-cell-tasks! self)
+
+    ;; Keep the one Black Lurker Shark in slot zero so passive collectible
+    ;; conversions at the end of the table never replace it.
+    (when (< slot (-> self fish-count))
+      (fisher-set-fish-species!
+        self slot (the-as int (fisher-species black-lurker-shark)))
+      (fisher-set-fish-suffix! self slot (fisher-roll-standard-fish-suffix))
+      (fisher-set-fish-level! self slot (fisher-roll-level-for-current-zone self))
+      (fisher-set-fish-weight-tenths! self slot (rand-vu-int-range 60 100))
+      (+! slot 1))
+
+    (dotimes (i guppie-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species swamp-guppie)))
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-configure-random-fish-slot!
+        self slot (the-as int (fisher-species sludge-crappie)))
+      (+! slot 1)))
+
+  (none))
+
+
 (defun fisher-configure-zone-table! ((self fisher-game))
   ;; Build every ordinary population directly from fisher-zone-info.  The old
   ;; area-specific builders hardcoded species, and hidden growth randomized a
@@ -1976,6 +2237,29 @@
         (return (the-as int (fisher-species electric-grubfish)))
         (return (the-as int (fisher-species electric-eelfish))))))
 
+  ;; Swamp always maintains one Black Lurker Shark.  Remaining replacement
+  ;; slots use the current Guppie/Crappie population weights.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+    (when
+      (<
+        (fisher-count-live-species
+          self
+          (the-as int (fisher-species black-lurker-shark)))
+        1)
+      (return (the-as int (fisher-species black-lurker-shark))))
+
+    (let ((guppie-weight (if golden? 10 6))
+        (crappie-weight (if golden? 10 6)))
+      (if
+        (<
+          (rand-vu-int-range
+            0
+            (+ guppie-weight crappie-weight -1))
+          guppie-weight)
+        (return (the-as int (fisher-species swamp-guppie)))
+        (return (the-as int (fisher-species sludge-crappie))))))
+
   ;; Pick a configured species using the current table's maximum ranges as
   ;; weights.  This is used only when an invisible normal/golden transition
   ;; grows the live pool.
@@ -2004,12 +2288,20 @@
       (fisher-configure-village2-table! self))
     ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
       (fisher-configure-sunken-table! self))
+    ((= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+      (fisher-configure-swamp-table! self))
     (else
       (fisher-configure-zone-table! self)))
 
-  (fisher-add-buzzer-fish-slots! self)
+  ;; The training lagoon has no Scout Fly fish.  Its four training cells,
+  ;; including the Scout Fly task cell, are awarded by the ten-orb quest.
+  (when
+    (!= (-> self location-id) (the-as int (fisher-zone training-lagoon)))
+    (fisher-add-buzzer-fish-slots! self))
+
   (fisher-add-power-cell-fish-slot! self)
   (fisher-add-fire-canyon-cellfish-slot! self)
+  (fisher-add-mountain-pass-cellfish-slots! self)
 
   ;; The logical table is the source of truth for gameplay/catch levels.
   (fisher-refresh-active-slot-levels! self)
@@ -2310,6 +2602,40 @@
           (set! g 0.72)
           (set! b 0.06))))
 
+    ;; Mountain Pass Cell Fish reuse the Fire Canyon cell-shark mechanics
+    ;; and red power-cell particle, but their body is blue.
+    (when
+      (and
+        (= species (the-as int (fisher-species fire-canyon-cellfish)))
+        (or
+          (= power-cell-task (the-as int (game-task ogre-boss)))
+          (= power-cell-task (the-as int (game-task ogre-end)))))
+      (set! r 0.10)
+      (set! g 0.42)
+      (set! b 1.00))
+
+    ;; The sludge-pool species keep their requested base colors for every
+    ;; ordinary suffix.  Only Mutant, Golden, and the four true rare fish may
+    ;; override these colors.
+    (when
+      (and
+        (not (fisher-rare-fish? suffix))
+        (!= suffix 3)
+        (!= suffix 6))
+      (cond
+        ((= species (the-as int (fisher-species swamp-guppie)))
+          (set! r 1.00)
+          (set! g 0.82)
+          (set! b 0.06))
+        ((= species (the-as int (fisher-species sludge-crappie)))
+          (set! r 1.00)
+          (set! g 1.00)
+          (set! b 1.00))
+        ((= species (the-as int (fisher-species black-lurker-shark)))
+          (set! r 0.035)
+          (set! g 0.040)
+          (set! b 0.040))))
+
     ;; Catch/loot display fish are presentation models, not gameplay scale.
     ;; Keep them compact so the full fish and any rare attachment fit above
     ;; the loot window.
@@ -2386,6 +2712,24 @@
       self
       slot
       (* (fisher-fish-speed self slot) 1.5)))
+
+  (cond
+    ((or
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species swamp-guppie)))
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species black-lurker-shark))))
+      (fisher-set-fish-speed!
+        self
+        slot
+        (* (fisher-fish-speed self slot) 1.60)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species sludge-crappie)))
+      (fisher-set-fish-speed!
+        self
+        slot
+        (* (fisher-fish-speed self slot) 0.60))))
 
   (fisher-set-fish-cooldown! self slot 0.0)
 
@@ -2769,6 +3113,7 @@
           (and
             (= species
               (the-as int (fisher-species fire-canyon-cellfish)))
+            (= cell-task (the-as int (game-task firecanyon-end)))
             (task-complete?
               *game-info*
               (game-task firecanyon-end)))
@@ -2874,6 +3219,11 @@
   (when (fisher-pool-fish-invisible? self)
     ;; Completion gates apply to both new rolls and persistent residents.
     (fisher-remove-completed-special-fish! self)
+
+    ;; The two Mountain Pass Cell Fish are guaranteed in all Hub 2 pools
+    ;; after 45 cells.  Recheck while hidden so a persistent pool updates as
+    ;; soon as the threshold is reached or after either reward is completed.
+    (fisher-add-mountain-pass-cellfish-slots! self)
 
     ;; Debug mode must guarantee that the Fire Canyon Cell Fish exists even
     ;; when the persistent fishbox was created before debug was enabled or was
@@ -3455,7 +3805,7 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define *fisher-man-dialogue-count* 2)
+(define *fisher-man-dialogue-count* 3)
 
 ;; dialogue-kind:
 ;;   0 = first tutorial
@@ -3465,6 +3815,7 @@
 ;;   4 = village1 random fishing hint
 ;;   5 = lure refill confirmation
 ;;   6 = first tutorial lure gift
+;;   7 = Mountain Pass zoomer requirement hint
 (define *fisher-man-dialogue-page-count* 6)
 (define *fisher-man-hint-count* 10)
 
@@ -3659,6 +4010,23 @@
     "... ER... SHIP, RATHER."
     ""))
 
+(define *fisher-man-mountain-pass-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "BE AWARE, LAD!"
+    "THE ZOOMER WILL NOT SPAWN"
+    "UNLESS YE COLLECTED THE POWERCELL"
+    "FER FINISHIN THIS HERE MOUNTAIN PASS."
+
+    ;; Page 1
+    "IT CAN BE COLLECTED IN ROCK VILLAGE OR"
+    "ANY OF THE AREAS ACROSS FROM IT!"
+    ""
+    ""))
+
 ;; Ten one-page gameplay hints used only by the Village fisherman.
 (define *fisher-man-hint-dialogue-lines*
   (new 'static
@@ -3700,15 +4068,15 @@
     "LEGENDARY FISH, LAD."
     ""
 
-    "GOLDEN HOURS RUN FROM 4 TO 6 AT DAWN,"
-    "AND THE EVENING AS WELL."
-    "MORE FISH STIR THEN, AND BETTER"
-    "TRAITS BE EASIER TO FIND."
+    "THERE BE MORE FISH TO CATCH WHEN YE"
+    "NIGHT FISH!"
+    "THE GOLDEN HOURS RUN FROM"
+    "SUNSET TO SUNRISE."
 
-    "A GLOWING FISH MAY HAVE SWALLOWED A CELL."
-    "THE CELL MAKES IT HEAVIER,"
-    ""
-    "LAND IT, AND THE POWER CELL BE YOURS."
+    "YE SHOULD BE SWITCHIN FISHIN SPOTS"
+    "OFTEN!"
+    "SETTLED WATERS CAN PRESENT"
+    "NEW FISH TO CATCH."
 
     "SCOUT FLIES CAN BITE YER LURE TOO."
     "EACH FISHING AREA HIDES SEVEN OF 'EM."
@@ -3738,6 +4106,10 @@
   ((self fisher-man))
 
   (cond
+    ((= (-> self dialogue-type) 2)
+      (set! (-> self dialogue-kind) 7)
+      (set! *fisher-man-dialogue-page-count* 2))
+
     ((= (-> self dialogue-type) 1)
       (let ((old-hint (-> self dialogue-hint-index))
           (new-hint (rand-vu-int-range 0 (- *fisher-man-hint-count* 1))))
@@ -3831,6 +4203,9 @@
 
       ((= (-> self dialogue-kind) 6)
         (-> *fisher-man-tutorial-lures-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 7)
+        (-> *fisher-man-mountain-pass-dialogue-lines* data index))
 
       (else
         (-> *fisher-man-orb-reminder-dialogue-lines* data index)))))
@@ -4489,7 +4864,8 @@
 
           ((or
               (= (-> self dialogue-kind) 5)
-              (= (-> self dialogue-kind) 6))
+              (= (-> self dialogue-kind) 6)
+              (= (-> self dialogue-kind) 7))
             (go idle))
 
           (else
