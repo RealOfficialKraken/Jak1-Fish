@@ -247,7 +247,7 @@
   ((:texture (middot effects))
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
-    (:scale-x (meters 0.72))
+    (:scale-x (meters 1.15))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:scale-y :copy scale-x)
@@ -264,7 +264,7 @@
   ((:texture (starflash effects))
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
-    (:scale-x (meters 0.54))
+    (:scale-x (meters 0.86))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:rot-z (degrees 0) (degrees 360))
@@ -283,11 +283,11 @@
   ((:texture (lightning effects))
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
-    (:scale-x (meters 0.48) (meters 0.68))
+    (:scale-x (meters 0.77) (meters 1.09))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:rot-z (degrees 0) (degrees 360))
-    (:scale-y (meters 0.10) (meters 0.16))
+    (:scale-y (meters 0.16) (meters 0.26))
     (:r 96.0)
     (:g 112.0)
     (:b 255.0)
@@ -299,58 +299,136 @@
 ;; Camera-facing yellow eco used by the Boggy Swamp sludge pool.  The compact
 ;; glow/flash/arc trio mirrors the blue-eco projectile without introducing a
 ;; world-oriented vent sheet.
-(defpart 3590
+(defpart 3564
   :init-specs
-  ((:texture (middot effects))
+  ((:texture (flare effects))
     (:birth-func 'birth-func-camera-orient)
-    (:num 1.0)
-    (:scale-x (meters 0.95))
+    (:num 8.0)
+    (:scale-x (meters 1.2) (meters 0.6))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
-    (:scale-y :copy scale-x)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 0.20) (meters 0.45))
     (:r 255.0)
-    (:g 208.0)
-    (:b 24.0)
-    (:a 96.0)
-    (:fade-a -4.8)
-    (:timer (seconds 0.08))
+    (:g 192.0 64.0)
+    (:b 0.0)
+    (:a 118.0)
+    (:vel-x (meters -0.025) (meters 0.05))
+    (:vel-y (meters -0.025) (meters 0.05))
+    (:scalevel-x (meters -0.006))
+    (:fade-a -1.8)
+    (:timer (seconds 0.34))
     (:flags (bit2 bit3 bit14))))
 
-(defpart 3591
+(defpart 3565
   :init-specs
   ((:texture (starflash effects))
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
-    (:scale-x (meters 0.72))
+    (:scale-x (meters 2.1))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:rot-z (degrees 0) (degrees 360))
     (:scale-y :copy scale-x)
     (:r 255.0)
-    (:g 236.0)
-    (:b 64.0)
-    (:a 116.0)
-    (:rotvel-z (degrees -1.2) (degrees 2.4))
-    (:fade-a -5.8)
-    (:timer (seconds 0.08))
+    (:g 208.0)
+    (:b 0.0)
+    (:a 145.0)
+    (:scalevel-x (meters 0.018))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -2.6)
+    (:timer (seconds 0.24))
     (:flags (bit2 bit3 bit14))))
 
-(defpart 3592
+;; Native yellow-eco collect clone.  This is based on the flare burst used by
+;; group-yellow-collect, adapted for direct world-space launches on a fish.
+(defpart 3566
   :init-specs
-  ((:texture (lightning effects))
+  ((:texture (flare effects))
     (:birth-func 'birth-func-camera-orient)
-    (:num 1.0)
-    (:scale-x (meters 0.65) (meters 0.90))
+    (:num 3.0)
+    (:scale-x (meters 0.88) (meters 0.40))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:rot-z (degrees 0) (degrees 360))
-    (:scale-y (meters 0.14) (meters 0.22))
+    (:scale-y (meters 0.19) (meters 0.35))
     (:r 255.0)
-    (:g 216.0)
-    (:b 24.0)
-    (:a 122.0)
-    (:fade-a -6.2)
-    (:timer (seconds 0.075))
+    (:g 192.0 96.0)
+    (:b 0.0)
+    (:a 104.0)
+    (:vel-x (meters -0.010) (meters 0.020))
+    (:vel-y (meters -0.010) (meters 0.020))
+    (:scalevel-x (meters 0.0015))
+    (:fade-a -1.25)
+    (:timer (seconds 0.36))
+    (:flags (bit2 bit3 bit14))))
+
+;; Native eco-yellow body clone, based on parts 192/193 from group-eco-yellow.
+(defpart 3567
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 2.0)
+    (:scale-x (meters 0.93) (meters 0.48))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 255.0)
+    (:g 128.0 224.0)
+    (:b 0.0)
+    (:a 76.0)
+    (:scalevel-x (meters -0.0022))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.85)
+    (:timer (seconds 0.28))
+    (:flags (bit2 bit3 bit14))))
+
+;; Native eco-yellow streak clone, based on parts 194/195.
+(defpart 3568
+  :init-specs
+  ((:texture (hotdot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 2.0)
+    (:scale-x (meters 0.38) (meters 0.19))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y :copy scale-x)
+    (:r 255.0)
+    (:g 144.0 224.0)
+    (:b 0.0)
+    (:a 118.0)
+    (:vel-x (meters -0.006) (meters 0.012))
+    (:vel-y (meters -0.006) (meters 0.012))
+    (:scalevel-x (meters -0.0010))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -1.55)
+    (:timer (seconds 0.20))
+    (:flags (bit2 bit3 bit14))))
+
+
+;; Platformius uses its own compact hover sparks rather than borrowing the
+;; world platform launch group.  Each decorative halo platform launches this
+;; particle from its current animated position.
+(defpart 3569
+  :init-specs
+  ((:texture (hotdot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.045) (meters 0.075))
+    (:scale-y :copy scale-x)
+    (:r 96.0 72.0)
+    (:g 224.0 96.0)
+    (:b 255.0 80.0)
+    (:a 118.0 52.0)
+    (:vel-x (meters -0.002) (meters 0.004))
+    (:vel-y (meters 0.004) (meters 0.010))
+    (:vel-z (meters -0.002) (meters 0.004))
+    (:scalevel-x (meters -0.00018))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.72)
+    (:timer (seconds 0.42))
     (:flags (bit2 bit3 bit14))))
 
 (defskelgroup *sharkey-sgc*
@@ -424,6 +502,19 @@
     (money-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 0.6)
   :texture-level 2)
+
+
+;; Decorative, non-colliding platform used by the Platformius rare fish.
+;; This is a manipy visual only; the normal platform process and rider logic
+;; are intentionally not created.
+(defskelgroup *fisher-platformius-plat-sgc*
+  plat
+  plat-lod0-jg
+  plat-idle-ja
+  ((plat-lod0-mg (meters 20))
+    (plat-lod1-mg (meters 40))
+    (plat-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 -0.5 0 3))
 
 (defskelgroup *fisher-junglefish-sg*
   junglefish

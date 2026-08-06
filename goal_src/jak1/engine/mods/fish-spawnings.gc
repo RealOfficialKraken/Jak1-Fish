@@ -941,34 +941,32 @@
           (else 6))))))
 
 (defun fisher-roll-fish-suffix ()
-  ;; fisher-debug: each rare becomes a 10% roll, for a 40% total rare chance.
-  (let ((rare-roll (rand-vu-int-range 0 99999)))
-    (cond
-      (*fisher-in-debug?*
-        (cond
-          ((< rare-roll 10000) 7)   ;; Precursor Fish
-          ((< rare-roll 20000) 8)   ;; Oracle's Goldfish
-          ((< rare-roll 30000) 9)   ;; Fricked Up Fish
-          ((< rare-roll 40000) 10)  ;; Precursor Orb-Eater
-          (else (fisher-roll-standard-fish-suffix))))
-      (else
-        ;; Each special rare is 0.01% (1 in 10,000).  Combined, any
-        ;; special rare is 0.04% (1 in 2,500).
-        (cond
-          ((< rare-roll 10) 7)
-          ((< rare-roll 20) 8)
-          ((< rare-roll 30) 9)
-          ((< rare-roll 40) 10)
-          (else (fisher-roll-standard-fish-suffix)))))))
+  ;; Debug mode deliberately makes every generated ordinary slot one of the
+  ;; ten special rare fish, with an even 10% share for each rare.
+  (cond
+    (*fisher-in-debug?*
+      (+ 7 (rand-vu-int-range 0 9)))
+
+    (else
+      ;; Combined special-rare odds:
+      ;;   normal hours: 250 / 100000, approximately 1 in 400
+      ;;   golden hours: 667 / 100000, approximately 1 in 150
+      ;; Once the rare roll succeeds, choose evenly among all ten rare fish.
+      (let ((rare-roll (rand-vu-int-range 0 99999))
+          (rare-threshold (if (fisher-golden-hour?) 667 250)))
+        (if (< rare-roll rare-threshold)
+          (+ 7 (rand-vu-int-range 0 9))
+          (fisher-roll-standard-fish-suffix))))))
 
 (defun fisher-rare-fish? ((suffix int))
-  (and (>= suffix 7) (<= suffix 10)))
+  (and (>= suffix 7) (<= suffix 16)))
 
 (defun fisher-apply-rare-slot-type! ((self fisher-game) (slot int))
   (let ((suffix (fisher-fish-suffix self slot)))
     (cond
-      ((= suffix 7) (fisher-set-fish-species! self slot 1))
-      ((or (= suffix 8) (= suffix 9) (= suffix 10))
+      ((or (= suffix 7) (= suffix 11) (= suffix 14) (= suffix 15) (= suffix 16))
+        (fisher-set-fish-species! self slot 1))
+      ((or (= suffix 8) (= suffix 9) (= suffix 10) (= suffix 12) (= suffix 13))
         (fisher-set-fish-species! self slot 0))))
   (none))
 
@@ -984,7 +982,13 @@
     ((= suffix 7) "PRECURSOR")
     ((= suffix 8) "ORACLE")
     ((= suffix 9) "FRICKED UP")
-    (else "ORB-HUNTER")))
+    ((= suffix 10) "ORB-HUNTER")
+    ((= suffix 11) "ARCHIPELAGOLD")
+    ((= suffix 12) "SPEC OPS")
+    ((= suffix 13) "COMPLICATED")
+    ((= suffix 14) "L TETROMINO")
+    ((= suffix 15) "PLATFORMIUS")
+    (else "SCREAMING")))
 
 (defun fisher-species-name
   ((self fisher-game) (species int))
@@ -1031,6 +1035,12 @@
       ((= suffix 8) (rand-vu-int-range 30 61))
       ((= suffix 9) (rand-vu-int-range 1 7))
       ((= suffix 10) (rand-vu-int-range 140 241))
+      ((= suffix 11) (rand-vu-int-range 100 201))
+      ((= suffix 12) (rand-vu-int-range 120 161))
+      ((= suffix 13) (rand-vu-int-range 200 301))
+      ((= suffix 14) 250)
+      ((= suffix 15) 1000)
+      ((= suffix 16) (rand-vu-int-range 30 51))
 
       ((= species 3) 260)
       ((= species 5) base-weight)
@@ -1420,7 +1430,19 @@
             (fisher-set-fish-pointer!
               self
               slot
-              (the-as (pointer manipy) #f)))))))
+              (the-as (pointer manipy) #f)))
+
+          ;; In a persistent rendered pool, do not leave this guaranteed cell
+          ;; fish as a missing slot.  fisher-refill-missing-fish! treats every
+          ;; missing pointer as a caught ordinary fish and rerolls its logical
+          ;; species/task, which immediately erased both Mountain Pass fish.
+          ;; Spawn the newly assigned special resident now while the pool is
+          ;; hidden so the refill pass cannot overwrite it.
+          (when (-> self pool-rendered?)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (fisher-spawn-gameplay-fish self slot)))))))
 
   (none))
 
@@ -2340,6 +2362,79 @@
 (define *fisher-orb-attachment-offset-c-catch*
   (new 'static 'vector :x (meters 0.27) :y (meters -0.04) :z (meters 0.13) :w 0.0))
 
+;; Archipelagoldfish orb-group centers.
+(define *fisher-archipelago-group-offset-game*
+  (new 'static 'vector :y (meters 0.04) :w 0.0))
+(define *fisher-archipelago-group-offset-catch*
+  (new 'static 'vector :y (meters 0.08) :w 0.0))
+
+(define *fisher-archipelago-magenta-game*
+  (new 'static 'vector :y (meters 0.48) :w 0.0))
+(define *fisher-archipelago-green-game*
+  (new 'static 'vector :x (meters 0.4157) :y (meters 0.24) :w 0.0))
+(define *fisher-archipelago-purple-game*
+  (new 'static 'vector :x (meters 0.4157) :y (meters -0.24) :w 0.0))
+(define *fisher-archipelago-salmon-game*
+  (new 'static 'vector :y (meters -0.48) :w 0.0))
+(define *fisher-archipelago-blue-game*
+  (new 'static 'vector :x (meters -0.4157) :y (meters -0.24) :w 0.0))
+(define *fisher-archipelago-yellow-game*
+  (new 'static 'vector :x (meters -0.4157) :y (meters 0.24) :w 0.0))
+
+(define *fisher-archipelago-magenta-catch*
+  (new 'static 'vector :y (meters 0.78) :w 0.0))
+(define *fisher-archipelago-green-catch*
+  (new 'static 'vector :x (meters 0.6755) :y (meters 0.39) :w 0.0))
+(define *fisher-archipelago-purple-catch*
+  (new 'static 'vector :x (meters 0.6755) :y (meters -0.39) :w 0.0))
+(define *fisher-archipelago-salmon-catch*
+  (new 'static 'vector :y (meters -0.78) :w 0.0))
+(define *fisher-archipelago-blue-catch*
+  (new 'static 'vector :x (meters -0.6755) :y (meters -0.39) :w 0.0))
+(define *fisher-archipelago-yellow-catch*
+  (new 'static 'vector :x (meters -0.6755) :y (meters 0.39) :w 0.0))
+
+;; Complicated Fish: three attached fish point along three different axes.
+(define *fisher-complicated-a-game*
+  (new 'static 'vector :x (meters 0.34) :y (meters 0.05) :w 0.0))
+(define *fisher-complicated-b-game*
+  (new 'static 'vector :x (meters -0.30) :y (meters 0.08) :w 0.0))
+(define *fisher-complicated-c-game*
+  (new 'static 'vector :y (meters 0.34) :z (meters 0.08) :w 0.0))
+(define *fisher-complicated-a-catch*
+  (new 'static 'vector :x (meters 0.58) :y (meters 0.08) :w 0.0))
+(define *fisher-complicated-b-catch*
+  (new 'static 'vector :x (meters -0.52) :y (meters 0.12) :w 0.0))
+(define *fisher-complicated-c-catch*
+  (new 'static 'vector :y (meters 0.58) :z (meters 0.12) :w 0.0))
+
+;; L Tetromino Fish: the base fish is the lower-left block; these three fish
+;; finish the vertical three-block column and the lower-right foot.
+;; The extra fish are spawned under an invisible pivot so the full shape can
+;; rotate in randomized 90-degree Tetris-like turns once per second.
+(define *fisher-tetromino-group-offset-game*
+  (new 'static 'vector :w 0.0))
+(define *fisher-tetromino-group-offset-catch*
+  (new 'static 'vector :w 0.0))
+(define *fisher-tetromino-a-game*
+  (new 'static 'vector :y (meters 0.30) :w 0.0))
+(define *fisher-tetromino-b-game*
+  (new 'static 'vector :y (meters 0.60) :w 0.0))
+(define *fisher-tetromino-c-game*
+  (new 'static 'vector :z (meters 0.42) :w 0.0))
+(define *fisher-tetromino-a-catch*
+  (new 'static 'vector :y (meters 0.48) :w 0.0))
+(define *fisher-tetromino-b-catch*
+  (new 'static 'vector :y (meters 0.96) :w 0.0))
+(define *fisher-tetromino-c-catch*
+  (new 'static 'vector :z (meters 0.66) :w 0.0))
+
+;; Platformius halo-group centers.
+(define *fisher-platformius-group-offset-game*
+  (new 'static 'vector :y (meters 0.72) :w 0.0))
+(define *fisher-platformius-group-offset-catch*
+  (new 'static 'vector :y (meters 1.15) :w 0.0))
+
 (defun fisher-update-rare-attachment-transform! ((self manipy))
   (let ((parent-proc (ppointer->process (-> self parent)))
       (offset (-> self root transv)))
@@ -2383,6 +2478,214 @@
 
 (defbehavior fisher-rare-attachment-trans manipy ()
   (fisher-update-rare-attachment-transform! self)
+  (none))
+
+
+(defun fisher-update-rare-attachment-rotated!
+  ((self manipy)
+    (axis-x float)
+    (axis-y float)
+    (axis-z float)
+    (angle float))
+
+  (fisher-update-rare-attachment-transform! self)
+
+  (let ((parent-quat (new 'stack-no-clear 'quaternion))
+      (relative-quat (new 'stack-no-clear 'quaternion)))
+    (quaternion-copy! parent-quat (-> self root quat))
+    (quaternion-axis-angle! relative-quat axis-x axis-y axis-z angle)
+    (quaternion*! (-> self root quat) parent-quat relative-quat))
+
+  (none))
+
+(defbehavior fisher-complicated-x-trans manipy ()
+  (fisher-update-rare-attachment-rotated! self 1.0 0.0 0.0 (degrees 90.0))
+  (none))
+
+(defbehavior fisher-complicated-z-trans manipy ()
+  (fisher-update-rare-attachment-rotated! self 0.0 0.0 1.0 (degrees 90.0))
+  (none))
+
+(defbehavior fisher-complicated-back-trans manipy ()
+  (fisher-update-rare-attachment-rotated! self 0.0 1.0 0.0 (degrees 180.0))
+  (none))
+
+(defbehavior fisher-archipelago-orb-group-trans manipy ()
+  (fisher-update-rare-attachment-transform! self)
+
+  (let ((base-quat (new 'stack-no-clear 'quaternion))
+      (x-quat (new 'stack-no-clear 'quaternion))
+      (z-quat (new 'stack-no-clear 'quaternion))
+      (spin-quat (new 'stack-no-clear 'quaternion))
+      (tick (the float (current-time))))
+
+    (quaternion-copy! base-quat (-> self root quat))
+    (quaternion-axis-angle! x-quat 1.0 0.0 0.0 (* tick 32.768))
+    (quaternion-axis-angle! z-quat 0.0 0.0 1.0 (* tick 49.152))
+    (quaternion*! spin-quat x-quat z-quat)
+    (quaternion*! (-> self root quat) base-quat spin-quat))
+
+  (none))
+
+(defun fisher-update-rare-attachment-offset-rotated!
+  ((self manipy)
+    (axis-x float)
+    (axis-y float)
+    (axis-z float)
+    (angle float))
+
+  (let ((parent-proc (ppointer->process (-> self parent)))
+      (offset (-> self root transv)))
+
+    (send-event
+      self
+      'max-vis-dist
+      (if (or *fisher-resident-fish-visible?* in-main-menu?)
+        (meters 999999.0)
+        (meters 0.0)))
+
+    (when
+      (and
+        parent-proc
+        offset
+        (type-type? (-> parent-proc type) process-drawable))
+
+      (let ((parent-drawable (the-as process-drawable parent-proc))
+          (relative-quat (new 'stack-no-clear 'quaternion))
+          (relative-mat (new 'stack-no-clear 'matrix))
+          (parent-mat (new 'stack-no-clear 'matrix))
+          (local-rotated-offset (new 'stack-no-clear 'vector))
+          (rotated-offset (new 'stack-no-clear 'vector)))
+
+        (quaternion-axis-angle! relative-quat axis-x axis-y axis-z angle)
+        (quaternion->matrix relative-mat relative-quat)
+        (vector-rotate*! local-rotated-offset offset relative-mat)
+        (set! (-> local-rotated-offset w) 0.0)
+
+        (quaternion->matrix parent-mat (-> parent-drawable root quat))
+        (vector-rotate*! rotated-offset local-rotated-offset parent-mat)
+        (set! (-> rotated-offset w) 0.0)
+
+        (vector+!
+          (-> self root trans)
+          (-> parent-drawable root trans)
+          rotated-offset)
+
+        (set! (-> self root trans w) 1.0)
+        (quaternion-copy!
+          (-> self root quat)
+          (-> parent-drawable root quat)))))
+
+  (none))
+
+
+(defun fisher-tetromino-orientation-step ((step int))
+  (case (mod step 16)
+    ((0)  0)
+    ((1)  1)
+    ((2)  0)
+    ((3)  3)
+    ((4)  0)
+    ((5)  1)
+    ((6)  2)
+    ((7)  1)
+    ((8)  0)
+    ((9)  3)
+    ((10) 2)
+    ((11) 3)
+    ((12) 0)
+    ((13) 1)
+    ((14) 2)
+    (else 3)))
+
+(defun fisher-tetromino-orientation-angle ((step int))
+  (* (the float (fisher-tetromino-orientation-step step))
+     (degrees 90.0)))
+
+(defun fisher-tetromino-current-angle ()
+  (let ((frames (current-time))
+      (period (seconds 1.0))
+      (step 0)
+      (phase 0.0)
+      (ease 0.0)
+      (from-angle 0.0)
+      (to-angle 0.0)
+      (delta 0.0))
+
+    (set! step (the int (/ frames period)))
+    (set! phase (/ (the float (mod frames period)) (the float period)))
+    (set! ease (* phase phase (- 3.0 (* 2.0 phase))))
+
+    (set! from-angle (fisher-tetromino-orientation-angle step))
+    (set! to-angle (fisher-tetromino-orientation-angle (+ step 1)))
+    (set! delta (- to-angle from-angle))
+
+    (when (> delta (degrees 180.0))
+      (-! delta (degrees 360.0)))
+    (when (< delta (degrees -180.0))
+      (+! delta (degrees 360.0)))
+
+    (+ from-angle (* delta ease))))
+
+(defbehavior fisher-tetromino-group-trans manipy ()
+  (fisher-update-rare-attachment-transform! self)
+  (none))
+
+(defbehavior fisher-tetromino-piece-trans manipy ()
+  (fisher-update-rare-attachment-offset-rotated!
+    self 1.0 0.0 0.0 (fisher-tetromino-current-angle))
+  (none))
+
+(defbehavior fisher-platformius-halo-group-trans manipy ()
+  (fisher-update-rare-attachment-rotated!
+    self 0.0 1.0 0.0 (* (the float (current-time)) 43.690666))
+  (none))
+
+(defbehavior fisher-platformius-platform-trans manipy ()
+  (fisher-update-rare-attachment-transform! self)
+
+  (when (zero? (mod (current-time) 12))
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3569)
+      (-> self root trans)))
+
+  (none))
+
+(defun fisher-configure-rare-orb!
+  ((attachment (pointer manipy))
+    (r float)
+    (g float)
+    (b float))
+
+  (when attachment
+    (let ((orb (the-as manipy (ppointer->process attachment))))
+      (when orb
+        ;; The six colors rotate as one group.  Do not let the money skeleton's
+        ;; own idle animation spin each orb independently.
+        (send-event orb 'anim-mode 'still)
+        (set! (-> orb draw color-mult r) r)
+        (set! (-> orb draw color-mult g) g)
+        (set! (-> orb draw color-mult b) b)
+        (set! (-> orb draw color-mult a) 1.0)
+        (set! (-> orb draw color-emissive r) (* r 0.40))
+        (set! (-> orb draw color-emissive g) (* g 0.40))
+        (set! (-> orb draw color-emissive b) (* b 0.40))
+        (set! (-> orb draw color-emissive a) 1.0))))
+
+  (none))
+
+(defun fisher-match-attachment-color!
+  ((attachment (pointer manipy)) (parent manipy))
+
+  (when attachment
+    (let ((attachment-proc (the-as manipy (ppointer->process attachment))))
+      (when attachment-proc
+        (set! (-> attachment-proc draw color-mult quad)
+          (-> parent draw color-mult quad))
+        (set! (-> attachment-proc draw color-emissive quad)
+          (-> parent draw color-emissive quad)))))
+
   (none))
 
 (defbehavior fisher-precursor-towertop-trans manipy ()
@@ -2486,8 +2789,214 @@
           *fisher-orb-attachment-offset-c-catch*
           *fisher-orb-attachment-offset-c-game*)
         (if catch-display? 0.62 0.40)
-        "fisher-orb-eater-orb-c")))
+        "fisher-orb-eater-orb-c"))
 
+    ((= suffix 11)
+      ;; One invisible parent owns the X/Z spin.  The six child orbs only own
+      ;; fixed local offsets, so the ring rotates as a single rigid group.
+      (let ((group
+            (fisher-spawn-rare-attachment!
+              fish-proc
+              *money-sgc*
+              (if catch-display?
+                *fisher-archipelago-group-offset-catch*
+                *fisher-archipelago-group-offset-game*)
+              0.001
+              "fisher-archipelago-orb-group")))
+
+        (when group
+          (let ((group-proc (the-as manipy (ppointer->process group)))
+              (orb-scale (if catch-display? 0.54 0.34)))
+
+            (when group-proc
+              (send-event group-proc 'anim-mode 'still)
+              (send-event group-proc 'trans-hook fisher-archipelago-orb-group-trans)
+              (set-vector! (-> group-proc draw color-mult) 0.0 0.0 0.0 0.0)
+              (set-vector! (-> group-proc draw color-emissive) 0.0 0.0 0.0 0.0)
+
+              (fisher-configure-rare-orb!
+                (fisher-spawn-rare-attachment!
+                  group-proc *money-sgc*
+                  (if catch-display?
+                    *fisher-archipelago-magenta-catch*
+                    *fisher-archipelago-magenta-game*)
+                  orb-scale "fisher-archipelago-orb-magenta")
+                1.00 0.18 0.48)
+
+              (fisher-configure-rare-orb!
+                (fisher-spawn-rare-attachment!
+                  group-proc *money-sgc*
+                  (if catch-display?
+                    *fisher-archipelago-green-catch*
+                    *fisher-archipelago-green-game*)
+                  orb-scale "fisher-archipelago-orb-green")
+                0.18 1.00 0.36)
+
+              (fisher-configure-rare-orb!
+                (fisher-spawn-rare-attachment!
+                  group-proc *money-sgc*
+                  (if catch-display?
+                    *fisher-archipelago-purple-catch*
+                    *fisher-archipelago-purple-game*)
+                  orb-scale "fisher-archipelago-orb-purple")
+                0.64 0.24 1.00)
+
+              (fisher-configure-rare-orb!
+                (fisher-spawn-rare-attachment!
+                  group-proc *money-sgc*
+                  (if catch-display?
+                    *fisher-archipelago-salmon-catch*
+                    *fisher-archipelago-salmon-game*)
+                  orb-scale "fisher-archipelago-orb-salmon")
+                1.00 0.42 0.26)
+
+              (fisher-configure-rare-orb!
+                (fisher-spawn-rare-attachment!
+                  group-proc *money-sgc*
+                  (if catch-display?
+                    *fisher-archipelago-blue-catch*
+                    *fisher-archipelago-blue-game*)
+                  orb-scale "fisher-archipelago-orb-blue")
+                0.12 0.24 1.00)
+
+              (fisher-configure-rare-orb!
+                (fisher-spawn-rare-attachment!
+                  group-proc *money-sgc*
+                  (if catch-display?
+                    *fisher-archipelago-yellow-catch*
+                    *fisher-archipelago-yellow-game*)
+                  orb-scale "fisher-archipelago-orb-yellow")
+                1.00 0.84 0.20))))))
+
+    ((= suffix 13)
+      (let ((attachment
+            (fisher-spawn-rare-attachment!
+              fish-proc *catch-fisha-sgc*
+              (if catch-display? *fisher-complicated-a-catch* *fisher-complicated-a-game*)
+              (if catch-display? 0.32 0.27)
+              "fisher-complicated-axis-x")))
+        (when attachment
+          (fisher-match-attachment-color! attachment fish-proc)
+          (send-event (ppointer->process attachment) 'trans-hook fisher-complicated-x-trans)))
+
+      (let ((attachment
+            (fisher-spawn-rare-attachment!
+              fish-proc *catch-fisha-sgc*
+              (if catch-display? *fisher-complicated-b-catch* *fisher-complicated-b-game*)
+              (if catch-display? 0.32 0.27)
+              "fisher-complicated-axis-z")))
+        (when attachment
+          (fisher-match-attachment-color! attachment fish-proc)
+          (send-event (ppointer->process attachment) 'trans-hook fisher-complicated-z-trans)))
+
+      (let ((attachment
+            (fisher-spawn-rare-attachment!
+              fish-proc *catch-fisha-sgc*
+              (if catch-display? *fisher-complicated-c-catch* *fisher-complicated-c-game*)
+              (if catch-display? 0.32 0.27)
+              "fisher-complicated-axis-back")))
+        (when attachment
+          (fisher-match-attachment-color! attachment fish-proc)
+          (send-event (ppointer->process attachment) 'trans-hook fisher-complicated-back-trans))))
+
+    ((= suffix 14)
+      (let ((group
+            (fisher-spawn-rare-attachment!
+              fish-proc
+              *money-sgc*
+              (if catch-display?
+                *fisher-tetromino-group-offset-catch*
+                *fisher-tetromino-group-offset-game*)
+              0.001
+              "fisher-tetromino-group")))
+
+        (when group
+          (let ((group-proc (the-as manipy (ppointer->process group)))
+              (fish-scale (if catch-display? 0.22 0.16)))
+
+            (when group-proc
+              (send-event group-proc 'anim-mode 'still)
+              (send-event group-proc 'trans-hook fisher-tetromino-group-trans)
+              (set-vector! (-> group-proc draw color-mult) 0.0 0.0 0.0 0.0)
+              (set-vector! (-> group-proc draw color-emissive) 0.0 0.0 0.0 0.0)
+
+              (let ((attachment
+                    (fisher-spawn-rare-attachment!
+                      group-proc *catch-fishb-sgc*
+                      (if catch-display? *fisher-tetromino-a-catch* *fisher-tetromino-a-game*)
+                      fish-scale
+                      "fisher-tetromino-upper-a")))
+                (when attachment
+                  (send-event (the-as manipy (ppointer->process attachment)) 'trans-hook fisher-tetromino-piece-trans))
+                (fisher-match-attachment-color! attachment fish-proc))
+
+              (let ((attachment
+                    (fisher-spawn-rare-attachment!
+                      group-proc *catch-fishb-sgc*
+                      (if catch-display? *fisher-tetromino-b-catch* *fisher-tetromino-b-game*)
+                      fish-scale
+                      "fisher-tetromino-upper-b")))
+                (when attachment
+                  (send-event (the-as manipy (ppointer->process attachment)) 'trans-hook fisher-tetromino-piece-trans))
+                (fisher-match-attachment-color! attachment fish-proc))
+
+              (let ((attachment
+                    (fisher-spawn-rare-attachment!
+                      group-proc *catch-fishb-sgc*
+                      (if catch-display? *fisher-tetromino-c-catch* *fisher-tetromino-c-game*)
+                      fish-scale
+                      "fisher-tetromino-foot")))
+                (when attachment
+                  (send-event (the-as manipy (ppointer->process attachment)) 'trans-hook fisher-tetromino-piece-trans))
+                (fisher-match-attachment-color! attachment fish-proc)))))))
+
+    ((= suffix 15)
+      (let ((group
+            (fisher-spawn-rare-attachment!
+              fish-proc
+              *money-sgc*
+              (if catch-display?
+                *fisher-platformius-group-offset-catch*
+                *fisher-platformius-group-offset-game*)
+              0.001
+              "fisher-platformius-halo-group")))
+
+        (when group
+          (let ((group-proc (the-as manipy (ppointer->process group)))
+              (radius (if catch-display? (meters 0.82) (meters 0.50)))
+              (plat-scale (if catch-display? 0.115 0.075)))
+
+            (when group-proc
+              (send-event group-proc 'anim-mode 'still)
+              (send-event group-proc 'trans-hook fisher-platformius-halo-group-trans)
+              (set-vector! (-> group-proc draw color-mult) 0.0 0.0 0.0 0.0)
+              (set-vector! (-> group-proc draw color-emissive) 0.0 0.0 0.0 0.0)
+
+              (dotimes (i 6)
+                (let* ((angle (* 10922.666 (the float i)))
+                    (offset (new 'stack-no-clear 'vector))
+                    (platform (the-as (pointer manipy) #f)))
+                  (set-vector!
+                    offset
+                    (* radius (cos angle))
+                    0.0
+                    (* radius (sin angle))
+                    0.0)
+                  (set!
+                    platform
+                    (fisher-spawn-rare-attachment!
+                      group-proc
+                      *fisher-platformius-plat-sgc*
+                      offset
+                      plat-scale
+                      "fisher-platformius-platform"))
+                  (when platform
+                    (send-event
+                      (ppointer->process platform)
+                      'trans-hook
+                      fisher-platformius-platform-trans)))))))))
+
+  )
   (none))
 
 (defun fisher-apply-slot-appearance!
@@ -2550,7 +3059,48 @@
         (set! base-scale (if catch-display? 0.68 0.38))
         (set! x-scale 1.18)
         (set! y-scale 1.12)
-        (set! z-scale 1.18)))
+        (set! z-scale 1.18))
+
+      ;; Archipelagoldfish uses the unaltered fishb material.
+      ((= suffix 11)
+        (set! r 1.00)
+        (set! g 1.00)
+        (set! b 1.00)
+        (set! base-scale (if catch-display? 0.62 0.34)))
+
+      ;; Spec Ops Fish is intentionally almost lightless.
+      ((= suffix 12)
+        (set! r 0.003)
+        (set! g 0.003)
+        (set! b 0.003)
+        (set! base-scale (if catch-display? 0.64 0.35)))
+
+      ((= suffix 13)
+        (set! r 1.00)
+        (set! g 1.00)
+        (set! b 1.00)
+        (set! base-scale (if catch-display? 0.64 0.34)))
+
+      ;; The base fish is one of the four blocks.  Attachments use the same
+      ;; compact scale to avoid intersections within the L silhouette.
+      ((= suffix 14)
+        (set! r 1.00)
+        (set! g 1.00)
+        (set! b 1.00)
+        (set! base-scale (if catch-display? 0.44 0.16)))
+
+      ;; Platformius and Screaming Fish have no body-color alterations.
+      ((= suffix 15)
+        (set! r 1.00)
+        (set! g 1.00)
+        (set! b 1.00)
+        (set! base-scale (if catch-display? 0.62 0.34)))
+
+      ((= suffix 16)
+        (set! r 1.00)
+        (set! g 1.00)
+        (set! b 1.00)
+        (set! base-scale (if catch-display? 0.62 0.34))))
 
     (when
       (and (not (fisher-rare-fish? suffix)) (= suffix 0))
@@ -2615,7 +3165,7 @@
       (set! b 1.00))
 
     ;; The sludge-pool species keep their requested base colors for every
-    ;; ordinary suffix.  Only Mutant, Golden, and the four true rare fish may
+    ;; ordinary suffix.  Only Mutant, Golden, and the true rare fish may
     ;; override these colors.
     (when
       (and
@@ -2652,7 +3202,13 @@
     (set! (-> fish-proc draw color-emissive r) 0.0)
     (set! (-> fish-proc draw color-emissive g) 0.0)
     (set! (-> fish-proc draw color-emissive b) 0.0)
-    (set! (-> fish-proc draw color-emissive a) 1.0))
+    (set! (-> fish-proc draw color-emissive a) 1.0)
+
+    (when (and catch-display? (= suffix 16))
+      (quaternion-axis-angle!
+        (-> fish-proc root quat)
+        0.0 0.0 1.0
+        (degrees 180.0))))
 
   (none))
 
@@ -2862,7 +3418,14 @@
 
     (matrix->quaternion
       (-> fish-proc root quat)
-      rot))
+      rot)
+
+    (when (= (fisher-fish-suffix self slot) 16)
+      (let ((facing-quat (new 'stack-no-clear 'quaternion))
+          (flip-quat (new 'stack-no-clear 'quaternion)))
+        (quaternion-copy! facing-quat (-> fish-proc root quat))
+        (quaternion-axis-angle! flip-quat 0.0 0.0 1.0 (degrees 180.0))
+        (quaternion*! (-> fish-proc root quat) facing-quat flip-quat))))
 
   (none))
 
@@ -2894,10 +3457,22 @@
           pos
           #f
           (cond
-            ((= (fisher-fish-suffix owner slot) 7) *catch-fishb-sgc*)
-            ((= (fisher-fish-suffix owner slot) 8) *catch-fishc-sgc*)
-            ((or (= (fisher-fish-suffix owner slot) 9)
-                (= (fisher-fish-suffix owner slot) 10)) *catch-fisha-sgc*)
+            ((or
+                (= (fisher-fish-suffix owner slot) 7)
+                (= (fisher-fish-suffix owner slot) 11)
+                (= (fisher-fish-suffix owner slot) 14)
+                (= (fisher-fish-suffix owner slot) 15)
+                (= (fisher-fish-suffix owner slot) 16))
+              *catch-fishb-sgc*)
+            ((or
+                (= (fisher-fish-suffix owner slot) 8)
+                (= (fisher-fish-suffix owner slot) 12))
+              *catch-fishc-sgc*)
+            ((or
+                (= (fisher-fish-suffix owner slot) 9)
+                (= (fisher-fish-suffix owner slot) 10)
+                (= (fisher-fish-suffix owner slot) 13))
+              *catch-fisha-sgc*)
             (else
               (the-as skeleton-group
                 (->
@@ -3731,6 +4306,11 @@
               0.5)))
         (levels-below (- jak-level fish-level)))
 
+      (when (= suffix 16)
+        (play-sound-file
+          "OHHHH.mp3"
+          (the int (-> *setting-control* current sfx-volume))))
+
       (when
         (and
           (> power-cell-task 1)
@@ -3805,7 +4385,7 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define *fisher-man-dialogue-count* 3)
+(define *fisher-man-dialogue-count* 4)
 
 ;; dialogue-kind:
 ;;   0 = first tutorial
@@ -3816,6 +4396,7 @@
 ;;   5 = lure refill confirmation
 ;;   6 = first tutorial lure gift
 ;;   7 = Mountain Pass zoomer requirement hint
+;;   8 = Fire Canyon cell-fish warning
 (define *fisher-man-dialogue-page-count* 6)
 (define *fisher-man-hint-count* 10)
 
@@ -4083,6 +4664,35 @@
     "MAYBE ONE OF 'EM HAS A POWERCELL!"
     ""))
 
+(define *fisher-man-firecanyon-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "YE WOULD BE WISE TO CATCH THE"
+    "FISH THAT HOLDS THE CELL FOR THIS"
+    "AREA BEFORE CROSSIN' IT!"
+    ""
+
+    ;; Page 1
+    "WORD AROUND THE SEA IS THAT"
+    "IT IS ATTRACTED TO POWER CELLS"
+    ""
+    ""
+
+    ;; Page 2
+    "20 POWERCELLS SHOULD DO THE"
+    "TRICK!"
+    ""
+    ""
+
+    ;; Page 3
+    "ONLY AFTER CATCHIN IT, WILL THE"
+    "ZOOMER BE OF USE TO YE!"
+    ""
+    ""))
+
 (define *fisher-man-dialogue-buffer-0*
   (new 'global 'string 256 (the string #f)))
 
@@ -4106,6 +4716,10 @@
   ((self fisher-man))
 
   (cond
+    ((= (-> self dialogue-type) 3)
+      (set! (-> self dialogue-kind) 8)
+      (set! *fisher-man-dialogue-page-count* 4))
+
     ((= (-> self dialogue-type) 2)
       (set! (-> self dialogue-kind) 7)
       (set! *fisher-man-dialogue-page-count* 2))
@@ -4206,6 +4820,9 @@
 
       ((= (-> self dialogue-kind) 7)
         (-> *fisher-man-mountain-pass-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 8)
+        (-> *fisher-man-firecanyon-dialogue-lines* data index))
 
       (else
         (-> *fisher-man-orb-reminder-dialogue-lines* data index)))))
@@ -4865,7 +5482,8 @@
           ((or
               (= (-> self dialogue-kind) 5)
               (= (-> self dialogue-kind) 6)
-              (= (-> self dialogue-kind) 7))
+              (= (-> self dialogue-kind) 7)
+              (= (-> self dialogue-kind) 8))
             (go idle))
 
           (else

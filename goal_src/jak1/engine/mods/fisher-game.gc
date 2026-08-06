@@ -494,9 +494,21 @@
             (+ 140 menu-offset)
             0.46)
 
-          (draw-fisher-large-font-scaled
-            "PRESS <PAD_R2> TO RESTORE 65 LINE HP."
-            256
+          (fisher-draw-reel-hint-text
+            "PRESS "
+            104
+            (+ 160 menu-offset)
+            0.34)
+
+          (fisher-draw-reel-hint-text-red
+            "R2"
+            148
+            (+ 160 menu-offset)
+            0.34)
+
+          (fisher-draw-reel-hint-text
+            " TO RESTORE 65 LINE HP."
+            168
             (+ 160 menu-offset)
             0.34)
 
@@ -560,9 +572,15 @@
 
           (when
             (nonzero? (logand skill-mask 32))
-            (draw-fisher-large-font-scaled
-              "<PAD_R2> HEAL LINE: RESTORE 65 HP / 26 SEC."
-              256
+            (fisher-draw-reel-hint-text-red
+              "R2"
+              74
+              (+ 220 menu-offset)
+              0.27)
+
+            (fisher-draw-reel-hint-text
+              " HEAL LINE: RESTORE 65 HP / 26 SEC."
+              94
               (+ 220 menu-offset)
               0.25))))
 
@@ -3241,7 +3259,10 @@
   (none))
 
 (defun fisher-play-random-fight-sound! ()
-  (play-sound-file (if (rand-vu-percent? 0.5) "fish-fighta.wav" "figh-fightb.wav") (the int (-> *setting-control* current sfx-volume)))
+  (if (rand-vu-percent? 0.5)
+    (play-sound-file "fish-fighta.wav" (the int (-> *setting-control* current sfx-volume)))
+    (play-sound-file "fish-fightb.wav" (the int (-> *setting-control* current sfx-volume)))
+  )
 
   (none))
 
@@ -3839,10 +3860,22 @@
             pos
             #f
             (cond
-              ((= (-> self caught-fish-suffix) 7) *catch-fishb-sgc*)
-              ((= (-> self caught-fish-suffix) 8) *catch-fishc-sgc*)
-              ((or (= (-> self caught-fish-suffix) 9)
-                  (= (-> self caught-fish-suffix) 10)) *catch-fisha-sgc*)
+              ((or
+                  (= (-> self caught-fish-suffix) 7)
+                  (= (-> self caught-fish-suffix) 11)
+                  (= (-> self caught-fish-suffix) 14)
+                  (= (-> self caught-fish-suffix) 15)
+                  (= (-> self caught-fish-suffix) 16))
+                *catch-fishb-sgc*)
+              ((or
+                  (= (-> self caught-fish-suffix) 8)
+                  (= (-> self caught-fish-suffix) 12))
+                *catch-fishc-sgc*)
+              ((or
+                  (= (-> self caught-fish-suffix) 9)
+                  (= (-> self caught-fish-suffix) 10)
+                  (= (-> self caught-fish-suffix) 13))
+                *catch-fisha-sgc*)
 
               ((= (-> self caught-fish-species) 1) *catch-fishb-sgc*)
 
@@ -5905,49 +5938,56 @@
 (defun fisher-world-to-screen!
   ((self fisher-game) (world-pos vector) (screen-pos vector))
 
-  (let ((camera-pos (new 'stack-no-clear 'vector))
-      (camera-look (new 'stack-no-clear 'vector))
-      (forward (new 'stack-no-clear 'vector))
-      (right (new 'stack-no-clear 'vector))
-      (up (new 'stack-no-clear 'vector))
-      (relative (new 'stack-no-clear 'vector))
-      (depth 0.0))
+  ;; Do not reconstruct the screen projection from the camera basis.  The
+  ;; renderer already exposes the exact transform used for this frame through
+  ;; transform-point-qword!.  The old hand-written projection treated camera
+  ;; vector 1 as camera-up even though it is camera-down, and it also guessed
+  ;; the focal length/viewport center.  Those errors could aim the warning at
+  ;; the lure or the opposite vertical side instead of at the charging fish.
+  (when
+    (and
+      *camera*
+      (> (-> *camera* num-slaves) 0))
 
-    (cond
-      ((and *camera* (> (-> *camera* num-slaves) 0))
-        (vector-copy! camera-pos (-> *camera* slave 0 0 trans)))
-      (else
-        (vector-copy! camera-pos (-> self fisher-cam))))
+    (let ((cam-slave (-> *camera* slave 0 0))
+        (relative (new 'stack-no-clear 'vector))
+        (forward (new 'stack-no-clear 'vector))
+        (projected (new 'stack 'vector4w-2))
+        (point (new 'stack-no-clear 'vector))
+        (depth 0.0))
 
-    (cond
-      ((or
-          (= (-> self camera-state) 'lure-camera)
-          (= (-> self camera-state) 'reel-camera))
-        (vector-copy! camera-look (-> self lure-camera-look)))
-      (else
-        (vector-copy! camera-look (-> self fisher-look))))
+      (vector-copy! point world-pos)
+      (set! (-> point w) 1.0)
 
-    (singlefish-vector-sub-safe! forward camera-look camera-pos)
-    (when
-      (<= (singlefish-vector-length-safe forward) (meters 0.001))
-      (singlefish-vector-copy-safe! forward (-> self playfield-axis)))
-    (singlefish-vector-normalize-safe! forward 1.0)
+      ;; Keep the simple front-of-camera rejection, but use the renderer's
+      ;; projected X/Y even when transform-point-qword! reports that the point
+      ;; is outside the visible frustum.  Offscreen coordinates are exactly
+      ;; what the warning arrow needs.
+      (vector-! relative point (-> cam-slave trans))
+      (vector-copy! forward (-> cam-slave tracking inv-mat vector 2))
+      (set! (-> forward w) 0.0)
+      (singlefish-vector-normalize-safe! forward 1.0)
+      (set! depth (vector-dot relative forward))
 
-    (singlefish-vector-cross-safe! right forward (-> *camera* local-down))
-    (singlefish-vector-normalize-safe! right 1.0)
+      (when (> depth (meters 0.10))
+        (transform-point-qword!
+          (-> projected vector 0)
+          point)
 
-    (singlefish-vector-cross-safe! up right forward)
-    (singlefish-vector-normalize-safe! up 1.0)
-
-    (singlefish-vector-sub-safe! relative world-pos camera-pos)
-    (set! depth (vector-dot relative forward))
-
-    (when (> depth (meters 0.10))
-      (set! (-> screen-pos x) (+ 256.0 (* 387.0 (/ (vector-dot relative right) depth))))
-      (set! (-> screen-pos y) (- 204.0 (* 387.0 (/ (vector-dot relative up) depth))))
-      (set! (-> screen-pos z) depth)
-      (set! (-> screen-pos w) 1.0)
-      (return #t)))
+        ;; transform-point-qword! returns GS 12.4 screen coordinates centered
+        ;; around 32768.  This is the same conversion already used by the XP
+        ;; fly and electric-line collision code in this file set.
+        (set! (-> screen-pos x)
+          (+
+            256.0
+            (/ (- (the float (-> projected vector 0 x)) 32768.0) 64.0)))
+        (set! (-> screen-pos y)
+          (+
+            224.0
+            (/ (- (the float (-> projected vector 0 y)) 32768.0) 64.0)))
+        (set! (-> screen-pos z) depth)
+        (set! (-> screen-pos w) 1.0)
+        (return #t))))
 
   #f)
 
@@ -7322,6 +7362,24 @@
     ((= (-> self caught-fish-suffix) 10)
       (format *fish-ui-str* "PRECURSOR ORB-HUNTER"))
 
+    ((= (-> self caught-fish-suffix) 11)
+      (format *fish-ui-str* "ARCHIPELAGOLDFISH"))
+
+    ((= (-> self caught-fish-suffix) 12)
+      (format *fish-ui-str* "SPEC OPS FISH"))
+
+    ((= (-> self caught-fish-suffix) 13)
+      (format *fish-ui-str* "A COMPLICATED FISH"))
+
+    ((= (-> self caught-fish-suffix) 14)
+      (format *fish-ui-str* "L TETROMINO FISH"))
+
+    ((= (-> self caught-fish-suffix) 15)
+      (format *fish-ui-str* "PLATFORMIUS"))
+
+    ((= (-> self caught-fish-suffix) 16)
+      (format *fish-ui-str* "SCREAMING FISH"))
+
     ((and
         (= (-> self caught-fish-species)
           (the-as int (fisher-species fire-canyon-cellfish)))
@@ -7552,7 +7610,87 @@
           (draw-fisher-large-font-scaled
             "I'LL BUY IT FROM YE FOR 90 ORBS."
             256 (+ 134 menu-offset)
-            0.34)))
+            0.34))
+
+        ((= suffix 11)
+          (draw-fisher-large-font-scaled
+            "THIS FISH BE FROM ANOTHER DIMENSION!"
+            256 (+ 108 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "MARKUS HAS BEEN BUSY..."
+            256 (+ 128 menu-offset)
+            0.34))
+
+        ((= suffix 12)
+          (draw-fisher-large-font-scaled
+            "DON'T TURN YOUR BACK ON THIS FISH!"
+            256 (+ 100 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "IT'LL SNEAK UP ON YE. I KNOW IT NOT BE POSSIBLE,"
+            256 (+ 120 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "BUT RUH WOULD WANT TO HAVE THIS FISH."
+            256 (+ 140 menu-offset)
+            0.34))
+
+        ((= suffix 13)
+          (draw-fisher-large-font-scaled
+            "IF YE DON'T CATCH THIS FISH FAST ENOUGH,"
+            256 (+ 108 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "YE MAY BE PUNISHED. MIKE, CRASH THE GAME, PLEASE."
+            256 (+ 128 menu-offset)
+            0.34))
+
+        ((= suffix 14)
+          (draw-fisher-large-font-scaled
+            "WHERE DOES THE L TETROMINO FISH GO? THATS RIGHT!"
+            256 (+ 94 menu-offset)
+            0.32)
+          (draw-fisher-large-font-scaled
+            "THE L TETROMINO FISH GOES IN THE L TETROMINO HOLE!"
+            256 (+ 114 menu-offset)
+            0.32)
+          (draw-fisher-large-font-scaled
+            "THANKS, GRATEFUL FOREST!"
+            256 (+ 134 menu-offset)
+            0.32))
+
+        ((= suffix 15)
+          (draw-fisher-large-font-scaled
+            "THIS HERE FISH STOLE A BUNCH OF PLATFORMS FROM"
+            256 (+ 92 menu-offset)
+            0.32)
+          (draw-fisher-large-font-scaled
+            "GRATEFUL FOREST, AND PUT IT ON ITS HEAD! MAYBE"
+            256 (+ 112 menu-offset)
+            0.32)
+          (draw-fisher-large-font-scaled
+            "IT CAN HELP YE GET TO THE TOP... ON SECOND THOUGHT,"
+            256 (+ 132 menu-offset)
+            0.32)
+          (draw-fisher-large-font-scaled
+            "MAYBE JUST SELL THIS FISH."
+            256 (+ 152 menu-offset)
+            0.32))
+
+        ((= suffix 16)
+          (draw-fisher-large-font-scaled
+            "THIS FISH BE NORMAL, EXCEPT IT HAS BEEN POUNDED"
+            256 (+ 100 menu-offset)
+            0.33)
+          (draw-fisher-large-font-scaled
+            "LIKE ONE TENDERIZES A YAKOW STEAK! YE BEST BE"
+            256 (+ 120 menu-offset)
+            0.33)
+          (draw-fisher-large-font-scaled
+            "PUTTIN THIS FISH OUT OF ITS MISERY, LAD."
+            256 (+ 140 menu-offset)
+            0.33)))
 
       (draw-fisher-large-font-scaled
         "PRESS <PAD_X> TO CONTINUE"
@@ -7638,26 +7776,40 @@
       (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
       (-> self camera-underwater?))
 
+    ;; Both phases use the native eco-yellow body/streak look.
     (launch-particles
       :system *sp-particle-system-3d*
-      (-> *part-id-table* 3590)
+      (-> *part-id-table* 3567)
       pos)
-
     (launch-particles
       :system *sp-particle-system-3d*
-      (-> *part-id-table* 3591)
+      (-> *part-id-table* 3568)
       pos)
 
-    (launch-particles
-      :system *sp-particle-system-3d*
-      (-> *part-id-table* 3592)
-      pos)
-
-    (when (= channel 1)
+    ;; While charging, layer in the native yellow-collect flare burst.
+    (when (= channel 0)
       (launch-particles
         :system *sp-particle-system-3d*
-        (-> *part-id-table* 3592)
+        (-> *part-id-table* 3566)
         pos)))
+
+  (none))
+
+(defun fisher-submit-yellow-explosion!
+  ((self fisher-game) (pos vector))
+
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+      (-> self camera-underwater?))
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3564)
+      pos)
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3565)
+      pos))
 
   (none))
 
@@ -7686,15 +7838,9 @@
                   (set! (-> data slot) slot)
                   (set! (-> data state) 'charging)
                   (set! (-> data timer) 0.0)
-                  ;; Reproduce the native yellow-eco pickup response with a
-                  ;; zero-duration powerup instead of using a blue zap sound.
-                  (when *target*
-                    (send-event
-                      *target*
-                      'powerup
-                      (pickup-type eco-yellow)
-                      0.0))
-                  (sound-play "y-eco-pickup"))
+                  (play-sound-file
+                      "yellow-grab.wav"
+                      (the int (-> *setting-control* current sfx-volume))))
 
                 (else
                   ;; No resident is facing the lure yet.  Retry soon without
@@ -7754,7 +7900,9 @@
                                 1.0)
                               (set! (-> data state) 'projectile)
                               (set! (-> data projectile-time) 0.0)
-                              (sound-play "yellow-fire"))
+                              (play-sound-file
+                                "yellow-fire.wav"
+                                (the int (-> *setting-control* current sfx-volume))))
 
                             (else
                               (fisher-reset-yellow-cycle! self))))))))))))
@@ -7788,6 +7936,7 @@
                   previous-pos
                   (-> data position)
                   *fisher-yellow-hook-hit-radius*)
+                (fisher-submit-yellow-explosion! self hook-pos)
                 (fisher-begin-lure-stolen-return! self)
                 (set! (-> self lure-destroyed?) #t)
                 (set! (-> self fish-message) "LURE DESTROYED")
@@ -7797,7 +7946,7 @@
               ((or
                   (<= distance (meters 3.5))
                   (>= distance (fisher-playfield-far-distance self))
-                  (>= (-> data projectile-time) 8.0))
+                  (>= (-> data projectile-time) 24.0))
                 (fisher-reset-yellow-cycle! self)))))
 
         (else
@@ -7944,10 +8093,9 @@
 (defun fisher-electric-projectile-hits-visible-line?
   ((self fisher-game) (previous-pos vector) (current-pos vector))
 
-  ;; The retail line is rendered from Jak's projected position to the fixed
-  ;; screen point (512, 506).  Treat the projectile as a visible sprite rather
-  ;; than an infinitely thin point: test the whole frame-to-frame sweep against
-  ;; a 42-pixel corridor surrounding that exact rendered segment.
+  ;; Test only whether the projectile's frame-to-frame path crosses the exact
+  ;; visible Jak-to-hook line.  The previous 42-pixel corridor electrified the
+  ;; line when a blast merely passed well above or below it.
   (let ((projected
           (new 'stack 'vector4w-2))
 
@@ -7965,8 +8113,6 @@
       (projectile-old-y 0)
       (projectile-new-x 0)
       (projectile-new-y 0)
-      (projectile-mid-x 0)
-      (projectile-mid-y 0)
       (line-dx 0)
       (line-dy 0)
       (shot-dx 0)
@@ -7975,19 +8121,7 @@
       (offset-y 0)
       (denominator 0)
       (line-time-numerator 0)
-      (shot-time-numerator 0)
-      (line-length-squared 0)
-      (hit-radius-squared (* 42 42))
-      (old-dot 0)
-      (new-dot 0)
-      (mid-dot 0)
-      (old-cross 0)
-      (new-cross 0)
-      (mid-cross 0)
-      (old-near? #f)
-      (new-near? #f)
-      (mid-near? #f)
-      (crosses? #f))
+      (shot-time-numerator 0))
 
     (vector-copy! line-world-start (target-pos 0))
     (+! (-> line-world-start y) (meters 3.25))
@@ -8005,15 +8139,15 @@
       (-> projected-current vector 0)
       current-pos)
 
-    (set!
-      line-start-x
+    ;; Match fisher-draw-retail-line-segment!: Jak's projected endpoint is
+    ;; clamped to the drawable screen, while the hook endpoint is fixed at the
+    ;; center anchor represented by GS coordinates (32768, 32428).
+    (set! line-start-x
       (the int
         (/
           (max 512 (min 65024 (-> projected vector 0 x)))
           64)))
-
-    (set!
-      line-start-y
+    (set! line-start-y
       (the int
         (/
           (max 512 (min 65024 (-> projected vector 0 y)))
@@ -8027,8 +8161,6 @@
       (the int (/ (-> projected-current vector 0 x) 64)))
     (set! projectile-new-y
       (the int (/ (-> projected-current vector 0 y) 64)))
-    (set! projectile-mid-x (/ (+ projectile-old-x projectile-new-x) 2))
-    (set! projectile-mid-y (/ (+ projectile-old-y projectile-new-y) 2))
 
     (set! line-dx (- line-end-x line-start-x))
     (set! line-dy (- line-end-y line-start-y))
@@ -8037,7 +8169,8 @@
     (set! offset-x (- projectile-old-x line-start-x))
     (set! offset-y (- projectile-old-y line-start-y))
 
-    ;; Exact swept-segment intersection.
+    ;; Segment/segment crossing parameters.  Both parameters must lie in
+    ;; [0, 1], meaning the moving blast actually passes through the finite line.
     (set! denominator
       (- (* line-dx shot-dy) (* line-dy shot-dx)))
     (set! line-time-numerator
@@ -8045,64 +8178,22 @@
     (set! shot-time-numerator
       (- (* offset-x line-dy) (* offset-y line-dx)))
 
-    (set! crosses?
-      (cond
-        ((> denominator 0)
-          (and
-            (>= line-time-numerator 0)
-            (<= line-time-numerator denominator)
-            (>= shot-time-numerator 0)
-            (<= shot-time-numerator denominator)))
-        ((< denominator 0)
-          (and
-            (<= line-time-numerator 0)
-            (>= line-time-numerator denominator)
-            (<= shot-time-numerator 0)
-            (>= shot-time-numerator denominator)))
-        (else #f)))
+    (cond
+      ((> denominator 0)
+        (and
+          (>= line-time-numerator 0)
+          (<= line-time-numerator denominator)
+          (>= shot-time-numerator 0)
+          (<= shot-time-numerator denominator)))
 
-    ;; Visible-width collision at the old, middle and new sweep positions.
-    (set! line-length-squared
-      (+ (* line-dx line-dx) (* line-dy line-dy)))
+      ((< denominator 0)
+        (and
+          (<= line-time-numerator 0)
+          (>= line-time-numerator denominator)
+          (<= shot-time-numerator 0)
+          (>= shot-time-numerator denominator)))
 
-    (when (> line-length-squared 0)
-      (let ((old-x (- projectile-old-x line-start-x))
-          (old-y (- projectile-old-y line-start-y))
-          (new-x (- projectile-new-x line-start-x))
-          (new-y (- projectile-new-y line-start-y))
-          (mid-x (- projectile-mid-x line-start-x))
-          (mid-y (- projectile-mid-y line-start-y)))
-
-        (set! old-dot (+ (* old-x line-dx) (* old-y line-dy)))
-        (set! new-dot (+ (* new-x line-dx) (* new-y line-dy)))
-        (set! mid-dot (+ (* mid-x line-dx) (* mid-y line-dy)))
-
-        (set! old-cross (- (* old-x line-dy) (* old-y line-dx)))
-        (set! new-cross (- (* new-x line-dy) (* new-y line-dx)))
-        (set! mid-cross (- (* mid-x line-dy) (* mid-y line-dx)))
-
-        (set! old-near?
-          (and
-            (>= old-dot 0)
-            (<= old-dot line-length-squared)
-            (<= (* old-cross old-cross)
-                (* hit-radius-squared line-length-squared))))
-
-        (set! new-near?
-          (and
-            (>= new-dot 0)
-            (<= new-dot line-length-squared)
-            (<= (* new-cross new-cross)
-                (* hit-radius-squared line-length-squared))))
-
-        (set! mid-near?
-          (and
-            (>= mid-dot 0)
-            (<= mid-dot line-length-squared)
-            (<= (* mid-cross mid-cross)
-                (* hit-radius-squared line-length-squared)))))
-
-    (or crosses? old-near? mid-near? new-near?))))
+      (else #f))))
 
 (defun fisher-finish-voltage-shot! ((self fisher-game) (slot int))
   (when (!= (-> self voltage-data slot slot state) 4)
@@ -8452,8 +8543,6 @@
 
       ((= (-> self electric-state) 'projectile)
         (let ((previous-pos (new 'stack-no-clear 'vector))
-            (line-start (new 'stack-no-clear 'vector))
-            (line-end (new 'stack-no-clear 'vector))
             (from-jak (new 'stack-no-clear 'vector))
             (distance 0.0))
 
@@ -8472,7 +8561,6 @@
             (-> self electric-projectile-pos)
             1)
 
-          (fisher-electric-line-points! self line-start line-end)
           (vector-!
             from-jak
             (-> self electric-projectile-pos)
@@ -8480,20 +8568,10 @@
           (set! distance (vector-dot from-jak (-> self playfield-axis)))
 
           (cond
-            ((or
-                ;; Swept screen-space collision against the exact line that
-                ;; is drawn from Jak to the fixed center anchor.
-                (fisher-electric-projectile-hits-visible-line?
-                  self
-                  previous-pos
-                  (-> self electric-projectile-pos))
-
-                ;; Retain the old world-space proximity check as a fallback.
-                (fisher-point-near-segment?
-                  (-> self electric-projectile-pos)
-                  line-start
-                  line-end
-                  (meters 0.65)))
+            ((fisher-electric-projectile-hits-visible-line?
+                self
+                previous-pos
+                (-> self electric-projectile-pos))
               (set! (-> self electric-state) 'line-charge)
               (set! (-> self electric-line-time) 0.0)
               (set! (-> self electric-stun-triggered?) #f)
@@ -9116,7 +9194,15 @@
 
     (set! (-> *target* control trans quad) (-> self fishing-player-pos quad))
 
-    (play-main-music "fishing-theme-a.wav" (the int (-> *setting-control* current sfx-volume)))
+    (play-main-music
+      (if
+        (or
+          (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+          (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+          (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+        "fishing-theme-b.mp3"
+        "fishing-theme-a.wav")
+      (the int (-> *setting-control* current sfx-volume)))
     (set! (-> self stored-music-vol) (-> *setting-control* current music-volume))
     (set-setting! 'music-volume 'abs 0.0 0)
     (set! (-> self saved-camera-read-analog) *camera-read-analog*)

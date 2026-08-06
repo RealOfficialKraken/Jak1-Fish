@@ -446,7 +446,28 @@
                 :z (meters -1999.4272)
                 :w 1.0)
               2
-              'ogre))))))
+              'ogre))
+
+          ((= current-level 'firecanyon)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters -24.4163)
+                :y (meters 34.0139)
+                :z (meters -153.9701)
+                :w 1.0)
+              3
+              'firecanyon)
+
+            ;; This placement faces the crossing after a 90-degree Y rotation.
+            (when *fisher-man*
+              (let ((firecanyon-fisher-rot
+                    (new 'stack-no-clear 'matrix)))
+                (matrix-rotate-y!
+                  firecanyon-fisher-rot
+                  (degrees 90.0))
+                (matrix->quaternion
+                  (-> *fisher-man* 0 root quat)
+                  firecanyon-fisher-rot))))))))
 
   ;; ensure orb-placer is spawned/killed as requested, debug menu is updated
   (when *debug-segment* (orb-placer-maintenance))
