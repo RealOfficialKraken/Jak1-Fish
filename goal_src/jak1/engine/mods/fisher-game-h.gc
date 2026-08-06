@@ -42,6 +42,11 @@
 (define *fisher-yellow-charge-seconds* 2.5)
 (define *fisher-yellow-projectile-speed* (meters 4.0))
 (define *fisher-yellow-hook-hit-radius* (meters 0.70))
+(define *fisher-lava-fire-cycle-seconds* 12.0)
+(define *fisher-lava-fire-charge-seconds* 2.5)
+(define *fisher-lava-fire-duration-seconds* 2.0)
+(define *fisher-lava-trail-interval-seconds* 0.18)
+(define *fisher-lava-flame-interval-seconds* 0.10)
 (define *fisher-sunken-far-distance* (meters 51.5))
 (define *fisher-sunken-max-depth* (meters 19.25))
 (define *fisher-approach-speed-min* 4.35)
@@ -62,7 +67,7 @@
 (define *fisher-underwater-haze-override?* #f)
 (define *fisher-underwater-haze-color* (new 'global 'vector))
 (define *fisher-spawn-player-pos* (new 'global 'vector))
-(define *singlefish-dead-pool* (new 'global 'dead-pool 22 (* 128 1024) '*singlefish-dead-pool*))
+(define *singlefish-dead-pool* (new 'global 'dead-pool 30 (* 128 1024) '*singlefish-dead-pool*))
 
 ;;main menu hacks
 (define in-main-menu? #f)
@@ -245,7 +250,7 @@
 
 (define *fish-ui-str* (new 'global 'string 256 (the-as string #f)))
 
-(define *fisher-max-fish-slots* 22)
+(define *fisher-max-fish-slots* 30)
 
 (define-extern *fisher-platformius-plat-sgc* skeleton-group)
 
@@ -262,7 +267,10 @@
   (electric-lurker-shark 9)
   (swamp-guppie 10)
   (sludge-crappie 11)
-  (black-lurker-shark 12))
+  (black-lurker-shark 12)
+  (lava-drum 13)
+  (magma-serpent 14)
+  (inferno-shark 15))
 
 (defenum fisher-zone
   (sandover-dock 0)
@@ -272,7 +280,8 @@
   (misty-island 4)
   (village2-electric 5)
   (sunken-voltage 6)
-  (swamp-sludge 7))
+  (swamp-sludge 7)
+  (village3-lava 8))
 
 (deftype fisher-species-info (basic)
   ((name                 string)
@@ -317,14 +326,14 @@
     (shark-chance           float)
     (fire-canyon-cellfish?  symbol)))
 
-(define *fisher-species-count* 13)
-(define *fisher-zone-count* 8)
+(define *fisher-species-count* 16)
+(define *fisher-zone-count* 9)
 
 (deftype fisher-species-table (basic)
-  ((entry fisher-species-info 13 :inline)))
+  ((entry fisher-species-info 16 :inline)))
 
 (deftype fisher-zone-table (basic)
-  ((entry fisher-zone-info 8 :inline)))
+  ((entry fisher-zone-info 9 :inline)))
 
 (define *fisher-species-table* (new 'global 'fisher-species-table))
 (define *fisher-zone-table* (new 'global 'fisher-zone-table))
@@ -357,7 +366,7 @@
 
 ;; My first Boxed external storage. Surprising I made 3 mode before doing stuff this way.
 (deftype fisher-fish-runtime (basic)
-  ((slot fisher-fish-slot 22 :inline) ;;max fish in a pool is 22
+  ((slot fisher-fish-slot 30 :inline) ;; Hub 3 lava pools can reach 27 residents
   )
 )
 
@@ -394,7 +403,7 @@
     (direction vector :inline)))
 
 (deftype fisher-voltage-runtime (basic)
-  ((slot fisher-voltage-shot-slot 22 :inline)))
+  ((slot fisher-voltage-shot-slot 30 :inline)))
 
 (define *fisher-voltage-runtime*
   (new 'global 'fisher-voltage-runtime))
@@ -467,6 +476,7 @@
     (rip-line-cooldown            float)
     (heal-line-cooldown           float)
     (lure-destroyed?               symbol)
+    (lure-incinerated?             symbol)
     (lure-snake                   (pointer manipy))
     (lure-snake-angle             vector :inline)
     (lure-snake-angular-speed     vector :inline)
@@ -526,6 +536,11 @@
     (voltage-shots-remaining      int)
     (voltage-data                 fisher-voltage-runtime)
     (yellow-data                  fisher-yellow-runtime)
+    (lava-fire-state              symbol)
+    (lava-fire-timer              float)
+    (lava-fire-slot               int)
+    (lava-trail-time              float)
+    (lava-flame-time              float)
     (catch-transition-time        float)
     (catch-menu-offset            float)
     (sandover-eco-count           int)
@@ -568,6 +583,9 @@
     (hook-time                   float)
     (scared-time                 float)
     (next-fight-time             float)
+    (fight-window-time           float)
+    (fight-window-count          int)
+    (fight-rate-cooldown         float)
     (fight-time                  float)
     (fight-phase                 float)
     (fight-base-y                float)
@@ -655,6 +673,7 @@
 (defun-extern fisher-xp-level-difference-multiplier int int float)
 (defun-extern fisher-xp-suffix-multiplier int float)
 (defun-extern fisher-roll-level-in-range int int int)
+(defun-extern fisher-roll-level-for-slot fisher-game int int)
 (defun-extern fisher-xp-needed-for-level int int)
 (define-extern *fisher-level-up-window-pending?* symbol)
 (define-extern *fisher-level-up-window-request?* symbol)
@@ -669,6 +688,7 @@
 (defun-extern draw-fisher-small-text string int int none)
 (defun-extern draw-mod-menu-text-custom string int int symbol symbol symbol none)
 (defun-extern fisher-apply-slot-appearance! fisher-game int manipy symbol none)
+(defun-extern fisher-spawn-gameplay-fish fisher-game int (pointer manipy))
 (defun-extern fisher-debug-draw-fish-cone! fisher-game int manipy none)
 (defun-extern fisher-debug-draw-logical-fish-marker! fisher-game int none)
 (defun-extern fisher-draw-playfield-debug! fisher-game none)
@@ -676,7 +696,10 @@
 (defun-extern fisher-misty-curtain-color! vector vector)
 (defun-extern fisher-village2-curtain-color! vector vector)
 (defun-extern fisher-swamp-curtain-color! vector vector)
+(defun-extern fisher-village3-curtain-color! fisher-game vector vector)
+(defun-extern fisher-set-lava-puff-mode! fisher-game int none)
 (defun-extern fisher-force-swamp-underwater-background! none)
+(defun-extern fisher-force-lava-underwater-background! fisher-game none)
 (defun-extern fisher-electric-species? int symbol)
 (defun-extern fisher-playfield-far-distance fisher-game float)
 (defun-extern fisher-playfield-max-depth fisher-game float)
@@ -693,6 +716,16 @@
 (defun-extern fisher-submit-yellow-particle! fisher-game vector int none)
 (defun-extern fisher-submit-yellow-explosion! fisher-game vector none)
 (defun-extern fisher-update-yellow-system! fisher-game none)
+(defun-extern fisher-incinerate-lure! fisher-game none)
+(defun-extern fisher-reset-lava-fire-cycle! fisher-game none)
+(defun-extern fisher-find-lava-fire-slot fisher-game int)
+(defun-extern fisher-lava-fish-forward! manipy vector vector)
+(defun-extern fisher-magma-serpent-touches-hook? fisher-game int manipy symbol)
+(defun-extern fisher-lava-flame-hits-hook? fisher-game int manipy symbol)
+(defun-extern fisher-submit-lava-flame-wall! fisher-game int manipy none)
+(defun-extern fisher-submit-lava-fish-effects! fisher-game none)
+(defun-extern fisher-submit-village3-lava-ambient! fisher-game none)
+(defun-extern fisher-update-lava-fire-system! fisher-game none)
 (defun-extern fisher-begin-lure-stolen-return! fisher-game none)
 (defun-extern fisher-camera-lure-stolen-return! fisher-game symbol)
 (defun-extern fisher-update-lure-stolen-return! fisher-game none)
@@ -710,6 +743,7 @@
 (defun-extern fisher-build-background-curtain-vertex! fisher-game vector vector vector vector int int vector)
 (defun-extern fisher-draw-background-curtain! fisher-game none)
 (defun-extern fisher-draw-retail-line! fisher-game vector vector rgba none)
+(defun-extern fisher-spawn-catch-display-fish! fisher-game none)
 (defun-extern fisher-finish-manipy-catch! fisher-game int none)
 (defun-extern fisher-fish-cooldown fisher-game int float)
 (defun-extern fisher-fish-direction fisher-game int float)
@@ -740,6 +774,7 @@
 (defun-extern fisher-configure-village2-table! fisher-game none)
 (defun-extern fisher-configure-sunken-table! fisher-game none)
 (defun-extern fisher-configure-swamp-table! fisher-game none)
+(defun-extern fisher-configure-village3-table! fisher-game none)
 (defun-extern fisher-count-live-species fisher-game int int)
 (defun-extern fisher-fish-species fisher-game int int)
 (defun-extern fisher-fish-speed fisher-game int float)

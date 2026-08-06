@@ -66,6 +66,152 @@
       curtain-yaw))
   (none))
 
+(defun fisher-set-lava-puff-mode! ((self fisher-game) (mode int))
+  ;; birth-func-camera-orient owns the complete camera-facing quaternion.
+  ;; Leave local Y/Z rotation at zero; baking camera-angle into rot-y applies a
+  ;; second world rotation and makes the sheet go edge-on on sharp camera turns.
+  (set!
+    (-> *part-id-table* 3573 init-specs 4 initial-valuef)
+    (degrees -90))
+  (set!
+    (-> *part-id-table* 3573 init-specs 5 initial-valuef)
+    0.0)
+  (set!
+    (-> *part-id-table* 3573 init-specs 6 initial-valuef)
+    0.0)
+
+  ;; Reconfigure only future births from safe custom particle 3573.  Every mode
+  ;; now fades on this launcher instead of relaunching through native part 1813,
+  ;; so its camera-facing quaternion remains intact for the whole puff.
+  (cond
+    ;; White steam: slow, broad puff.
+    ((= mode 0)
+      (set! (-> *part-id-table* 3573 init-specs 2 initial-valuef) 1.0)
+      (set! (-> *part-id-table* 3573 init-specs 3 initial-valuef) (meters 0.78))
+      (set! (-> *part-id-table* 3573 init-specs 7 initial-valuef) (meters 0.78))
+      (set! (-> *part-id-table* 3573 init-specs 8 initial-valuef) 255.0)
+      (set! (-> *part-id-table* 3573 init-specs 9 initial-valuef) 255.0)
+      (set! (-> *part-id-table* 3573 init-specs 10 initial-valuef) 255.0)
+      (set! (-> *part-id-table* 3573 init-specs 11 initial-valuef) 92.0)
+      (set! (-> *part-id-table* 3573 init-specs 18 initial-valuef) -0.16)
+      (set! (-> *part-id-table* 3573 init-specs 19 initial-value) (seconds 1.8)))
+
+    ;; Thin black trail shared by all lava fish.
+    ((= mode 1)
+      (set! (-> *part-id-table* 3573 init-specs 2 initial-valuef) 1.0)
+      (set! (-> *part-id-table* 3573 init-specs 3 initial-valuef) (meters 0.34))
+      (set! (-> *part-id-table* 3573 init-specs 7 initial-valuef) (meters 0.34))
+      (set! (-> *part-id-table* 3573 init-specs 8 initial-valuef) 2.0)
+      (set! (-> *part-id-table* 3573 init-specs 9 initial-valuef) 2.0)
+      (set! (-> *part-id-table* 3573 init-specs 10 initial-valuef) 2.0)
+      (set! (-> *part-id-table* 3573 init-specs 11 initial-valuef) 64.0)
+      (set! (-> *part-id-table* 3573 init-specs 18 initial-valuef) -0.40)
+      (set! (-> *part-id-table* 3573 init-specs 19 initial-value) (seconds 0.9)))
+
+    ;; Oversized orange fireball around the charging fish.
+    ((= mode 2)
+      (set! (-> *part-id-table* 3573 init-specs 2 initial-valuef) 2.0)
+      (set! (-> *part-id-table* 3573 init-specs 3 initial-valuef) (meters 6.0))
+      (set! (-> *part-id-table* 3573 init-specs 7 initial-valuef) (meters 6.0))
+      (set! (-> *part-id-table* 3573 init-specs 8 initial-valuef) 255.0)
+      (set! (-> *part-id-table* 3573 init-specs 9 initial-valuef) 72.0)
+      (set! (-> *part-id-table* 3573 init-specs 10 initial-valuef) 0.0)
+      (set! (-> *part-id-table* 3573 init-specs 11 initial-valuef) 118.0)
+      (set! (-> *part-id-table* 3573 init-specs 18 initial-valuef) -0.65)
+      (set! (-> *part-id-table* 3573 init-specs 19 initial-value) (seconds 0.42)))
+
+    ;; Orange flamethrower segment.  No 90-degree in-plane roll: scale-x is the
+    ;; horizontal overlap and scale-y is the vertical flame height.
+    ((= mode 3)
+      (set! (-> *part-id-table* 3573 init-specs 2 initial-valuef) 2.0)
+      (set! (-> *part-id-table* 3573 init-specs 3 initial-valuef) (meters 6.30))
+      (set! (-> *part-id-table* 3573 init-specs 7 initial-valuef) (meters 5.25))
+      (set! (-> *part-id-table* 3573 init-specs 8 initial-valuef) 255.0)
+      (set! (-> *part-id-table* 3573 init-specs 9 initial-valuef) 58.0)
+      (set! (-> *part-id-table* 3573 init-specs 10 initial-valuef) 0.0)
+      (set! (-> *part-id-table* 3573 init-specs 11 initial-valuef) 118.0)
+      (set! (-> *part-id-table* 3573 init-specs 18 initial-valuef) -0.70)
+      (set! (-> *part-id-table* 3573 init-specs 19 initial-value) (seconds 0.34)))
+
+    ;; Flame blanket on the Magma Serpent.
+    ((= mode 4)
+      (set! (-> *part-id-table* 3573 init-specs 2 initial-valuef) 1.0)
+      (set! (-> *part-id-table* 3573 init-specs 3 initial-valuef) (meters 2.16))
+      (set! (-> *part-id-table* 3573 init-specs 7 initial-valuef) (meters 2.76))
+      (set! (-> *part-id-table* 3573 init-specs 8 initial-valuef) 255.0)
+      (set! (-> *part-id-table* 3573 init-specs 9 initial-valuef) 48.0)
+      (set! (-> *part-id-table* 3573 init-specs 10 initial-valuef) 0.0)
+      (set! (-> *part-id-table* 3573 init-specs 11 initial-valuef) 104.0)
+      (set! (-> *part-id-table* 3573 init-specs 18 initial-valuef) -0.60)
+      (set! (-> *part-id-table* 3573 init-specs 19 initial-value) (seconds 0.42)))
+
+    ;; Thick black smoke produced by the serpent flames and flame wall.
+    (else
+      (set! (-> *part-id-table* 3573 init-specs 2 initial-valuef) 2.0)
+      (set! (-> *part-id-table* 3573 init-specs 3 initial-valuef) (meters 0.58))
+      (set! (-> *part-id-table* 3573 init-specs 7 initial-valuef) (meters 0.58))
+      (set! (-> *part-id-table* 3573 init-specs 8 initial-valuef) 0.0)
+      (set! (-> *part-id-table* 3573 init-specs 9 initial-valuef) 0.0)
+      (set! (-> *part-id-table* 3573 init-specs 10 initial-valuef) 0.0)
+      (set! (-> *part-id-table* 3573 init-specs 11 initial-valuef) 76.0)
+      (set! (-> *part-id-table* 3573 init-specs 18 initial-valuef) -0.22)
+      (set! (-> *part-id-table* 3573 init-specs 19 initial-value) (seconds 1.3))))
+  (none))
+
+(defun fisher-submit-lava-yellow-trail!
+  ((self fisher-game) (pos vector))
+  ;; The bright middot is the camera-facing equivalent of native Village3
+  ;; part 1852.  The smaller hotdots make the same rising ember read as a
+  ;; trailing particle instead of another smoke puff.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+    (launch-particles
+      :system *sp-particle-system-3d*
+      (-> *part-id-table* 3578)
+      pos)
+
+    ;; Place several glow particles below the rising middot instead of launching
+    ;; every phase at the same point.  The staggered vertical positions make a
+    ;; readable tail even before particle velocity separates the sprites.
+    (dotimes (trail-index 4)
+      (let ((trail-pos (new 'stack-no-clear 'vector)))
+        (vector-copy! trail-pos pos)
+        (-! (-> trail-pos y) (* (meters 0.22) (+ (the float trail-index) 1.0)))
+        (set! (-> trail-pos w) 1.0)
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3568)
+          trail-pos))))
+  (none))
+
+(defun fisher-submit-village3-heat-distortion!
+  ((self fisher-game) (side-axis vector))
+  ;; Native part 1850 is Village3's aux-list heat warp.  Aux particles belong
+  ;; to the 2D particle system even though their origins are world positions.
+  ;; Scatter several origins through the visible fish volume so the distortion
+  ;; covers the play area rather than collecting at one lava-surface point.
+  (dotimes (heat-index 5)
+    (let ((heat-pos (new 'stack-no-clear 'vector)))
+      (singlefish-vector-add-scaled-safe!
+        heat-pos
+        (-> self fishing-player-pos)
+        (-> self playfield-axis)
+        (rand-vu-float-range (meters 8.0) (meters 50.0)))
+      (singlefish-vector-add-scaled-safe!
+        heat-pos
+        heat-pos
+        side-axis
+        (rand-vu-float-range (meters -9.0) (meters 9.0)))
+      (set! (-> heat-pos y)
+        (- (-> self water-level)
+          (rand-vu-float-range (meters 0.5) (meters 24.0))))
+      (set! (-> heat-pos w) 1.0)
+      (launch-particles
+        :system *sp-particle-system-2d*
+        (-> *part-id-table* 1850)
+        heat-pos)))
+  (none))
+
 (define *fisher-level-up-window-state* 'hidden)
 (define *fisher-level-up-window-time* 0.0)
 (define *fisher-level-up-window-offset* 150.0)
@@ -734,6 +880,7 @@
   (set! (-> self rip-line-cooldown) 0.0)
   (set! (-> self heal-line-cooldown) 0.0)
   (set! (-> self lure-destroyed?) #f)
+  (set! (-> self lure-incinerated?) #f)
   (set! (-> self lure-y-velocity) 0.0)
   (set! (-> self bubble-time) -2.0)
   (set! (-> self underwater-wave-time) 0.0)
@@ -792,6 +939,11 @@
   (set! (-> self yellow-data projectile-time) 0.0)
   (vector-reset! (-> self yellow-data position))
   (vector-reset! (-> self yellow-data direction))
+  (set! (-> self lava-fire-state) 'waiting)
+  (set! (-> self lava-fire-timer) *fisher-lava-fire-cycle-seconds*)
+  (set! (-> self lava-fire-slot) -1)
+  (set! (-> self lava-trail-time) 0.0)
+  (set! (-> self lava-flame-time) 0.0)
   (set! (-> self fish-count) 0)
   (dotimes (slot-index *fisher-max-fish-slots*)
     (set! (-> self fish-data slot slot-index visual)
@@ -887,7 +1039,10 @@
     )
 
     (when
-      (and (-> self camera-underwater?) (<= (-> self underwater-wave-time) 0.0))
+      (and
+        (-> self camera-underwater?)
+        (<= (-> self underwater-wave-time) 0.0)
+        (!= (-> self location-id) (the-as int (fisher-zone village3-lava))))
 
       (play-sound-file "water-waves.mp3" (the int (* (the float (-> *setting-control* current sfx-volume)) 1.0)))
 
@@ -1434,7 +1589,7 @@
     (> (-> self reel-hint-time) 0.0)
 
     (when
-      (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
+      (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-tug-line-unlock-level*))
 
       (fisher-draw-reel-hint-text-red
         "L1"
@@ -1449,7 +1604,7 @@
         0.55))
 
     (when
-      (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
+      (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-sink-lure-unlock-level*))
 
       (fisher-draw-reel-hint-text-red
         "R1"
@@ -1464,7 +1619,7 @@
         0.55))
 
     (when
-      (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
+      (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-stop-lure-unlock-level*))
 
       (fisher-draw-reel-hint-text
         "<PAD_SQUARE> TO STOP LURE"
@@ -1490,22 +1645,21 @@
   (none))
 
 (defun fisher-launch-water-entry-bubbles! ((self fisher-game))
-  (let ((spray-pos
-        (new 'stack-no-clear 'vector)))
-
+  (let ((spray-pos (new 'stack-no-clear 'vector)))
     (vector-copy! spray-pos (-> self lure-pos))
-
     (set! (-> spray-pos y) (- (-> self water-level) (meters 0.05)))
-
     (set! (-> spray-pos w) 1.0)
-
     (fisher-set-particle-fishbox-rotation! self)
 
-    (launch-particles :system *sp-particle-system-3d* (-> *part-id-table* 3571) spray-pos)
-  )
-
-  (none)
-)
+    (cond
+      ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (fisher-submit-lava-yellow-trail! self spray-pos))
+      (else
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3571)
+          spray-pos))))
+  (none))
 
 (defun fisher-misty-curtain-color!
   ((dst vector))
@@ -1650,6 +1804,65 @@
 
   ;; Black sludge is intentionally time-of-day independent.
   (set-vector! dst 20.0 22.0 22.0 1.0)
+  dst)
+
+(defun fisher-village3-curtain-color!
+  ((self fisher-game) (dst vector))
+
+  ;; A four-leg pulse: base -> accent A -> base -> accent B -> base.
+  ;; Base: #e88212. Accent A: #da7114. Accent B: #e57b0b.
+  ;; The second 360-degree half swaps A/B, preserving the alternating mechanic.
+  (let* ((phase (-> self background-curtain-phase))
+      (half-phase
+        (if
+          (>= phase (degrees 360.0))
+          (- phase (degrees 360.0))
+          phase))
+      (swapped? (>= phase (degrees 360.0)))
+      (blend 0.0)
+      (target-r 0.0)
+      (target-g 0.0)
+      (target-b 0.0))
+
+    (cond
+      ((< half-phase (degrees 90.0))
+        (set! blend (/ half-phase (degrees 90.0)))
+        (set! target-r (if swapped? 229.0 218.0))
+        (set! target-g (if swapped? 123.0 113.0))
+        (set! target-b (if swapped? 11.0 20.0))
+        (set! (-> dst x) (+ 232.0 (* (- target-r 232.0) blend)))
+        (set! (-> dst y) (+ 130.0 (* (- target-g 130.0) blend)))
+        (set! (-> dst z) (+ 18.0 (* (- target-b 18.0) blend))))
+
+      ((< half-phase (degrees 180.0))
+        (set! blend (/ (- half-phase (degrees 90.0)) (degrees 90.0)))
+        (set! target-r (if swapped? 229.0 218.0))
+        (set! target-g (if swapped? 123.0 113.0))
+        (set! target-b (if swapped? 11.0 20.0))
+        (set! (-> dst x) (+ target-r (* (- 232.0 target-r) blend)))
+        (set! (-> dst y) (+ target-g (* (- 130.0 target-g) blend)))
+        (set! (-> dst z) (+ target-b (* (- 18.0 target-b) blend))))
+
+      ((< half-phase (degrees 270.0))
+        (set! blend (/ (- half-phase (degrees 180.0)) (degrees 90.0)))
+        (set! target-r (if swapped? 218.0 229.0))
+        (set! target-g (if swapped? 113.0 123.0))
+        (set! target-b (if swapped? 20.0 11.0))
+        (set! (-> dst x) (+ 232.0 (* (- target-r 232.0) blend)))
+        (set! (-> dst y) (+ 130.0 (* (- target-g 130.0) blend)))
+        (set! (-> dst z) (+ 18.0 (* (- target-b 18.0) blend))))
+
+      (else
+        (set! blend (/ (- half-phase (degrees 270.0)) (degrees 90.0)))
+        (set! target-r (if swapped? 218.0 229.0))
+        (set! target-g (if swapped? 113.0 123.0))
+        (set! target-b (if swapped? 20.0 11.0))
+        (set! (-> dst x) (+ target-r (* (- 232.0 target-r) blend)))
+        (set! (-> dst y) (+ target-g (* (- 130.0 target-g) blend)))
+        (set! (-> dst z) (+ target-b (* (- 18.0 target-b) blend)))))
+
+    (set! (-> dst w) 1.0))
+
   dst)
 
 (defun fisher-background-color!
@@ -1807,6 +2020,9 @@
           (new 'stack-no-clear 'vector))
 
         (particle-pos
+          (new 'stack-no-clear 'vector))
+
+        (lava-color
           (new 'stack-no-clear 'vector)))
 
       (singlefish-vector-copy-safe!
@@ -1828,8 +2044,16 @@
             (-> *part-id-table* 3572 init-specs 11 initial-valuef)
             8.0))
 
-        ;; The Swamp bigpuff is always black and extremely dim, independent
-        ;; of the time-of-day haze and the fixed #141616 curtain color.
+        ;; Match the lava mist sheet to Village3's rapidly pulsing curtain.
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone village3-lava)))
+          (fisher-village3-curtain-color! self lava-color)
+          (set! (-> *part-id-table* 3572 init-specs 8 initial-valuef) (-> lava-color x))
+          (set! (-> *part-id-table* 3572 init-specs 9 initial-valuef) (-> lava-color y))
+          (set! (-> *part-id-table* 3572 init-specs 10 initial-valuef) (-> lava-color z))
+          (set! (-> *part-id-table* 3572 init-specs 11 initial-valuef) 12.0))
+
         ((=
             (-> self location-id)
             (the-as int (fisher-zone swamp-sludge)))
@@ -2398,6 +2622,20 @@
   (fisher-force-underwater-horizon! 20.0 22.0 22.0)
   (none))
 
+(defun fisher-force-lava-underwater-background! ((self fisher-game))
+  (let ((color (new 'stack-no-clear 'vector)))
+    (fisher-village3-curtain-color! self color)
+    (dotimes (i 12)
+      (set! (-> sky-base-polygons i col x) (-> color x))
+      (set! (-> sky-base-polygons i col y) (-> color y))
+      (set! (-> sky-base-polygons i col z) (-> color z))
+      (set! (-> sky-base-polygons i col w) 128.0))
+    (fisher-force-underwater-horizon!
+      (-> color x)
+      (-> color y)
+      (-> color z)))
+  (none))
+
 (defun fisher-update-camera-water! ((self fisher-game))
   (cond
     ((and
@@ -2493,7 +2731,11 @@
   (set! (-> self electric-slot) -1)
   (fisher-reset-electric-cycle! self)
   (fisher-reset-yellow-cycle! self)
+  (fisher-reset-lava-fire-cycle! self)
+  (set! (-> self lava-trail-time) 0.0)
+  (set! (-> self lava-flame-time) 0.0)
   (set! (-> self lure-destroyed?) #f)
+  (set! (-> self lure-incinerated?) #f)
 
   (none))
 
@@ -2504,6 +2746,7 @@
   ;; reeling point, then blend smoothly to the before-cast camera.
   (when (!= (-> self cast-state) 'lure-stolen-return)
     (set! (-> self lure-destroyed?) #f)
+    (set! (-> self lure-incinerated?) #f)
     (fisher-lose-lure!)
     (fisher-clear-button-fight! self)
     (set! (-> self cast-state) 'lure-stolen-return)
@@ -2607,12 +2850,16 @@
         (fisher-update-camera-bubbles! self)
 
         (when (fisher-camera-lure-stolen-return! self)
-          (let ((destroyed? (-> self lure-destroyed?)))
+          (let ((destroyed? (-> self lure-destroyed?))
+              (incinerated? (-> self lure-incinerated?)))
             (fisher-reset-cast! self)
             (set!
               (-> self fish-message)
-              (if destroyed? "LURE DESTROYED" "LURE STOLEN"))
-            (set! (-> self fish-message-time) 1.75))))))
+              (cond
+                (incinerated? "LURE INCINERATED")
+                (destroyed? "LURE DESTROYED")
+                (else "LURE STOLEN")))
+            (set! (-> self fish-message-time) (if incinerated? 2.0 1.75)))))))
 
   (none))
 
@@ -3350,14 +3597,46 @@
 
   (none))
 
-(defun singlefish-start-fight! ((self singlefish-base))
+(defun singlefish-update-fight-rate-limit! ((self singlefish-base) (dt float))
+  (when (> (-> self fight-rate-cooldown) 0.0)
+    (-! (-> self fight-rate-cooldown) dt)
+    (when (<= (-> self fight-rate-cooldown) 0.0)
+      (set! (-> self fight-rate-cooldown) 0.0)))
+
+  (when (> (-> self fight-window-time) 0.0)
+    (-! (-> self fight-window-time) dt)
+    (when (<= (-> self fight-window-time) 0.0)
+      (set! (-> self fight-window-time) 0.0)
+      (set! (-> self fight-window-count) 0)))
+
+  (none))
+
+(defun singlefish-try-start-fight! ((self singlefish-base))
   (let ((owner (the-as fisher-game (-> self owner))))
-    (fisher-play-random-fight-sound!)
-    (set! (-> self fighting?) #t)
-    (set! (-> self fight-time) (rand-vu-float-range 2.0 4.0))
-    (set! (-> self fight-phase) 0.0)
-    (set! (-> self fight-base-y) (-> owner lure-pos y))
-    (set! (-> self fight-pull) 0.0))
+    (cond
+      ((> (-> self fight-rate-cooldown) 0.0)
+        (none))
+
+      ((and (> (-> self fight-window-time) 0.0) (>= (-> self fight-window-count) 3))
+        ;; Four fights already began during this eight-second window.
+        ;; Deny the fifth attempt and lock this fish out for three seconds.
+        (set! (-> self fight-rate-cooldown) 3.0)
+        (set! (-> self fight-window-time) 0.0)
+        (set! (-> self fight-window-count) 0)
+        (set! (-> self next-fight-time) 3.0))
+
+      (else
+        (when (<= (-> self fight-window-time) 0.0)
+          (set! (-> self fight-window-time) 8.0)
+          (set! (-> self fight-window-count) 0))
+
+        (+! (-> self fight-window-count) 1)
+        (fisher-play-random-fight-sound!)
+        (set! (-> self fighting?) #t)
+        (set! (-> self fight-time) (rand-vu-float-range 2.0 4.0))
+        (set! (-> self fight-phase) 0.0)
+        (set! (-> self fight-base-y) (-> owner lure-pos y))
+        (set! (-> self fight-pull) 0.0))))
 
   (none))
 
@@ -3466,6 +3745,8 @@
           (-> owner tug-line-active?)
           *fisher-tug-line-reel-multiplier*
           1.0)))
+
+    (singlefish-update-fight-rate-limit! self dt)
 
     (when
       (or (not (singlefish-owner-still-hooked? self)) (!= (-> owner fish-state) 'reeling))
@@ -3580,8 +3861,11 @@
         (set! horizontal-distance (vector-dot from-owner (-> owner playfield-axis)))
 
         (when
-          (and (<= (-> self next-fight-time) 0.0) (> horizontal-distance (meters 5.0)))
-          (singlefish-start-fight! self))))
+          (and
+            (<= (-> self next-fight-time) 0.0)
+            (<= (-> self fight-rate-cooldown) 0.0)
+            (> horizontal-distance (meters 5.0)))
+          (singlefish-try-start-fight! self))))
 
     (singlefish-vector-sub-safe! from-owner (-> owner lure-pos) (-> owner pos))
 
@@ -3754,6 +4038,9 @@
   (set! (-> self hook-time) 0.0)
   (set! (-> self scared-time) 0.0)
   (set! (-> self next-fight-time) 0.0)
+  (set! (-> self fight-window-time) 0.0)
+  (set! (-> self fight-window-count) 0)
+  (set! (-> self fight-rate-cooldown) 0.0)
   (set! (-> self fight-time) 0.0)
   (set! (-> self fight-phase) 0.0)
   (set! (-> self fight-base-y) 0.0)
@@ -3917,6 +4204,21 @@
               ((=
                   (-> self caught-fish-species)
                   (the-as int (fisher-species black-lurker-shark)))
+                *sharkey-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species lava-drum)))
+                *catch-fisha-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species magma-serpent)))
+                *catch-fishc-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species inferno-shark)))
                 *sharkey-sgc*)
 
               (else
@@ -4596,6 +4898,15 @@
 
 (defun fisher-update-ability-cooldowns! ((self fisher-game))
   (let ((dt (-> *display* seconds-per-frame)))
+    ;; Debug fishing exposes every skill and removes all reuse limits.
+    (when *fisher-in-debug?*
+      (set! (-> self lure-stop-cooldown) 0.0)
+      (set! (-> self lure-sink-cooldown) 0.0)
+      (set! (-> self tug-line-cooldown) 0.0)
+      (set! (-> self rip-line-cooldown) 0.0)
+      (set! (-> self heal-line-cooldown) 0.0)
+      (set! (-> self lure-stop-used?) #f)
+      (set! (-> self lure-sink-used?) #f))
     (when (> (-> self lure-stop-cooldown) 0.0)
       (-! (-> self lure-stop-cooldown) dt)
 
@@ -4630,7 +4941,7 @@
 
     (when
       (and
-        (>= (fisher-current-level) *fisher-heal-line-unlock-level*)
+        (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-heal-line-unlock-level*))
         (-> self casted?)
         (= (-> self cast-state) 'line-active)
         (< *fisher-line-hp* *fisher-line-hp-max*)
@@ -4648,7 +4959,7 @@
 
     (when
       (and
-        (>= (fisher-current-level) *fisher-rip-line-unlock-level*)
+        (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-rip-line-unlock-level*))
         (= (-> self fish-state) 'reeling)
         (>= (-> self hooked-fish-slot) 0)
         (-> self fish-fighting?)
@@ -4668,7 +4979,7 @@
 
     (when
       (and
-        (>= (fisher-current-level) *fisher-tug-line-unlock-level*)
+        (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-tug-line-unlock-level*))
         (= (-> self fish-state) 'reeling)
         (not (-> self fish-fighting?))
         (not (-> self button-fight-data active?))
@@ -4748,7 +5059,7 @@
 (defun fisher-draw-skill-cooldowns! ((self fisher-game))
   (when
     (and
-      (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
+      (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-stop-lure-unlock-level*))
       (current-frame)
       (-> (current-frame) global-buf))
 
@@ -4886,6 +5197,12 @@
         (the-as int (fisher-species sludge-crappie))) (meters 8.0))
       ((= (fisher-fish-species self slot)
         (the-as int (fisher-species black-lurker-shark))) (meters 10.5))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species lava-drum))) (meters 20.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species magma-serpent))) (meters 15.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species inferno-shark))) (meters 7.0))
       (else (meters 8.5)))))
 
 (defun fisher-update-lure! ((self fisher-game))
@@ -4911,7 +5228,7 @@
 
     (when
       (and
-        (>= (fisher-current-level) *fisher-stop-lure-unlock-level*)
+        (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-stop-lure-unlock-level*))
         (<= (-> self lure-stop-cooldown) 0.0)
         (!= (-> self fish-state) 'reeling)
         (not (-> self fish-fighting?))
@@ -4931,7 +5248,7 @@
 
     (when
       (and
-        (>= (fisher-current-level) *fisher-sink-lure-unlock-level*)
+        (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-sink-lure-unlock-level*))
         (<= (-> self lure-sink-cooldown) 0.0)
         (!= (-> self fish-state) 'reeling)
         (not (-> self fish-fighting?))
@@ -5096,6 +5413,11 @@
 
     (when
       (and
+        ;; A hooked fish must be allowed to reach the 2.05-meter catch
+        ;; threshold in fisher-update-manipy-reeling!.  Resetting the cast at
+        ;; four meters clears the hook first and strands the fish on-screen.
+        (< (-> self hooked-fish-slot) 0)
+
         (>= (-> self lure-pos y) (- (-> self water-level) (meters 3.05)))
 
         (<=
@@ -5131,6 +5453,9 @@
           ((= species (the-as int (fisher-species swamp-guppie))) 15.0)
           ((= species (the-as int (fisher-species sludge-crappie))) 25.0)
           ((= species (the-as int (fisher-species black-lurker-shark))) 80.0)
+          ((= species (the-as int (fisher-species lava-drum))) 600.0)
+          ((= species (the-as int (fisher-species magma-serpent))) 275.0)
+          ((= species (the-as int (fisher-species inferno-shark))) 50.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
           (else 15.0))))
@@ -5161,6 +5486,9 @@
           ((= species (the-as int (fisher-species swamp-guppie))) 40.0)
           ((= species (the-as int (fisher-species sludge-crappie))) 30.0)
           ((= species (the-as int (fisher-species black-lurker-shark))) 72.0)
+          ((= species (the-as int (fisher-species lava-drum))) 56.0)
+          ((= species (the-as int (fisher-species magma-serpent))) 52.0)
+          ((= species (the-as int (fisher-species inferno-shark))) 38.0)
           (else 34.0)))
 
       (fish-level
@@ -5298,7 +5626,7 @@
 
     (launch-particles
       :system *sp-particle-system-3d*
-      (-> *part-id-table* 3578)
+      (-> *part-id-table* 3577)
       particle-pos)
 
     (launch-particles
@@ -5604,7 +5932,10 @@
       (else
         (fisher-update-lure! self)
 
-        (vector-! from-jak (-> self lure-pos) (-> self pos))
+        ;; Use the same anchor as fisher-update-lure!.  That function clamps
+        ;; the hooked lure to exactly two meters from fishing-player-pos, so
+        ;; this test now completes the catch instead of missing the endpoint.
+        (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
 
         (set! horizontal-distance (vector-dot from-jak (-> self lure-cast-axis)))
 
@@ -6030,7 +6361,7 @@
   (none))
 
 (defun fisher-update-all-fish-debug! ((self fisher-game))
-  (dotimes (i 22) (fisher-update-gameplay-fish-one! self i (fisher-fish-pointer self i)))
+  (dotimes (i *fisher-max-fish-slots*) (fisher-update-gameplay-fish-one! self i (fisher-fish-pointer self i)))
 
   (fisher-draw-approaching-question! self)
 
@@ -6056,55 +6387,44 @@
 (defun fisher-launch-camera-bubble! ((self fisher-game))
   (when
     (and *camera* (> (-> *camera* num-slaves) 0))
-
-    (let ((cam-slave
-          (-> *camera* slave 0 0))
-
+    (let ((cam-slave (-> *camera* slave 0 0))
         (bubble-pos (new 'stack-no-clear 'vector))
-
         (forward (new 'stack-no-clear 'vector))
-
         (right (new 'stack-no-clear 'vector))
-
-        (lane
-          (rand-vu-float-range
-            (meters -5.5)
-            (meters 5.5))))
+        (lane (rand-vu-float-range (meters -5.5) (meters 5.5))))
 
       (vector-! forward (-> self lure-camera-look) (-> cam-slave trans))
-
       (set! (-> forward w) 0.0)
       (vector-normalize! forward 1.0)
-
       (vector-cross! right forward (-> *camera* local-down))
-
       (set! (-> right w) 0.0)
       (vector-normalize! right 1.0)
-
       (vector+float*! bubble-pos (-> cam-slave trans) forward (meters 6.0))
-
       (vector+float*! bubble-pos bubble-pos right lane)
 
-      (vector+float*! bubble-pos bubble-pos (-> *camera* local-down) (meters 4.5))
-
-      (when
-        (>= (-> bubble-pos y) (-> self water-level))
-
-        (set!
-          (-> bubble-pos y)
-          (- (-> self water-level)
-            (meters 4.0))))
+      (cond
+        ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (+! (-> bubble-pos y)
+            (rand-vu-float-range (meters -2.5) (meters 1.5)))
+          (when (>= (-> bubble-pos y) (-> self water-level))
+            (set! (-> bubble-pos y)
+              (- (-> self water-level) (meters 0.15)))))
+        (else
+          (vector+float*! bubble-pos bubble-pos (-> *camera* local-down) (meters 4.5))
+          (when (>= (-> bubble-pos y) (-> self water-level))
+            (set! (-> bubble-pos y)
+              (- (-> self water-level) (meters 4.0))))))
 
       (set! (-> bubble-pos w) 1.0)
-
       (fisher-set-particle-fishbox-rotation! self)
-
-      (launch-particles
-        :system *sp-particle-system-3d*
-        (-> *part-id-table* 3570)
-        bubble-pos))
-  )
-
+      (cond
+        ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (fisher-submit-lava-yellow-trail! self bubble-pos))
+        (else
+          (launch-particles
+            :system *sp-particle-system-3d*
+            (-> *part-id-table* 3570)
+            bubble-pos)))))
   (none))
 
 (defun fisher-update-camera-bubbles! ((self fisher-game))
@@ -6114,10 +6434,10 @@
     (cond
       ((and
           (-> self casted?)
-          (-> self camera-underwater?)
-          (<
-            (-> self lure-pos y)
-            (-> self water-level)))
+          (< (-> self lure-pos y) (-> self water-level))
+          (or
+            (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+            (-> self camera-underwater?)))
 
         (cond
           ((< (-> self bubble-time) 0.0)
@@ -6130,9 +6450,10 @@
 
               (set!
                 (-> self bubble-time)
-                (rand-vu-float-range
-                  0.35
-                  1.10)))
+                (if
+                  (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+                  (rand-vu-float-range 0.18 0.45)
+                  (rand-vu-float-range 0.35 1.10))))
           )
 
           (else
@@ -6145,9 +6466,10 @@
 
               (set!
                 (-> self bubble-time)
-                (rand-vu-float-range
-                  0.35
-                  1.10)))
+                (if
+                  (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+                  (rand-vu-float-range 0.18 0.45)
+                  (rand-vu-float-range 0.35 1.10))))
           )
         )
       )
@@ -6442,9 +6764,13 @@
       (base-y
         (+
           (if
-            (=
-              (-> self location-id)
-              (the-as int (fisher-zone swamp-sludge)))
+            (or
+              (=
+                (-> self location-id)
+                (the-as int (fisher-zone swamp-sludge)))
+              (=
+                (-> self location-id)
+                (the-as int (fisher-zone village3-lava))))
             (-> curtain-center y)
             (-> self water-level))
           (meters -0.75)
@@ -6516,17 +6842,20 @@
     (+!
       (-> self background-curtain-phase)
       (*
-        (degrees 24.0)
+        (if
+          (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (degrees 48.0)
+          (degrees 24.0))
         (-> *display* seconds-per-frame)))
 
-    (when
-      (>=
-        (-> self background-curtain-phase)
-        (degrees 360.0))
-
-      (-!
-        (-> self background-curtain-phase)
-        (degrees 360.0)))
+    (let ((phase-limit
+          (if
+            (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+            (degrees 720.0)
+            (degrees 360.0))))
+      (when
+        (>= (-> self background-curtain-phase) phase-limit)
+        (-! (-> self background-curtain-phase) phase-limit)))
 
     (let ((p00
           (new 'stack-no-clear 'vector))
@@ -6577,11 +6906,15 @@
         1.0)
 
       (cond
-        ((=
-            (-> self location-id)
-            (the-as int (fisher-zone swamp-sludge)))
-          ;; Place the Swamp curtain by camera depth, not along the fish
-          ;; playfield.  It sits seven meters behind the standard 92 m wall.
+        ((or
+            (=
+              (-> self location-id)
+              (the-as int (fisher-zone swamp-sludge)))
+            (=
+              (-> self location-id)
+              (the-as int (fisher-zone village3-lava))))
+          ;; Swamp and Village3 use the close curtain depth requested for their
+          ;; opaque sludge/lava pools instead of the standard distant wall.
           (vector+float*!
             curtain-center
             (-> self fisher-cam)
@@ -6610,12 +6943,19 @@
       (cond
         ((=
             (-> self location-id)
+            (the-as int (fisher-zone village3-lava)))
+          ;; Village3 needs extra height to cover the elevated lava camera.
+          (set!
+            (-> curtain-center y)
+            (+ (-> self water-level) (meters 34.0))))
+
+        ((=
+            (-> self location-id)
             (the-as int (fisher-zone swamp-sludge)))
-          ;; Raise the Swamp curtain another seven meters above its prior
-          ;; five-meter vertical offset.
           (set!
             (-> curtain-center y)
             (+ (-> self water-level) (meters 12.0))))
+
         (else
           (set! (-> curtain-center y) (-> self water-level))))
       (set! (-> curtain-center w) 1.0)
@@ -6638,6 +6978,11 @@
               (-> self location-id)
               (the-as int (fisher-zone swamp-sludge)))
             (fisher-swamp-curtain-color! active-curtain-color))
+
+          ((=
+              (-> self location-id)
+              (the-as int (fisher-zone village3-lava)))
+            (fisher-village3-curtain-color! self active-curtain-color))
 
           (else
             (set!
@@ -6769,6 +7114,11 @@
             (the-as int (fisher-zone swamp-sludge)))
           (fisher-force-swamp-underwater-background!))
 
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone village3-lava)))
+          (fisher-force-lava-underwater-background! self))
+
         (else
           (fisher-force-underwater-background!)))
 
@@ -6776,11 +7126,15 @@
       (when
         (!= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
         (fisher-draw-background-curtain! self)
-        (fisher-submit-background-mist! self)
-
-        ;; Black sludge has no sun shafts.
         (when
-          (!= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+          (!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (fisher-submit-background-mist! self))
+
+        ;; Black sludge and lava have no sun shafts.
+        (when
+          (and
+            (!= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+            (!= (-> self location-id) (the-as int (fisher-zone village3-lava))))
           (fisher-submit-god-rays! self))))
 
     (else
@@ -7269,7 +7623,7 @@
 (defun fisher-draw-fish-status! ((self fisher-game))
   (when
     (and
-      (>= (fisher-current-level) *fisher-rip-line-unlock-level*)
+      (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-rip-line-unlock-level*))
       (= (-> self fish-state) 'reeling)
       (-> self fish-fighting?)
       (not (-> self button-fight-data active?))
@@ -8646,16 +9000,450 @@
 
   (none))
 
+(defun fisher-submit-village3-lava-ambient! ((self fisher-game))
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (-> self casted?)
+      (-> self pool-rendered?))
+    (-! (-> self background-mist-time) (-> *display* seconds-per-frame))
+    (when (<= (-> self background-mist-time) 0.0)
+      (set! (-> self background-mist-time)
+        (rand-vu-float-range 0.20 0.42))
+
+      (let ((lava-pos (new 'stack-no-clear 'vector))
+          (side-axis (new 'stack-no-clear 'vector)))
+        (set! (-> side-axis x) (-> self playfield-axis z))
+        (set! (-> side-axis y) 0.0)
+        (set! (-> side-axis z) (- (-> self playfield-axis x)))
+        (set! (-> side-axis w) 0.0)
+        (singlefish-vector-normalize-safe! side-axis 1.0)
+
+        ;; Keep a moving layer of the native Village3 heat-warp effect spread
+        ;; through the whole fishing volume.
+        (fisher-submit-village3-heat-distortion! self side-axis)
+
+        (singlefish-vector-add-scaled-safe!
+          lava-pos
+          (-> self fishing-player-pos)
+          (-> self playfield-axis)
+          (rand-vu-float-range (meters 24.0) (meters 62.0)))
+        (singlefish-vector-add-scaled-safe!
+          lava-pos
+          lava-pos
+          side-axis
+          (rand-vu-float-range (meters -8.0) (meters 8.0)))
+        (set! (-> lava-pos y)
+          (- (-> self water-level)
+            (rand-vu-float-range (meters 0.4) (meters 7.0))))
+        (set! (-> lava-pos w) 1.0)
+
+        ;; Camera-facing lava glow/puff.  The native Village3 sheet is
+        ;; world-oriented and appears edge-on from the fishing camera.
+        (fisher-set-lava-puff-mode! self 5)
+        (launch-particles
+          :system *sp-particle-system-3d*
+          (-> *part-id-table* 3573)
+          lava-pos)
+
+        (when (rand-vu-percent? 0.32)
+          (fisher-submit-lava-yellow-trail! self lava-pos))
+
+        ;; Rare, small geyser from the bottom of the visible fish field.
+        (when (rand-vu-percent? 0.035)
+          (set! (-> lava-pos y)
+            (- (-> self water-level) (meters 33.0)))
+          (dotimes (geyser-index 4)
+            (+! (-> lava-pos y) (meters 1.15))
+            (fisher-submit-lava-yellow-trail! self lava-pos))))))
+  (none))
+
+(defun fisher-incinerate-lure! ((self fisher-game))
+  (when
+    (and
+      (-> self casted?)
+      (!= (-> self cast-state) 'lure-stolen-return))
+    (let ((hook-pos (new 'stack-no-clear 'vector)))
+      (fisher-hook-target! self hook-pos)
+      (fisher-set-lava-puff-mode! self 2)
+      (launch-particles
+        :system *sp-particle-system-3d*
+        (-> *part-id-table* 3573)
+        hook-pos)
+      (fisher-set-lava-puff-mode! self 5)
+      (launch-particles
+        :system *sp-particle-system-3d*
+        (-> *part-id-table* 3573)
+        hook-pos))
+    (fisher-begin-lure-stolen-return! self)
+    (set! (-> self lure-incinerated?) #t)
+    (set! (-> self fish-message) "LURE INCINERATED")
+    (set! (-> self fish-message-time) 2.0))
+  (none))
+
+(defun fisher-reset-lava-fire-cycle! ((self fisher-game))
+  (set! (-> self lava-fire-state) 'waiting)
+  (set! (-> self lava-fire-timer) *fisher-lava-fire-cycle-seconds*)
+  (set! (-> self lava-fire-slot) -1)
+  (set! (-> self lava-flame-time) 0.0)
+  (none))
+
+(defun fisher-find-lava-fire-slot ((self fisher-game))
+  (when (> (-> self fish-count) 0)
+    (dotimes (attempt 12)
+      (let ((slot (rand-vu-int-range 0 (- (-> self fish-count) 1))))
+        (when
+          (and
+            (!= slot (-> self hooked-fish-slot))
+            (fisher-fish-pointer self slot)
+            (-> (fisher-fish-pointer self slot) 0 self))
+          (return slot))))
+
+    (dotimes (slot (-> self fish-count))
+      (when
+        (and
+          (!= slot (-> self hooked-fish-slot))
+          (fisher-fish-pointer self slot)
+          (-> (fisher-fish-pointer self slot) 0 self))
+        (return slot))))
+  -1)
+
+(defun fisher-lava-fish-forward! ((fish-proc manipy) (dst vector))
+  ;; Read the fish's rendered quaternion, not only its logical lane direction.
+  ;; This also follows the visible 0.42-second turn animation correctly.
+  (let ((rot (new 'stack-no-clear 'matrix)))
+    (quaternion->matrix rot (-> fish-proc root quat))
+    (vector-copy! dst (-> rot vector 2))
+    (set! (-> dst y) 0.0)
+    (set! (-> dst w) 0.0)
+    (singlefish-vector-normalize-safe! dst 1.0))
+  dst)
+
+(defun fisher-magma-serpent-touches-hook?
+  ((self fisher-game) (slot int) (fish-proc manipy))
+
+  ;; Oriented body box around the long fishc model.  The exact hook target is
+  ;; tested; no point on the visible fishing line participates.
+  (let ((hook-pos (new 'stack-no-clear 'vector))
+      (relative (new 'stack-no-clear 'vector))
+      (forward (new 'stack-no-clear 'vector))
+      (side (new 'stack-no-clear 'vector))
+      (along 0.0)
+      (across 0.0)
+      (vertical 0.0))
+
+    (fisher-hook-target! self hook-pos)
+    (fisher-lava-fish-forward! fish-proc forward)
+
+    ;; The enlarged serpent model extends forward from its logical root.  Put
+    ;; the infernal touch box over that visible front section instead of
+    ;; centering it through the middle/back half of the model.
+    (singlefish-vector-add-scaled-safe!
+      relative (-> fish-proc root trans) forward (meters 5.50))
+    (vector-! relative hook-pos relative)
+
+    (set! (-> side x) (-> forward z))
+    (set! (-> side y) 0.0)
+    (set! (-> side z) (- (-> forward x)))
+    (set! (-> side w) 0.0)
+
+    (set! along (fabs (vector-dot relative forward)))
+    (set! across (fabs (vector-dot relative side)))
+    (set! vertical (fabs (-> relative y)))
+
+    (and
+      ;; Front-only box: root -> nose.  Its dimensions follow the current
+      ;; 3x serpent presentation closely without reaching behind the root.
+      (<= along (meters 5.50))
+      (<= across (meters 1.95))
+      (<= vertical (meters 1.75)))))
+
+(defun fisher-submit-lava-fish-effects! ((self fisher-game))
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (-> self pool-rendered?))
+
+    (when (-> self camera-underwater?)
+      (let ((dt (-> *display* seconds-per-frame)))
+        (-! (-> self lava-trail-time) dt)
+        (when (<= (-> self lava-trail-time) 0.0)
+          (set! (-> self lava-trail-time) *fisher-lava-trail-interval-seconds*)
+          (dotimes (slot (-> self fish-count))
+            (let ((fish (fisher-fish-pointer self slot)))
+              (when (and fish (-> fish 0 self))
+                (let* ((fish-proc (the-as manipy (-> fish 0 self)))
+                    (species (fisher-fish-species self slot))
+                    (smoke-pos (new 'stack-no-clear 'vector))
+                    (forward (new 'stack-no-clear 'vector)))
+                  (fisher-lava-fish-forward! fish-proc forward)
+                  (singlefish-vector-add-scaled-safe!
+                    smoke-pos (-> fish-proc root trans) forward (meters -0.85))
+                  (+! (-> smoke-pos y) (meters 0.18))
+                  (set! (-> smoke-pos w) 1.0)
+                  (fisher-set-lava-puff-mode! self 1)
+                  (launch-particles
+                    :system *sp-particle-system-3d*
+                    (-> *part-id-table* 3573)
+                    smoke-pos)
+
+                  (when (= species (the-as int (fisher-species magma-serpent)))
+                    ;; Four stations cover the stretched fishc body.  Native
+                    ;; Village3 flame is layered under thick fading soot.
+                    (dotimes (body-index 4)
+                      (let ((body-pos (new 'stack-no-clear 'vector))
+                          (offset (* (meters 3.75)
+                            (- (the float body-index) 1.5))))
+                        (singlefish-vector-add-scaled-safe!
+                          body-pos (-> fish-proc root trans) forward offset)
+                        (+! (-> body-pos y) (meters 0.20))
+                        (set! (-> body-pos w) 1.0)
+                        (fisher-set-lava-puff-mode! self 4)
+                        (launch-particles
+                          :system *sp-particle-system-3d*
+                          (-> *part-id-table* 3573)
+                          body-pos)
+
+                        (fisher-set-lava-puff-mode! self 5)
+                        (launch-particles
+                          :system *sp-particle-system-3d*
+                          (-> *part-id-table* 3573)
+                          body-pos)))))))))))
+
+    ;; The serpent itself is infernal.  Its forward body volume can burn the
+    ;; lure even when it is not the fish currently firing the wall attack.
+    (when
+      (and
+        (-> self casted?)
+        (= (-> self cast-state) 'line-active)
+        (= (-> self fish-state) 'free))
+      (dotimes (slot (-> self fish-count))
+        (let ((fish (fisher-fish-pointer self slot)))
+          (when
+            (and
+              fish
+              (-> fish 0 self)
+              (= (fisher-fish-species self slot)
+                (the-as int (fisher-species magma-serpent)))
+              (fisher-magma-serpent-touches-hook?
+                self slot (the-as manipy (-> fish 0 self))))
+            (fisher-incinerate-lure! self)))))
+    )
+  (none))
+
+(defun fisher-lava-flame-hits-hook?
+  ((self fisher-game) (slot int) (fish-proc manipy))
+  (let ((hook-pos (new 'stack-no-clear 'vector))
+      (relative (new 'stack-no-clear 'vector))
+      (forward (new 'stack-no-clear 'vector))
+      (side (new 'stack-no-clear 'vector))
+      (forward-distance 0.0)
+      (side-distance 0.0)
+      (vertical-distance 0.0)
+      (remaining-distance 0.0)
+      (forward-sign 1.0))
+    ;; The rendered fish quaternion sweeps through the side axis during its
+    ;; 180-degree turn.  Use it only to choose left/right, then snap the attack
+    ;; to the playfield axis so the flame can never fire 90 degrees sideways.
+    (fisher-lava-fish-forward! fish-proc forward)
+    (set! forward-sign
+      (if (>= (vector-dot forward (-> self playfield-axis)) 0.0) 1.0 -1.0))
+    (singlefish-vector-scale-safe!
+      forward
+      (-> self playfield-axis)
+      forward-sign)
+    (set! (-> side x) (-> forward z))
+    (set! (-> side y) 0.0)
+    (set! (-> side z) (- (-> forward x)))
+    (set! (-> side w) 0.0)
+    (fisher-hook-target! self hook-pos)
+    (vector-! relative hook-pos (-> fish-proc root trans))
+    (set! forward-distance (vector-dot relative forward))
+    (set! side-distance (fabs (vector-dot relative side)))
+    (set! vertical-distance (fabs (-> relative y)))
+    (set! remaining-distance
+      (if (> forward-sign 0.0)
+        (- (fisher-playfield-far-distance self) (fisher-fish-distance self slot))
+        (- (fisher-fish-distance self slot) (meters 3.5))))
+    (and
+      (>= forward-distance 0.0)
+      (<= forward-distance (fmax 0.0 remaining-distance))
+      (<= side-distance (meters 2.0))
+      (<= vertical-distance (meters 2.5)))))
+
+(defun fisher-submit-lava-flame-wall!
+  ((self fisher-game) (slot int) (fish-proc manipy))
+  (let ((forward (new 'stack-no-clear 'vector))
+      (remaining-distance 0.0)
+      (forward-sign 1.0))
+    ;; The visible turn quaternion passes through a direction perpendicular to
+    ;; the playfield.  Snap that continuous turn to one of the only two legal
+    ;; firing directions before placing any segments.
+    (fisher-lava-fish-forward! fish-proc forward)
+    (set! forward-sign
+      (if (>= (vector-dot forward (-> self playfield-axis)) 0.0) 1.0 -1.0))
+    (singlefish-vector-scale-safe!
+      forward
+      (-> self playfield-axis)
+      forward-sign)
+    (set! remaining-distance
+      (if (> forward-sign 0.0)
+        (- (fisher-playfield-far-distance self) (fisher-fish-distance self slot))
+        (- (fisher-fish-distance self slot) (meters 3.5))))
+
+    ;; Twelve forward stations x three height bands make one continuous
+    ;; longitudinal flame wall.  The old three-wide lateral grid made every
+    ;; depth station read as a separate crosswise wall.
+    (dotimes (depth-index 12)
+      (let ((depth (* (fmax (meters 0.5) remaining-distance)
+                    (/ (+ (the float depth-index) 0.5) 12.0))))
+        (dotimes (height-index 3)
+          (let ((flame-pos (new 'stack-no-clear 'vector)))
+            (singlefish-vector-add-scaled-safe!
+              flame-pos (-> fish-proc root trans) forward depth)
+            (+! (-> flame-pos y)
+              (* (meters 2.5) (- (the float height-index) 1.0)))
+            (set! (-> flame-pos w) 1.0)
+            (fisher-set-lava-puff-mode! self 3)
+            (launch-particles
+              :system *sp-particle-system-3d*
+              (-> *part-id-table* 3573)
+              flame-pos)
+            (when (= height-index 1)
+              (fisher-set-lava-puff-mode! self 5)
+              (launch-particles
+                :system *sp-particle-system-3d*
+                (-> *part-id-table* 3573)
+                flame-pos)))))))
+  (none))
+
+(defun fisher-update-lava-fire-system! ((self fisher-game))
+  (cond
+    ((!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (fisher-reset-lava-fire-cycle! self))
+
+    ((or
+        (not (-> self casted?))
+        (!= (-> self cast-state) 'line-active)
+        (!= (-> self fish-state) 'free))
+      ;; Every interrupted cast starts a fresh twelve-second cycle instead of
+      ;; resuming a half-finished countdown on the next lure.
+      (fisher-reset-lava-fire-cycle! self))
+
+    (else
+      (let ((dt (-> *display* seconds-per-frame)))
+        (cond
+          ((= (-> self lava-fire-state) 'waiting)
+            (-! (-> self lava-fire-timer) dt)
+            (when (<= (-> self lava-fire-timer) 0.0)
+              (let ((slot (fisher-find-lava-fire-slot self)))
+                (cond
+                  ((>= slot 0)
+                    (set! (-> self lava-fire-slot) slot)
+                    (set! (-> self lava-fire-state) 'charging)
+                    (set! (-> self lava-fire-timer) 0.0))
+
+                  (else
+                    (set! (-> self lava-fire-timer) 1.0))))))
+
+          ((= (-> self lava-fire-state) 'charging)
+            (let ((slot (-> self lava-fire-slot)))
+              (cond
+                ((or
+                    (< slot 0)
+                    (not (fisher-fish-pointer self slot))
+                    (not (-> (fisher-fish-pointer self slot) 0 self)))
+                  (fisher-reset-lava-fire-cycle! self))
+
+                (else
+                  (let* ((fish-proc
+                          (the-as manipy
+                            (-> (fisher-fish-pointer self slot) 0 self)))
+                         (charge-pos
+                          (new 'stack-no-clear 'vector)))
+                    (vector-copy! charge-pos (-> fish-proc root trans))
+                    (+! (-> charge-pos y) (meters 0.15))
+                    (set! (-> charge-pos w) 1.0)
+
+                    (-! (-> self lava-flame-time) dt)
+                    (when (<= (-> self lava-flame-time) 0.0)
+                      (set! (-> self lava-flame-time) 0.085)
+                      (fisher-set-lava-puff-mode! self 2)
+
+                      (launch-particles
+                        :system *sp-particle-system-3d*
+                        (-> *part-id-table* 3573)
+                        charge-pos)
+
+)
+
+                    (+! (-> self lava-fire-timer) dt)
+
+                    (when
+                      (>=
+                        (-> self lava-fire-timer)
+                        *fisher-lava-fire-charge-seconds*)
+                      (set! (-> self lava-fire-state) 'firing)
+                      (set! (-> self lava-fire-timer) 0.0)
+                      (set! (-> self lava-flame-time) 0.0)))))))
+
+          ((= (-> self lava-fire-state) 'firing)
+            (let ((slot (-> self lava-fire-slot)))
+              (cond
+                ((or
+                    (< slot 0)
+                    (not (fisher-fish-pointer self slot))
+                    (not (-> (fisher-fish-pointer self slot) 0 self)))
+                  (fisher-reset-lava-fire-cycle! self))
+
+                (else
+                  (let ((fish-proc
+                          (the-as manipy
+                            (-> (fisher-fish-pointer self slot) 0 self))))
+                    (+! (-> self lava-fire-timer) dt)
+                    (-! (-> self lava-flame-time) dt)
+
+                    (when (<= (-> self lava-flame-time) 0.0)
+                      (set!
+                        (-> self lava-flame-time)
+                        *fisher-lava-flame-interval-seconds*)
+
+                      (fisher-submit-lava-flame-wall!
+                        self
+                        slot
+                        fish-proc))
+
+                    (cond
+                      ((fisher-lava-flame-hits-hook?
+                          self
+                          slot
+                          fish-proc)
+                        (fisher-incinerate-lure! self)
+                        (fisher-reset-lava-fire-cycle! self))
+
+                      ((>=
+                          (-> self lava-fire-timer)
+                          *fisher-lava-fire-duration-seconds*)
+                        (fisher-reset-lava-fire-cycle! self))))))))
+
+          (else
+            (fisher-reset-lava-fire-cycle! self))))))
+
+  (none))
+
 (defun fisher-update-casting! ((self fisher-game))
   (fisher-update-ability-cooldowns! self)
   (fisher-update-voltage-surge! self)
   (fisher-update-electric-system! self)
   (fisher-update-yellow-system! self)
+  (fisher-update-lava-fire-system! self)
+  (fisher-submit-village3-lava-ambient! self)
+  (fisher-submit-lava-fish-effects! self)
   (fisher-draw-voltage-meter! self)
   (fisher-handle-fish-input! self)
   (fisher-draw-playfield-debug! self)
 
-  (dotimes (slot 22) (fisher-debug-draw-logical-fish-marker! self slot))
+  (dotimes (slot *fisher-max-fish-slots*) (fisher-debug-draw-logical-fish-marker! self slot))
 
   (fisher-update-all-fish-debug! self)
 
@@ -9199,7 +9987,8 @@
         (or
           (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
           (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
-          (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+          (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+          (= (-> self location-id) (the-as int (fisher-zone village3-lava))))
         "fishing-theme-b.mp3"
         "fishing-theme-a.wav")
       (the int (-> *setting-control* current sfx-volume)))

@@ -21,6 +21,7 @@
 (define *fisher-pool-center-village2* (new 'static 'vector :x (meters 457.0053) :y (meters 1.9815) :z (meters -1679.8937) :w 1.0))
 (define *fisher-pool-center-sunken* (new 'static 'vector :x (meters 856.0955) :y (meters -143.8908) :z (meters -1761.6607) :w 1.0))
 (define *fisher-pool-center-swamp* (new 'static 'vector :x (meters 571.2822) :y (meters 0.3981) :z (meters -2116.4223) :w 1.0))
+(define *fisher-pool-center-village3* (new 'static 'vector :x (meters 1050.9093) :y (meters 40.2031) :z (meters -3456.7578) :w 1.0))
 
 (defun fisher-pool-center-for-location ((location-id int))
   (cond
@@ -32,6 +33,7 @@
     ((= location-id 5) *fisher-pool-center-village2*)
     ((= location-id 6) *fisher-pool-center-sunken*)
     ((= location-id 7) *fisher-pool-center-swamp*)
+    ((= location-id 8) *fisher-pool-center-village3*)
     (else (the-as vector #f))))
 
 (defun fisher-player-near-location? ((location-id int) (max-distance meters))
@@ -281,7 +283,31 @@
         (degrees -53.2123)
         (degrees 36.7877))
 
-      (set! *fisher-active-location-id* 7)))
+      (set! *fisher-active-location-id* 7))
+
+    ((= level-name 'village3)
+      (spawn-fisher-game
+        8
+        (new 'static 'vector
+          :x (meters 1053.1063)
+          :y (meters 41.9705)
+          :z (meters -3444.0141)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 1050.9093)
+          :y (meters 40.2031)
+          :z (meters -3456.7578)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 1055.8519)
+          :y (meters 44.6681)
+          :z (meters -3470.6354)
+          :w 1.0)
+        (meters 35.8092)
+        (degrees 30.5125)
+        (degrees 120.5125))
+
+      (set! *fisher-active-location-id* 8)))
 
   (none))
 
@@ -298,7 +324,8 @@
         ((= (-> inside name) 'misty) (set! wanted-location-id 4))
         ((= (-> inside name) 'village2) (set! wanted-location-id 5))
         ((= (-> inside name) 'sunken) (set! wanted-location-id 6))
-        ((= (-> inside name) 'swamp) (set! wanted-location-id 7))))
+        ((= (-> inside name) 'swamp) (set! wanted-location-id 7))
+        ((= (-> inside name) 'village3) (set! wanted-location-id 8))))
 
     ;; Hysteresis prevents repeated spawning right on the boundary.
     (when

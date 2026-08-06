@@ -4,6 +4,40 @@
 
 ;; name: fisher-assets.gc
 
+
+;; --------------------------------------------------------------------------
+;; Hub 3 / Village3 lava-pool billboard effect.
+;;
+;; Keep the entire lifetime on this launcher.  Chaining this particle through
+;; native launcher 1813 reset the 3D quaternion during relaunch, which made a
+;; camera-facing puff abruptly become a world-up sheet while it was rising.
+;; Village3 code recolors, resizes, and chooses the fade/lifetime before each
+;; direct launch.
+;; --------------------------------------------------------------------------
+(defpart 3573
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 0.55))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:scale-y (meters 0.55))
+    (:r 128.0)
+    (:g 96.0)
+    (:b 32.0)
+    (:a 96.0)
+    (:vel-x (meters -0.0025) (meters 0.0050))
+    (:vel-y (meters 0.0040) (meters 0.0070))
+    (:vel-z (meters -0.0025) (meters 0.0050))
+    (:scalevel-x (meters 0.0030))
+    (:rotvel-z 0.0)
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.30)
+    (:timer (seconds 1.25))
+    (:flags (bit2 bit3 bit14))))
+
 (defpart 3570
   :init-specs
   ((:texture (lakedrop effects))
@@ -173,25 +207,33 @@
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
 
+;; Camera-facing clone of Village3's small yellow lava mote (native part 1852).
+;; This replaces the white underwater steam in the custom lava fishing view.
+;; The separate 3568 hotdot launch supplies the short glowing trail.
 (defpart 3578
   :init-specs
-  ((:texture (hotdot effects))
+  ((:texture (middot effects))
     (:birth-func 'birth-func-camera-orient)
-    (:num 14.0)
-    (:scale-x (meters 0.035) (meters 0.065))
+    (:num 1.0 1.0)
+    (:scale-x (meters 0.42) (meters 0.24))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z (degrees 0) (degrees 360))
     (:scale-y :copy scale-x)
     (:r 255.0)
-    (:g 244.0)
-    (:b 190.0)
-    (:a 126.0)
-    (:vel-x (meters -0.008) (meters 0.016))
-    (:vel-y (meters -0.008) (meters 0.016))
-    (:vel-z (meters -0.003) (meters 0.006))
-    (:scalevel-x (meters -0.0005))
+    (:g 96.0 128.0)
+    (:b 0.0)
+    (:a 210.0 36.0)
+    (:vel-x (meters -0.002) (meters 0.004))
+    (:vel-y (meters 0.020) (meters 0.020))
+    (:vel-z (meters -0.002) (meters 0.004))
+    (:scalevel-x (meters -0.0012))
     (:scalevel-y :copy scalevel-x)
-    (:fade-a -0.80)
-    (:timer (seconds 0.45))
-    (:flags (bit2 bit3))))
+    (:fade-g -0.30)
+    (:fade-a -0.52)
+    (:accel-y (meters -0.0011))
+    (:timer (seconds 0.72))
+    (:flags (bit2 bit3 bit14))))
 
 (defpart 3579
   :init-specs
@@ -389,8 +431,8 @@
   :init-specs
   ((:texture (hotdot effects))
     (:birth-func 'birth-func-camera-orient)
-    (:num 2.0)
-    (:scale-x (meters 0.38) (meters 0.19))
+    (:num 1.0)
+    (:scale-x (meters 0.30) (meters 0.14))
     (:rot-x (degrees -90))
     (:rot-y 0.0)
     (:rot-z (degrees 0) (degrees 360))
@@ -400,11 +442,11 @@
     (:b 0.0)
     (:a 118.0)
     (:vel-x (meters -0.006) (meters 0.012))
-    (:vel-y (meters -0.006) (meters 0.012))
-    (:scalevel-x (meters -0.0010))
+    (:vel-y (meters 0.006) (meters 0.010))
+    (:scalevel-x (meters -0.00045))
     (:scalevel-y :copy scalevel-x)
-    (:fade-a -1.55)
-    (:timer (seconds 0.20))
+    (:fade-a -0.58)
+    (:timer (seconds 0.62))
     (:flags (bit2 bit3 bit14))))
 
 

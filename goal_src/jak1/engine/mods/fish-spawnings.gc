@@ -244,6 +244,27 @@
     60 100 2.8 0.52 0.25 0.035 0.040 0.040
     (meters 27.0) (meters 33.0))
 
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species lava-drum))
+    "LAVA DRUM"
+    *catch-fisha-sgc*
+    400 800 4.0 1.35 1.05 1.00 0.20 0.005
+    (meters 30.0) (meters 35.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species magma-serpent))
+    "MAGMA SERPENT"
+    *catch-fishc-sgc*
+    210 340 3.2 1.00 0.72 1.00 0.025 0.005
+    (meters 24.0) (meters 31.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species inferno-shark))
+    "INFERNO SHARK"
+    *sharkey-sgc*
+    40 60 2.0 0.38 0.22 1.00 0.035 0.005
+    (meters 4.0) (meters 8.0))
+
   (dotimes (species *fisher-species-count*)
     (fisher-set-normal-fight-info!
       (fisher-species-info-for species)))
@@ -336,6 +357,53 @@
     0.0
     1.0)
 
+  ;; Village3 lava species all use button fights.  The shark checks much more
+  ;; frequently, while the two heavy species use medium fight frequency.
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species lava-drum))
+    (meters 1.42)
+    0.90
+    1.35
+    0.38
+    1
+    3
+    0.22
+    0.34
+    150.0
+    160.0
+    0.0
+    1.0)
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species magma-serpent))
+    (meters 1.38)
+    0.90
+    1.30
+    0.38
+    2
+    4
+    0.20
+    0.31
+    150.0
+    162.0
+    0.0
+    1.0)
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species inferno-shark))
+    (meters 1.20)
+    0.85
+    1.10
+    0.72
+    1
+    2
+    0.18
+    0.28
+    154.0
+    165.0
+    0.0
+    1.0)
+
   ;; Only species explicitly marked here steal the lure when their bite is
   ;; not hooked in time.  All other species keep the default #f value.
   (set!
@@ -355,6 +423,12 @@
     #t)
   (set!
     (-> (fisher-species-info-for (fisher-species swamp-guppie)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species lava-drum)) snap-on-bite?)
+    #t)
+  (set!
+    (-> (fisher-species-info-for (fisher-species inferno-shark)) snap-on-bite?)
     #t)
 
   (fisher-set-zone-info!
@@ -409,6 +483,15 @@
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone swamp-sludge)) 0 (fisher-species black-lurker-shark) 1 1 1 1)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone swamp-sludge)) 1 (fisher-species swamp-guppie) 5 6 8 10)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone swamp-sludge)) 2 (fisher-species sludge-crappie) 5 6 8 10)
+
+  ;; First Hub 3 pool. Inferno Sharks occupy the lower 15-17 band while the
+  ;; two heavy lava species occupy 18-20.
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone village3-lava))
+    15 20 15 19 20 27 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village3-lava)) 0 (fisher-species lava-drum) 4 5 6 7)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village3-lava)) 1 (fisher-species magma-serpent) 3 3 4 4)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village3-lava)) 2 (fisher-species inferno-shark) 8 10 10 14)
 
   (set! (-> (fisher-zone-info-for (fisher-zone sandover-dock)) fire-canyon-cellfish?) #t)
   (set! (-> (fisher-zone-info-for (fisher-zone jungle-pillar)) fire-canyon-cellfish?) #t)
@@ -794,7 +877,18 @@
   (none))
 
 (defun fisher-set-fish-depth! ((self fisher-game) (slot int) (value float))
-  (set! (-> self fish-data slot slot depth) value)
+  ;; Village3 Scout Flies are deepwater-only.  Enforce this at the shared
+  ;; setter so respawns, rerolls, replacements, and later depth changes cannot
+  ;; move one into the topwater or bottom-feeder bands.
+  (set!
+    (-> self fish-data slot slot depth)
+    (if
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species scout-fly))))
+      (meters 27.5)
+      value))
   (none))
 
 (defun fisher-set-fish-direction! ((self fisher-game) (slot int) (value float))
@@ -1030,6 +1124,18 @@
           (-> info min-weight-tenths)
           (-> info max-weight-tenths))))
 
+    ;; Ordinary Village3 catches always stay inside their authored species
+    ;; weight ranges. True rare-fish suffixes keep their own special weights.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (not (fisher-rare-fish? suffix))
+        (or
+          (= species (the-as int (fisher-species lava-drum)))
+          (= species (the-as int (fisher-species magma-serpent)))
+          (= species (the-as int (fisher-species inferno-shark)))))
+      (return base-weight))
+
     (cond
       ((= suffix 7) (rand-vu-int-range 100 151))
       ((= suffix 8) (rand-vu-int-range 30 61))
@@ -1077,16 +1183,30 @@
       (-> zone level-min)
       (-> zone level-max))))
 
+(defun fisher-roll-level-for-slot ((self fisher-game) (slot int))
+  ;; Inferno Sharks are intentionally lower-level than the heavy lava fish.
+  ;; All other zones retain their existing zone-wide level roll.
+  (if
+    (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+    (cond
+      ((= (fisher-fish-species self slot)
+          (the-as int (fisher-species inferno-shark)))
+        (fisher-roll-level-in-range 15 17))
+      ((= (fisher-fish-species self slot)
+          (the-as int (fisher-species magma-serpent)))
+        (fisher-roll-level-in-range 17 20))
+      (else
+        (fisher-roll-level-in-range 18 20)))
+    (fisher-roll-level-for-current-zone self)))
+
 (defun fisher-refresh-active-slot-levels! ((self fisher-game))
-  ;; Every live table slot owns its level.  Re-assert valid zone levels after
-  ;; initial table construction and hidden population growth so no slot can
-  ;; remain at the initialization default of level 1 unless the zone itself is
-  ;; level 1 (training).
+  ;; Every live table slot owns its level.  Re-assert valid species/zone levels
+  ;; after initial table construction and hidden population growth.
   (dotimes (slot (-> self fish-count))
     (fisher-set-fish-level!
       self
       slot
-      (fisher-roll-level-for-current-zone self)))
+      (fisher-roll-level-for-slot self slot)))
   (none))
 
 (defun fisher-randomize-fish-level-and-weight!
@@ -1097,7 +1217,7 @@
   (fisher-set-fish-level!
     self
     slot
-    (fisher-roll-level-for-current-zone self))
+    (fisher-roll-level-for-slot self slot))
 
   (fisher-set-fish-weight-tenths!
     self
@@ -1187,6 +1307,7 @@
     ((= (-> self location-id) 5) 3)
     ((= (-> self location-id) 6) 9)
     ((= (-> self location-id) 7) 9)
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava))) 1)
     ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
     (else 0)))
 
@@ -1246,6 +1367,9 @@
         ((= index 7) (game-task rolling-lake))
         (else (game-task rolling-buzzer))))
 
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (game-task village3-extra1))
+
     (else (game-task none))))
 
 (defun fisher-find-missing-power-cell-task ((self fisher-game))
@@ -1294,7 +1418,8 @@
         (= (-> self location-id) 4)
         (= (-> self location-id) 5)
         (= (-> self location-id) 6)
-        (= (-> self location-id) 7))
+        (= (-> self location-id) 7)
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava))))
       (> (-> self fish-count) 0)
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
@@ -1478,6 +1603,9 @@
     ((= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
       (the-as int (fisher-species sludge-crappie)))
 
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (the-as int (fisher-species inferno-shark)))
+
     (else
       (the-as int (fisher-species eco-drum)))))
 
@@ -1632,6 +1760,9 @@
 (defun fisher-roll-passive-special-for-slot!
   ((self fisher-game) (slot int))
 
+  ;; Village3 participates in the same passive Scout Fly and local-cell
+  ;; replacement rolls as the other non-training fishing pools.
+
   ;; Every replacement begins as a normal zone fish.  This helper may then
   ;; convert that exact new slot into any eligible passive special fish.
   ;; Preserve the guaranteed Electric Lurker Shark in both Hub 2 electric
@@ -1717,7 +1848,8 @@
         (= (-> self location-id) 4)
         (= (-> self location-id) 5)
         (= (-> self location-id) 6)
-        (= (-> self location-id) 7))
+        (= (-> self location-id) 7)
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava))))
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
         (if *fisher-in-debug?* 0.90 *fisher-power-cell-fish-chance*)))
@@ -1749,6 +1881,8 @@
     ((= (-> self location-id) 5) (game-task village2-buzzer))
     ((= (-> self location-id) 6) (game-task sunken-buzzer))
     ((= (-> self location-id) 7) (game-task swamp-buzzer))
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (game-task village3-buzzer))
     (else (game-task village1-buzzer))))
 
 (defun fisher-find-missing-buzzer-index
@@ -1806,7 +1940,9 @@
                 (= (fisher-fish-species self slot)
                   (the-as int (fisher-species electric-lurker-shark)))
                 (= (fisher-fish-species self slot)
-                  (the-as int (fisher-species black-lurker-shark)))))
+                  (the-as int (fisher-species black-lurker-shark)))
+                (= (fisher-fish-species self slot)
+                  (the-as int (fisher-species inferno-shark)))))
             (-! slot 1))
 
           (when (>= slot 0)
@@ -2129,6 +2265,46 @@
   (none))
 
 
+(defun fisher-configure-village3-table! ((self fisher-game))
+  (let* ((zone (fisher-zone-info-for (fisher-zone village3-lava)))
+      (golden? (fisher-golden-hour?))
+      (drum-count
+        (if golden?
+          (rand-vu-int-range 6 7)
+          (rand-vu-int-range 4 5)))
+      ;; Keep the serpent population deterministic in this pool.
+      (serpent-count (if golden? 4 3))
+      (shark-count
+        (if golden?
+          (rand-vu-int-range 10 14)
+          (rand-vu-int-range 8 10)))
+      (slot 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min *fisher-max-fish-slots* (+ drum-count serpent-count shark-count)))
+    (fisher-clear-power-cell-tasks! self)
+
+    (dotimes (i drum-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species lava-drum)))
+        (+! slot 1)))
+
+    (dotimes (i serpent-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species magma-serpent)))
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-configure-random-fish-slot!
+        self slot (the-as int (fisher-species inferno-shark)))
+      (+! slot 1)))
+
+  (none))
+
 (defun fisher-configure-zone-table! ((self fisher-game))
   ;; Build every ordinary population directly from fisher-zone-info.  The old
   ;; area-specific builders hardcoded species, and hidden growth randomized a
@@ -2282,6 +2458,25 @@
         (return (the-as int (fisher-species swamp-guppie)))
         (return (the-as int (fisher-species sludge-crappie))))))
 
+  ;; Village3 preserves its three lava-only species during hidden pool growth.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+    (let ((drum-weight (if golden? 7 5))
+        (serpent-weight (if golden? 6 4))
+        (shark-weight (if golden? 14 10))
+        (roll 0))
+      (set! roll
+        (rand-vu-int-range
+          0
+          (+ drum-weight serpent-weight shark-weight -1)))
+      (cond
+        ((< roll drum-weight)
+          (return (the-as int (fisher-species lava-drum))))
+        ((< roll (+ drum-weight serpent-weight))
+          (return (the-as int (fisher-species magma-serpent))))
+        (else
+          (return (the-as int (fisher-species inferno-shark)))))))
+
   ;; Pick a configured species using the current table's maximum ranges as
   ;; weights.  This is used only when an invisible normal/golden transition
   ;; grows the live pool.
@@ -2312,18 +2507,27 @@
       (fisher-configure-sunken-table! self))
     ((= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
       (fisher-configure-swamp-table! self))
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (fisher-configure-village3-table! self))
     (else
       (fisher-configure-zone-table! self)))
 
-  ;; The training lagoon has no Scout Fly fish.  Its four training cells,
-  ;; including the Scout Fly task cell, are awarded by the ten-orb quest.
-  (when
-    (!= (-> self location-id) (the-as int (fisher-zone training-lagoon)))
-    (fisher-add-buzzer-fish-slots! self))
+  ;; Village3 gets its own Scout Flies and its single local hidden-cell fish,
+  ;; but does not inherit the Hub 2 Fire Canyon or Mountain Pass cell fish.
+  (cond
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (fisher-add-buzzer-fish-slots! self)
+      (fisher-add-power-cell-fish-slot! self))
 
-  (fisher-add-power-cell-fish-slot! self)
-  (fisher-add-fire-canyon-cellfish-slot! self)
-  (fisher-add-mountain-pass-cellfish-slots! self)
+    (else
+      ;; Training has no Scout Fly fish.
+      (when
+        (!= (-> self location-id) (the-as int (fisher-zone training-lagoon)))
+        (fisher-add-buzzer-fish-slots! self))
+
+      (fisher-add-power-cell-fish-slot! self)
+      (fisher-add-fire-canyon-cellfish-slot! self)
+      (fisher-add-mountain-pass-cellfish-slots! self)))
 
   ;; The logical table is the source of truth for gameplay/catch levels.
   (fisher-refresh-active-slot-levels! self)
@@ -3186,6 +3390,36 @@
           (set! g 0.040)
           (set! b 0.040))))
 
+    ;; Village3's ordinary fish retain their authored lava colors even when
+    ;; standard suffix tinting is present.  Mutant, Golden, and true rare fish
+    ;; still keep their global suffix appearance.
+    (when
+      (and
+        (not (fisher-rare-fish? suffix))
+        (!= suffix 3)
+        (!= suffix 6))
+      (cond
+        ((= species (the-as int (fisher-species lava-drum)))
+          (set! r 1.00)
+          (set! g 0.20)
+          (set! b 0.005)
+          (set! base-scale (if catch-display? 1.35 1.05)))
+
+        ((= species (the-as int (fisher-species magma-serpent)))
+          (set! r 1.00)
+          (set! g 0.025)
+          (set! b 0.005)
+          (set! base-scale (if catch-display? 3.00 2.16))
+          (*! x-scale 0.62)
+          (*! y-scale 0.70)
+          (*! z-scale 3.65))
+
+        ((= species (the-as int (fisher-species inferno-shark)))
+          (set! r 1.00)
+          (set! g 0.035)
+          (set! b 0.005)
+          (set! base-scale (if catch-display? 0.38 0.22)))))
+
     ;; Catch/loot display fish are presentation models, not gameplay scale.
     ;; Keep them compact so the full fish and any rare attachment fit above
     ;; the loot window.
@@ -3203,6 +3437,21 @@
     (set! (-> fish-proc draw color-emissive g) 0.0)
     (set! (-> fish-proc draw color-emissive b) 0.0)
     (set! (-> fish-proc draw color-emissive a) 1.0)
+
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (not (fisher-rare-fish? suffix)))
+      (cond
+        ((= species (the-as int (fisher-species lava-drum)))
+          (set! (-> fish-proc draw color-emissive r) 0.32)
+          (set! (-> fish-proc draw color-emissive g) 0.055))
+        ((= species (the-as int (fisher-species magma-serpent)))
+          (set! (-> fish-proc draw color-emissive r) 0.28)
+          (set! (-> fish-proc draw color-emissive g) 0.018))
+        ((= species (the-as int (fisher-species inferno-shark)))
+          (set! (-> fish-proc draw color-emissive r) 0.20)
+          (set! (-> fish-proc draw color-emissive g) 0.012))))
 
     (when (and catch-display? (= suffix 16))
       (quaternion-axis-angle!
@@ -3236,6 +3485,13 @@
           (fisher-fish-species self slot))))
 
     (cond
+      ;; Every Village3 Scout Fly belongs on the pool's deepwater plane.
+      ;; This is the same 27.5m boundary drawn by the fishing debug overlay.
+      ((and
+          (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (= (fisher-fish-species self slot)
+            (the-as int (fisher-species scout-fly))))
+        (fisher-set-fish-depth! self slot (meters 27.5)))
       ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
         (cond
           ((= (fisher-fish-species self slot)
@@ -3285,7 +3541,28 @@
       (fisher-set-fish-speed!
         self
         slot
-        (* (fisher-fish-speed self slot) 0.60))))
+        (* (fisher-fish-speed self slot) 0.60)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species lava-drum)))
+      (fisher-set-fish-speed!
+        self
+        slot
+        (* (fisher-fish-speed self slot) 0.72)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species magma-serpent)))
+      (fisher-set-fish-speed!
+        self
+        slot
+        (* (fisher-fish-speed self slot) 0.27)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species inferno-shark)))
+      (fisher-set-fish-speed!
+        self
+        slot
+        (* (fisher-fish-speed self slot) 2.15))))
 
   (fisher-set-fish-cooldown! self slot 0.0)
 
@@ -3936,134 +4213,124 @@
 
   (none))
 
+(defun fisher-fish-lure-sense-range ((self fisher-game) (slot int))
+  (if
+    (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
+    (meters 1.35)
+    (meters 5.0)))
+
+(defun fisher-fish-lure-sense-origin-offset ((self fisher-game) (slot int))
+  (if
+    (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
+    (meters 10.0)
+    0.0))
+
+(defun fisher-fish-lure-sense-half-angle ((self fisher-game) (slot int))
+  (if
+    (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
+    (degrees 20.0)
+    (degrees 35.0)))
+
+(defun fisher-fish-lure-sense-dot-min ((self fisher-game) (slot int))
+  (cos (fisher-fish-lure-sense-half-angle self slot)))
+
 (defun fisher-debug-draw-fish-cone!
   ((self fisher-game) (slot int) (fish-proc manipy))
 
   (when *fisher-in-debug?*
-    (let ((origin
-          (new 'stack-no-clear 'vector))
-
+    (let* ((origin (new 'stack-no-clear 'vector))
         (forward (new 'stack-no-clear 'vector))
-
-        (upper-edge (new 'stack-no-clear 'vector))
-
         (forward-end (new 'stack-no-clear 'vector))
-
         (upper-end (new 'stack-no-clear 'vector))
-
+        (lower-end (new 'stack-no-clear 'vector))
         (arc-a (new 'stack-no-clear 'vector))
-
         (arc-b (new 'stack-no-clear 'vector))
-
         (color (new 'static 'rgba :r #x20 :g #xff :b #xff :a #xff))
+        (range (fisher-fish-lure-sense-range self slot))
+        (origin-offset (fisher-fish-lure-sense-origin-offset self slot))
+        (cone-angle (fisher-fish-lure-sense-half-angle self slot))
+        ;; The debug cone's end radius must come from the same live angle and
+        ;; center-line range used by this fish's anticipation test.
+        (cone-radius (* range (tan cone-angle))))
 
-        (range
-          (meters 4.0)))
-
-      (singlefish-vector-copy-safe! origin (-> fish-proc root trans))
-
-      (singlefish-vector-scale-safe! forward (-> self playfield-axis) (fisher-fish-direction self slot))
-
+      (singlefish-vector-scale-safe!
+        forward (-> self playfield-axis) (fisher-fish-direction self slot))
       (set! (-> forward y) 0.0)
       (set! (-> forward w) 0.0)
-
       (singlefish-vector-normalize-safe! forward 1.0)
 
-      (set! (-> upper-edge x) (* (-> forward x) 0.8191520))
+      (singlefish-vector-copy-safe! origin (-> fish-proc root trans))
+      (when (> origin-offset 0.0)
+        (singlefish-vector-add-scaled-safe! origin origin forward origin-offset))
 
-      (set! (-> upper-edge y) 0.5735764)
-
-      (set! (-> upper-edge z) (* (-> forward z) 0.8191520))
-
-      (set! (-> upper-edge w) 0.0)
-
-      (singlefish-vector-normalize-safe! upper-edge 1.0)
-
+      ;; Range is the center-line length.  Build the cone cap at that exact
+      ;; distance, then expand it by the fish's true cone radius.
       (singlefish-vector-add-scaled-safe! forward-end origin forward range)
-
-      (singlefish-vector-add-scaled-safe! upper-end origin upper-edge range)
+      (singlefish-vector-copy-safe! upper-end forward-end)
+      (singlefish-vector-copy-safe! lower-end forward-end)
+      (+! (-> upper-end y) cone-radius)
+      (-! (-> lower-end y) cone-radius)
 
       (fisher-debug-line! origin forward-end color)
-
       (fisher-debug-line! origin upper-end color)
+      (fisher-debug-line! origin lower-end color)
+      (fisher-debug-line! upper-end lower-end color)
 
-      (dotimes (i 7)
-        (let ((angle-a
-              (* 5.0 (the float i)))
-
-            (angle-b (* 5.0 (the float (+ i 1))))
-
-            (dir-a (new 'stack-no-clear 'vector))
-
-            (dir-b
-              (new 'stack-no-clear 'vector)))
-
-          (set! (-> dir-a x) (* (-> forward x) (cos (degrees angle-a))))
-
-          (set! (-> dir-a y) (sin (degrees angle-a)))
-
-          (set! (-> dir-a z) (* (-> forward z) (cos (degrees angle-a))))
-
-          (set! (-> dir-a w) 0.0)
-
-          (set! (-> dir-b x) (* (-> forward x) (cos (degrees angle-b))))
-
-          (set! (-> dir-b y) (sin (degrees angle-b)))
-
-          (set! (-> dir-b z) (* (-> forward z) (cos (degrees angle-b))))
-
-          (set! (-> dir-b w) 0.0)
-
-          (singlefish-vector-add-scaled-safe! arc-a origin dir-a range)
-
-          (singlefish-vector-add-scaled-safe! arc-b origin dir-b range)
-
-          (fisher-debug-line!
-            arc-a
-            arc-b
-            color)))))
+      ;; Draw a curved profile between the lower and upper edges so changes to
+      ;; species angle/range are immediately visible in debug mode.
+      (dotimes (i 8)
+        (let* ((t-a (/ (the float i) 8.0))
+            (t-b (/ (the float (+ i 1)) 8.0))
+            (y-a (* cone-radius (- (* t-a 2.0) 1.0)))
+            (y-b (* cone-radius (- (* t-b 2.0) 1.0))))
+          (singlefish-vector-copy-safe! arc-a forward-end)
+          (singlefish-vector-copy-safe! arc-b forward-end)
+          (+! (-> arc-a y) y-a)
+          (+! (-> arc-b y) y-b)
+          (fisher-debug-line! arc-a arc-b color)))))
 
   (none))
 
 (defun fisher-manipy-can-sense-lure?
   ((self fisher-game) (slot int) (fish-proc manipy))
 
-  (let ((to-lure
-        (new 'stack-no-clear 'vector))
-
+  (let ((to-lure (new 'stack-no-clear 'vector))
       (forward (new 'stack-no-clear 'vector))
-
+      (sense-origin (new 'stack-no-clear 'vector))
       (distance 0.0)
-
       (horizontal-distance 0.0)
+      (facing-dot 0.0)
+      (sense-range (fisher-fish-lure-sense-range self slot))
+      (origin-offset (fisher-fish-lure-sense-origin-offset self slot))
+      (sense-dot-min (fisher-fish-lure-sense-dot-min self slot)))
 
-      (facing-dot
-        0.0))
-
-    (singlefish-vector-sub-safe! to-lure (-> self lure-pos) (-> fish-proc root trans))
-
-    (set! distance (singlefish-vector-length-safe to-lure))
-
-    (set! (-> to-lure y) 0.0)
-    (set! (-> to-lure w) 0.0)
-
-    (set! horizontal-distance (singlefish-vector-length-safe to-lure))
-
-    (when (> horizontal-distance (meters 0.001)) (singlefish-vector-normalize-safe! to-lure 1.0))
-
-    (singlefish-vector-scale-safe! forward (-> self playfield-axis) (fisher-fish-direction self slot))
-
+    (singlefish-vector-scale-safe!
+      forward (-> self playfield-axis) (fisher-fish-direction self slot))
     (set! (-> forward y) 0.0)
     (set! (-> forward w) 0.0)
-
     (singlefish-vector-normalize-safe! forward 1.0)
+
+    (singlefish-vector-copy-safe! sense-origin (-> fish-proc root trans))
+
+    (when (> origin-offset 0.0)
+      (singlefish-vector-add-scaled-safe!
+        sense-origin sense-origin forward origin-offset))
+
+    (singlefish-vector-sub-safe! to-lure (-> self lure-pos) sense-origin)
+    (set! distance (singlefish-vector-length-safe to-lure))
+    (set! (-> to-lure y) 0.0)
+    (set! (-> to-lure w) 0.0)
+    (set! horizontal-distance (singlefish-vector-length-safe to-lure))
+
+    (when (> horizontal-distance (meters 0.001))
+      (singlefish-vector-normalize-safe! to-lure 1.0))
 
     (set! facing-dot (vector-dot forward to-lure))
 
     (and
-      (<= distance (meters 5.0))
+      (<= distance sense-range)
       (> horizontal-distance (meters 0.001))
-      (>= facing-dot 0.8191520))))
+      (>= facing-dot sense-dot-min))))
 
 (defun fisher-move-manipy-toward!
   ((fish-proc manipy) (target vector) (speed float))
@@ -4368,7 +4635,21 @@
       (set! (-> self fish-fight-phase) 0.0)
       (set! (-> self fish-fight-base-y) 0.0)
       (stop-sound-file "water-waves.wav")
-      (fisher-remove-lure-snake! self)))
+      (fisher-remove-lure-snake! self)
+
+      ;; Inferno Sharks use the wide shark model and can become stranded at
+      ;; the top-right reel point during the physical return-to-Jak sequence.
+      ;; Move this species directly into the normal catch-card presentation.
+      (when (= species (the-as int (fisher-species inferno-shark)))
+        (let ((caught-fish (fisher-fish-pointer self slot)))
+          (when caught-fish
+            (fisher-destroy-manipy! caught-fish)
+            (fisher-set-fish-pointer! self slot (the-as (pointer manipy) #f))))
+        (fisher-spawn-catch-display-fish! self)
+        (set! (-> self fish-state) 'catch-enter)
+        (set! (-> self cast-state) 'catch-display)
+        (set! (-> self catch-transition-time) 0.0)
+        (set! (-> self catch-menu-offset) 150.0))))
 
   (none))
 

@@ -44,6 +44,48 @@
 
 (deftype villagec-lava (water-anim) ())
 
+(defstate water-vol-idle (villagec-lava)
+  :virtual #t
+
+  :event
+    (behavior
+      ((proc process)
+       (argc int)
+       (message symbol)
+       (block event-message-block))
+
+      ;; Preserve the normal water-anim event handling.
+      ((-> (method-of-type water-anim water-vol-idle) event)
+       proc
+       argc
+       message
+       block))
+
+  :trans
+    (behavior ()
+      ;; Run the base water-volume behavior, but deliberately skip the
+      ;; water-anim camera-height hiding test.
+      (let ((parent-trans
+              (-> (method-of-type water-vol water-vol-idle) trans)))
+        (when parent-trans
+          (parent-trans)))
+
+      ;; Always allow the lava surface to be drawn from underneath.
+      (logclear! (-> self draw status) (draw-status hidden))
+
+      (when
+        (and
+          (-> self play-ambient-sound?)
+          (nonzero? (-> self sound)))
+        (update! (-> self sound))))
+
+  :code
+    (behavior ()
+      (loop
+        (ja-post)
+        (logior! (-> self mask) (process-mask sleep-code))
+        (suspend))))
+
 
 (define ripple-for-villagec-lava
   (new 'static
