@@ -1141,13 +1141,39 @@
   (set! (-> this victory-anim) (fuel-cell-pick-anim this))
   this)
 
+(defun citadel-sage-cell-task? ((task int))
+  (or
+    (= task (the-as int (game-task citadel-sage-green)))
+    (= task (the-as int (game-task citadel-sage-blue)))
+    (= task (the-as int (game-task citadel-sage-red)))
+    (= task (the-as int (game-task citadel-sage-yellow)))))
+
+(defun citadel-fuel-cell-spawn-allowed? ((task int))
+  ;; Preserve the global no-authored-Power-Cells mod except for Citadel.
+  ;; The explicit task checks also let these four sage cells initialize
+  ;; correctly during a level transition.
+  (or
+    (= (-> (level-get-target-inside *level*) name) 'citadel)
+    (citadel-sage-cell-task? task)))
+
 (defmethod init-from-entity! ((this fuel-cell) (arg0 entity-actor))
-  ;; Prevent level-authored fuel cells from becoming active processes.
-  (process-entity-status!
-    this
-    (entity-perm-status dead)
-    #t)
-  (deactivate this)
+  (if
+    (citadel-fuel-cell-spawn-allowed?
+      (the-as int (-> this entity extra perm task)))
+    (begin
+      ;; Vanilla level-authored Power Cell initialization.
+      (initialize this)
+      (process-drawable-from-entity! this (-> this entity))
+      (initialize-params this 0 (the-as float 1024.0))
+      (logclear! (-> this fact options) (fact-options can-collect))
+      (update-transforms! (-> this root))
+      (go (method-of-object this wait)))
+    (begin
+      (process-entity-status!
+        this
+        (entity-perm-status dead)
+        #t)
+      (deactivate this)))
   (none))
 
 (defbehavior fuel-cell-init-by-other fuel-cell ((arg0 vector) (arg1 vector) (arg2 fact-info) (arg3 entity-actor))
@@ -1492,10 +1518,41 @@
                 (set! sv-48 0)
                 #f)
 
-              ;; Fuel cells may only be awarded directly through get-pickup.
+              ;; Power Cell processes may spawn only for Citadel or one of
+              ;; the four Citadel sage-cell tasks.  Money and buzzers stay
+              ;; blocked by their separate branches below/above.
               ((= v1-25 (pickup-type fuel-cell))
-                (set! sv-48 0)
-                #f)
+                (if
+                  (citadel-fuel-cell-spawn-allowed? (the int arg2))
+                  (begin
+                    (set! (-> s0-0 pickup-spawn-amount) arg2)
+                    (let ((sv-160
+                            (get-process
+                              *pickup-dead-pool*
+                              fuel-cell
+                              #x4000)))
+                      (set! v1-64
+                        (when sv-160
+                          (set! sv-192 (the-as (pointer process) v1-64))
+                          ((method-of-type fuel-cell activate)
+                            (the-as fuel-cell sv-160)
+                            arg4
+                            'fuel-cell
+                            (the-as pointer #x70004000))
+                          (run-now-in-process
+                            sv-160
+                            fuel-cell-init-by-other
+                            arg0
+                            s1-0
+                            s0-0
+                            (-> self entity))
+                          (set! sv-192 (-> sv-160 ppointer))
+                          v1-64)))
+                    (set! sv-48 0)
+                    sv-192)
+                  (begin
+                    (set! sv-48 0)
+                    #f)))
               ;; Buzzers may not spawn naturally from crates or other pickup births.
               ((= v1-25 (pickup-type buzzer))
                 (set! sv-48 0)

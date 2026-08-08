@@ -1270,6 +1270,12 @@
   (cond
     ((and
         (= species (the-as int (fisher-species fire-canyon-cellfish)))
+        (= (-> self caught-power-cell-task)
+          (the-as int (game-task citadel-buzzer))))
+      "CITADEL SCOUT FLY FISH")
+
+    ((and
+        (= species (the-as int (fisher-species fire-canyon-cellfish)))
         (or
           (= (-> self caught-power-cell-task) (the-as int (game-task lavatube-end)))
           (= (-> self caught-power-cell-task) (the-as int (game-task lavatube-buzzer)))))
@@ -1279,7 +1285,8 @@
         (= species (the-as int (fisher-species fire-canyon-cellfish)))
         (or
           (= (-> self caught-power-cell-task) (the-as int (game-task ogre-boss)))
-          (= (-> self caught-power-cell-task) (the-as int (game-task ogre-end)))))
+          (= (-> self caught-power-cell-task) (the-as int (game-task ogre-end)))
+          (= (-> self caught-power-cell-task) (the-as int (game-task ogre-buzzer)))))
       "MOUNTAIN PASS CELL FISH")
 
     (else
@@ -1821,6 +1828,30 @@
     (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end)))
   (none))
 
+(defun fisher-add-village3-mountain-pass-cellfish-slots! ((self fisher-game))
+  ;; Village3 lava is the fallback home for the two Mountain Pass rewards
+  ;; stranded by the collectable changes:
+  ;;   ogre-end    = Reach the End of Mountain Pass
+  ;;   ogre-buzzer = Collect 7 Scout Flies
+  ;;
+  ;; Do NOT add ogre-boss here; Klaww can still award that cell normally.
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      *target*
+      (>=
+        (the int
+          (the float
+            (send-event
+              *target*
+              'query
+              'pickup
+              (pickup-type fuel-cell))))
+        45))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-buzzer)))
+  (none))
+
 (defun fisher-lava-tube-cellfish-eligible? ((self fisher-game))
   ;; These two final cell sharks belong only to the Main Cave Dark Eco pool
   ;; and are a hard 72-cell unlock.  Debug mode deliberately does not bypass
@@ -1919,6 +1950,84 @@
     ;; Exactly one carrier for each missing Lava Tube reward.
     (fisher-add-one-lava-tube-cellfish! self (game-task lavatube-end))
     (fisher-add-one-lava-tube-cellfish! self (game-task lavatube-buzzer)))
+  (none))
+
+(defun fisher-citadel-buzzer-cellfish-eligible? ((self fisher-game))
+  ;; Citadel's seven normal Scout Fly pickups remain disabled.  Their reward
+  ;; cell is carried by one guaranteed shark in Main Cave's Dark Eco pool.
+  (and
+    (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+    (not (task-complete? *game-info* (game-task citadel-buzzer)))))
+
+(defun fisher-add-citadel-buzzer-cellfish-slot! ((self fisher-game))
+  (when
+    (and
+      (fisher-citadel-buzzer-cellfish-eligible? self)
+      (> (-> self fish-count) 0)
+      (not
+        (fisher-has-power-cell-task?
+          self
+          (game-task citadel-buzzer)))
+      (!=
+        (-> self caught-power-cell-task)
+        (the-as int (game-task citadel-buzzer))))
+
+    (let ((step 0)
+        (slot -1)
+        (candidate 0))
+
+      ;; Replace only a normal resident.  Never steal another cell carrier,
+      ;; Scout Fly fish, Megaloviathan, or Phantasm Shark.
+      (while (and (< step (-> self fish-count)) (< slot 0))
+        (set! candidate step)
+        (when
+          (and
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species scout-fly)))
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species megaloviathan)))
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species phantasm-shark)))
+            (<= (fisher-fish-power-cell-task self candidate) 1))
+          (set! slot candidate))
+        (+! step 1))
+
+      (when (>= slot 0)
+        (fisher-set-fish-species!
+          self
+          slot
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (rand-vu-int-range 100 140))
+        (fisher-set-fish-power-cell-task!
+          self
+          slot
+          (the-as int (game-task citadel-buzzer)))
+        (fisher-set-fish-depth!
+          self
+          slot
+          (rand-vu-float-range (meters 30.0) (meters 33.0)))
+
+        (let ((old-fish (fisher-fish-pointer self slot)))
+          (when old-fish
+            (fisher-destroy-manipy! old-fish)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (the-as (pointer manipy) #f)))
+          (when (-> self pool-rendered?)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (fisher-spawn-gameplay-fish self slot)))))))
+
   (none))
 
 (defun fisher-existing-zone? ((self fisher-game))
@@ -3047,11 +3156,15 @@
     ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
       (fisher-add-buzzer-fish-slots! self)
       (fisher-add-power-cell-fish-slot! self)
-      (fisher-add-lava-tube-cellfish-slots! self))
+      (fisher-add-lava-tube-cellfish-slots! self)
+      (fisher-add-citadel-buzzer-cellfish-slot! self))
 
-    ((or
-        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
-        (= (-> self location-id) (the-as int (fisher-zone snow-ice))))
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+      (fisher-add-buzzer-fish-slots! self)
+      (fisher-add-power-cell-fish-slot! self)
+      (fisher-add-village3-mountain-pass-cellfish-slots! self))
+
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
       (fisher-add-buzzer-fish-slots! self)
       (fisher-add-power-cell-fish-slot! self))
 
@@ -4161,7 +4274,8 @@
               (= species (the-as int (fisher-species fire-canyon-cellfish)))
               (or
                 (= power-cell-task (the-as int (game-task lavatube-end)))
-                (= power-cell-task (the-as int (game-task lavatube-buzzer)))))
+                (= power-cell-task (the-as int (game-task lavatube-buzzer)))
+                (= power-cell-task (the-as int (game-task citadel-buzzer)))))
             ;; The final Lava Tube carriers are pure-black sharkey silhouettes.
             ;; Their reddish/orange Power Cell particle is still supplied by
             ;; the shared fire-canyon-cellfish particle path.
@@ -4240,7 +4354,8 @@
             (= species (the-as int (fisher-species fire-canyon-cellfish)))
             (or
               (= power-cell-task (the-as int (game-task lavatube-end)))
-              (= power-cell-task (the-as int (game-task lavatube-buzzer)))))
+              (= power-cell-task (the-as int (game-task lavatube-buzzer)))
+              (= power-cell-task (the-as int (game-task citadel-buzzer)))))
           (set! (-> fish-proc draw color-mult a) 6.00))
         ((= species (the-as int (fisher-species helix-voidfish)))
           (set! (-> fish-proc draw color-mult a) 2.40))
@@ -5161,15 +5276,21 @@
     ;; Completion gates apply to both new rolls and persistent residents.
     (fisher-remove-completed-special-fish! self)
 
-    ;; The two Mountain Pass Cell Fish are guaranteed in all Hub 2 pools
-    ;; after 45 cells.  Recheck while hidden so a persistent pool updates as
-    ;; soon as the threshold is reached or after either reward is completed.
+    ;; The existing Hub 2 Mountain Pass carriers remain unchanged.
     (fisher-add-mountain-pass-cellfish-slots! self)
+
+    ;; Village3 lava additionally carries only the two Mountain Pass rewards
+    ;; that cannot otherwise be obtained with normal collectable processes
+    ;; disabled: Reach the End + 7 Scout Flies.
+    (fisher-add-village3-mountain-pass-cellfish-slots! self)
 
     ;; The two Lava Tube carriers are guaranteed in the Main Cave Dark Eco
     ;; pool once 72 cells are held.  Recheck while hidden so an already-created
     ;; persistent pool updates immediately when the threshold is reached.
     (fisher-add-lava-tube-cellfish-slots! self)
+
+    ;; Keep Citadel's seven-fly reward represented by the Dark Eco shark.
+    (fisher-add-citadel-buzzer-cellfish-slot! self)
 
     ;; Debug mode must guarantee that the Fire Canyon Cell Fish exists even
     ;; when the persistent fishbox was created before debug was enabled or was

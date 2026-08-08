@@ -8,6 +8,59 @@
 
 ;; DECOMP BEGINS
 
+;; Fishing-mod progression controls.
+;; Each *boss-waiting-for-Nth-phase* flag is status-only and becomes #t when the
+;; robot reaches that intermission's frozen downward pose.  External custom code
+;; releases the corresponding phase by setting the matching *boss-enter-* flag.
+;;
+;;   *boss-enter-2nd-phase* -> Green mutant-spawn return
+;;   *boss-enter-3rd-phase* -> Red/fire gun return (Green bomb skipped)
+;;   *boss-enter-4th-phase* -> Yellow gun return (Red bomb skipped)
+;;   *boss-enter-5th-phase* -> final no-yellow airborne idle (light-eco setup skipped)
+;;   *boss-defeated*        -> ending movie beginning at the robot explosion beat
+;;
+;; Blue eco remains independently stateful through *boss-activate-blue-eco*.
+;; *boss-trigger-blue-bomb-explosion* remains a one-shot command.
+(define *boss-enter-2nd-phase* #f)
+(define *boss-waiting-for-2nd-phase* #f)
+(define *boss-enter-3rd-phase* #f)
+(define *boss-waiting-for-3rd-phase* #f)
+(define *boss-enter-4th-phase* #f)
+(define *boss-waiting-for-4th-phase* #f)
+(define *boss-enter-5th-phase* #f)
+(define *boss-waiting-for-5th-phase* #f)
+(define *boss-defeated* #f)
+(define *boss-activate-blue-eco* #f)
+(define *boss-trigger-blue-bomb-explosion* #f)
+
+
+;; Custom cutscene scrub override.
+;; This branch's setting-control has no user-current/movie-skip-frame fields, so
+;; keep the override in this file instead.  current-str-pos falls back to the
+;; retail IOP-reported stream position whenever this value is negative.
+(define *boss-movie-skip-frame* -1.0)
+
+;; One-shot guard for the replacement ending-cutscene WAV.
+;; The retail STR audio is stopped separately once the movie becomes active.
+(define *boss-ending-custom-audio-started?* #f)
+
+(defun current-str-pos ((str sound-id))
+  "Return position of the current stream, with an optional boss-movie frame override."
+  (when (>= *boss-movie-skip-frame* 0.0)
+    (return (the int (* 34.133335 *boss-movie-skip-frame*))))
+  ;; Retail Jak 1 uses one active stream: str-id + strpos.
+  (let ((ret -1))
+    (if (= str (-> *sound-iop-info* str-id))
+      (set! ret (-> *sound-iop-info* strpos)))
+    ret))
+
+;; Internal one-shots.  They tell the next retail return state that we arrived
+;; from one of the custom frozen transitions, so it must NOT finish the frozen
+;; reveal animation before beginning its authored upward return.
+(define *boss-custom-green-return* #f)
+(define *boss-custom-red-return* #f)
+(define *boss-custom-yellow-return* #f)
+
 (defmethod ease-loc-t ((this robotboss))
   (parameter-ease-sin-clamp (-> this loc-t)))
 
@@ -37,6 +90,60 @@
   (if (and *target* (logtest? (-> *target* state-flags) (state-flags grabbed))) (process-release? *target*))
   (logclear! (-> self skel status) (janim-status inited))
   (set! (-> self skip-cut) #f)
+  (none))
+
+;; Custom intermission camera ownership.
+;;
+;; While the robot is frozen, do NOT leave the camera in cam-robotboss and do
+;; NOT let robotboss-always-trans immediately take it back. Return to the
+;; normal gameplay/base camera and suppress robotboss camera steering until the
+;; matching phase-release flag is received.
+(defbehavior robotboss-custom-freeze-camera robotboss ()
+  (robotboss-cut-cam-exit)
+  (set! *camera-look-through-other* 0)
+  (set! (-> self ignore-camera) #t)
+  (set! (-> self des-cam-entity) #f)
+  (set! (-> self use-interesting) #f)
+
+  ;; IMPORTANT: cam-robotboss makes ITSELF *camera-base-mode* when the boss
+  ;; fight camera starts.  Therefore changing to *camera-base-mode* here does
+  ;; not detach anything -- it just asks for cam-robotboss again.  Explicitly
+  ;; restore Jak's normal string camera while the robot is frozen.
+  (set! *camera-base-mode* cam-string)
+  (send-event *camera* 'point-of-interest #f)
+  (send-event *camera* 'clear-entity)
+  (send-event *camera* 'change-state cam-string 0)
+
+  ;; Do not blend from the boss camera's old pivot.  Rebuild the string camera
+  ;; immediately around Jak so the held robot cannot drag the camera's Y down.
+  (send-event *camera* 'teleport)
+  (none))
+
+;; The instant a frozen boss is released, give the fight camera back to the
+;; robot before entering the next authored upward-return state.
+(defbehavior robotboss-custom-resume-camera robotboss ()
+  (set! *camera-look-through-other* 0)
+  (set! (-> self ignore-camera) #f)
+  (set! (-> self des-cam-entity) #f)
+  (send-event *camera* 'point-of-interest #f)
+
+  ;; Restore boss-camera ownership immediately -- no transition period where
+  ;; cam-string and cam-robotboss can fight over the target.
+  (set! *camera-base-mode* cam-robotboss)
+  (send-event *camera* 'clear-entity)
+  (send-event *camera* 'change-state cam-robotboss 0)
+
+  ;; robotboss-position normally refreshes this pivot every frame.  During the
+  ;; freeze that function is intentionally paused, so seed cam-robotboss with a
+  ;; fresh pivot from the robot's CURRENT held position before the upward return.
+  (let ((s5-cam (-> self entity extra trans))
+        (gp-cam (new 'stack-no-clear 'vector)))
+    (vector-! gp-cam s5-cam (-> self root trans))
+    (set! (-> gp-cam y) 0.0)
+    (vector-normalize! gp-cam (the-as float 204800.0))
+    (set! (-> gp-cam y) 32768.0)
+    (vector+! gp-cam gp-cam s5-cam)
+    (send-event *camera* 'set-pivot gp-cam))
   (none))
 
 (defbehavior robotboss-cut-cam robotboss ((arg0 float) (arg1 float) (arg2 int))
@@ -71,7 +178,69 @@
          (+! (-> self valid-frames) 1)))))
   (none))
 
+;; The Final Boss blue eco vent is the arena actor linked at alts 11.
+;; Use its RETAIL event interface instead of modifying the global ecovent class:
+;;   *boss-activate-blue-eco* = #t -> 'show
+;;   *boss-activate-blue-eco* = #f -> 'hide
+;; This controls the vent's own blocked/wait states, so both particles and pickup
+;; collision follow the same boolean.
+(defbehavior robotboss-sync-blue-ecovent robotboss ()
+  (let ((a1-vent (new 'stack-no-clear 'event-message-block)))
+    (set! (-> a1-vent from) self)
+    (set! (-> a1-vent num-params) 0)
+    (set! (-> a1-vent message)
+          (if *boss-activate-blue-eco* 'show 'hide))
+    (let ((send-vent send-event-function)
+          (blue-vent (-> self alts 11)))
+      (send-vent (if blue-vent (-> blue-vent extra process)) a1-vent)))
+  (none))
+
 (defbehavior robotboss-always-trans robotboss ((arg0 (state robotboss)))
+  ;; Enforce the Final Boss vent (alts 11) through its retail show/hide events
+  ;; every frame before handling the robot presentation.
+  (robotboss-sync-blue-ecovent)
+
+  ;; HARD BOOLEAN OWNERSHIP OF THE BLUE ECO.
+  ;; This is enforced EVERY frame that robotboss-always-trans runs, including
+  ;; the frames immediately after the Blue part is destroyed and before the
+  ;; custom intermission state begins.  There is no one-shot/edge behavior:
+  ;;   #t -> Blue eco/glow is on.
+  ;;   #f -> Blue eco/glow is off and any existing glow tracker is killed.
+  (cond
+    (*boss-activate-blue-eco*
+     (when (not (-> self blue-smoke))
+       (let ((a1-blue (new 'stack-no-clear 'event-message-block)))
+         (set! (-> a1-blue from) self)
+         (set! (-> a1-blue num-params) 1)
+         (set! (-> a1-blue message) 'open)
+         (set! (-> a1-blue param 0) (the-as uint group-robotboss-blue-claw-glow))
+         (let ((send-blue send-event-function)
+               (blue-claw (-> self alts 3)))
+           (send-blue (if blue-claw (-> blue-claw extra process)) a1-blue)))
+       (let ((blue-piece (manipy-spawn (-> self root trans)
+                                        (-> self entity)
+                                        *robotboss-blueeco-sg*
+                                        #f
+                                        :to self)))
+         (send-event (ppointer->process (-> self parent)) 'flash 255.0)
+         (send-event (ppointer->process blue-piece) 'anim-mode 'play1)
+         (send-event (ppointer->process blue-piece) 'rot-quat (-> self root quat))
+         (send-event (ppointer->process blue-piece)
+                     'art-joint-anim
+                     "robotboss-blueeco-blue-last-hit"
+                     0))
+       (set! (-> self blue-smoke) #t)))
+    (else
+     ;; FALSE means FALSE.  Do this every frame so no vanilla state/event can
+     ;; leave the destroyed Blue component glowing behind our back.
+     (set! (-> self blue-smoke) #f)
+     (let ((blue-proc (-> self alts 3 extra process)))
+       (when (and blue-proc (type-type? (-> blue-proc type) ecoclaw))
+         (let ((blue-claw (the-as ecoclaw blue-proc)))
+           (set! (-> blue-claw particles 0 kind) #f)
+           (let ((blue-tracker (handle->process (-> blue-claw particles 0 tracker))))
+             (if blue-tracker (deactivate blue-tracker)))
+           (set! (-> blue-claw particles 0 tracker) (the-as handle #f)))))))
   (when (-> self blue-smoke)
     (let ((s5-0 (new 'stack-no-clear 'vector)))
       (vector<-cspace! s5-0 (joint-node robotboss-basic-lod0-jg blue_eco_piece))
@@ -255,6 +424,77 @@
                    :to
                    *entity-pool*)))
 
+;; Blue-only presentation used by the custom intermission.
+;; IMPORTANT: the Blue claw glow is NOT opened anywhere automatically anymore.
+;; This behavior is the ONLY place that may light it, and it is only called while
+;; *boss-activate-blue-eco* is #t.
+(defbehavior robotboss-custom-activate-blue-eco robotboss ()
+  ;; The boolean owns the linked Final Boss vent too.
+  (robotboss-sync-blue-ecovent)
+  (when (not (-> self blue-smoke))
+    ;; Turn on the actual Blue eco/claw glow that vanilla used to open
+    ;; automatically from robotboss-blue-wait :exit.
+    (let ((a1-0 (new 'stack-no-clear 'event-message-block)))
+      (set! (-> a1-0 from) self)
+      (set! (-> a1-0 num-params) 1)
+      (set! (-> a1-0 message) 'open)
+      (set! (-> a1-0 param 0) (the-as uint group-robotboss-blue-claw-glow))
+      (let ((t9-0 send-event-function)
+            (v1-0 (-> self alts 3)))
+        (t9-0 (if v1-0 (-> v1-0 extra process)) a1-0)))
+
+    ;; Keep the broken Blue eco presentation tied to the same explicit switch.
+    (let ((gp-0 (manipy-spawn (-> self root trans) (-> self entity) *robotboss-blueeco-sg* #f :to self)))
+      (send-event (ppointer->process (-> self parent)) 'flash 255.0)
+      (send-event (ppointer->process gp-0) 'anim-mode 'play1)
+      (send-event (ppointer->process gp-0) 'rot-quat (-> self root quat))
+      ;; og:preserve-this the zero passed here was missing in the original game,
+      ;; but is a bug that causes undefined behavior
+      (send-event (ppointer->process gp-0) 'art-joint-anim "robotboss-blueeco-blue-last-hit" 0))
+    (set! (-> self blue-smoke) #t))
+  (none))
+
+;; Hard-off path for the Blue glow.  ecoclaw's vanilla 'open event has no matching
+;; close event for particles[0], so merely setting the global false is not enough
+;; once the glow has been opened.  Stop its tracker and clear its kind explicitly.
+(defbehavior robotboss-custom-deactivate-blue-eco robotboss ()
+  ;; FALSE immediately hides/blocks the linked Final Boss vent.
+  (robotboss-sync-blue-ecovent)
+  (set! (-> self blue-smoke) #f)
+  (let ((gp-0 (-> self alts 3 extra process)))
+    (when (and gp-0 (type-type? (-> gp-0 type) ecoclaw))
+      (let ((s5-0 (the-as ecoclaw gp-0)))
+        (set! (-> s5-0 particles 0 kind) #f)
+        (let ((a0-0 (handle->process (-> s5-0 particles 0 tracker))))
+          (if a0-0 (deactivate a0-0)))
+        (set! (-> s5-0 particles 0 tracker) (the-as handle #f)))))
+  (none))
+
+;; Spawn the REAL dark-eco bomb and make it reach its explosion sequence
+;; immediately.  countdown-time is literally 0.0.  The arcing-shot flight is
+;; kept at one frame instead of zero so the projectile setup never divides by a
+;; zero-duration trajectory.
+(defbehavior robotboss-custom-blue-bomb-explode-now robotboss ()
+  (+! (-> self children-spawned) 1)
+  (let ((gp-0 (new 'stack-no-clear 'vector)))
+    (let ((s4-0 (new 'stack-no-clear 'vector)))
+      (vector<-cspace! gp-0 (joint-node robotboss-basic-lod0-jg darkbombD))
+      (set! (-> s4-0 quad) (-> self entity extra trans quad))
+      (+! (-> s4-0 y) 32768.0)
+      (process-spawn darkecobomb gp-0 s4-0 61440.0 1 (the-as float 0.0) :to self))
+    (process-spawn part-tracker
+                   :init
+                   part-tracker-init
+                   group-robotboss-darkecobomb-launch
+                   300
+                   #f
+                   #f
+                   #f
+                   gp-0
+                   :to
+                   *entity-pool*))
+  (none))
+
 (defbehavior robotboss-bomb-handler robotboss ((arg0 process) (arg1 int) (arg2 symbol) (arg3 event-message-block))
   (local-vars (v0-0 object))
   (case arg2
@@ -264,7 +504,7 @@
      (let ((a1-1 (new 'stack-no-clear 'event-message-block)))
        (set! (-> a1-1 from) self)
        (set! (-> a1-1 num-params) 0)
-       (set! (-> a1-1 message) 'hide)
+       (set! (-> a1-1 message) (if *boss-activate-blue-eco* 'show 'hide))
        (let ((t9-0 send-event-function)
              (v1-4 (-> self alts 11)))
          (t9-0 (if v1-4 (-> v1-4 extra process)) a1-1)))
@@ -443,14 +683,16 @@
           (set! (-> self white-eco) (ppointer->handle (process-spawn light-eco-mother (-> self entity) gp-0 :to self))))))
   :code
     (behavior ()
-      (let ((a1-0 (new 'stack-no-clear 'event-message-block)))
-        (set! (-> a1-0 from) self)
-        (set! (-> a1-0 num-params) 1)
-        (set! (-> a1-0 message) 'open)
-        (set! (-> a1-0 param 0) (the-as uint group-robotboss-blue-claw-glow))
-        (let ((t9-0 send-event-function)
-              (v1-4 (-> self alts 3)))
-          (t9-0 (if v1-4 (-> v1-4 extra process)) a1-0)))
+      ;; Blue claw glow is owned ONLY by *boss-activate-blue-eco*.
+      (when *boss-activate-blue-eco*
+        (let ((a1-0 (new 'stack-no-clear 'event-message-block)))
+          (set! (-> a1-0 from) self)
+          (set! (-> a1-0 num-params) 1)
+          (set! (-> a1-0 message) 'open)
+          (set! (-> a1-0 param 0) (the-as uint group-robotboss-blue-claw-glow))
+          (let ((t9-0 send-event-function)
+                (v1-4 (-> self alts 3)))
+            (t9-0 (if v1-4 (-> v1-4 extra process)) a1-0))))
       (let ((a1-1 (new 'stack-no-clear 'event-message-block)))
         (set! (-> a1-1 from) self)
         (set! (-> a1-1 num-params) 1)
@@ -529,6 +771,150 @@
         (((task-status unknown)) (go robotboss-daxter-sacrifice-movie))
         (else (go robotboss-yellow-dark-bomb-wait)))))
 
+(defstate robotboss-custom-defeat-movie (robotboss)
+  :enter
+    (behavior ()
+      (set! *boss-defeated* #f)
+      (set! *boss-ending-custom-audio-started?* #f)
+      (set-time! (-> self state-time))
+      (logior! (-> self draw status) (draw-status hidden))
+
+      ;; Pre-position the movie immediately before the explosion.  Holding at
+      ;; 268 for a few frames lets the spooled movie rapidly discard earlier art
+      ;; parts without repeatedly spawning the explosion particle.
+      (set! *boss-movie-skip-frame* 268.0)
+      (set-blackout-frames (seconds 0.25))
+
+      ;; Retail advances finalboss-movies from `unknown` before playing the actual
+      ;; victory movie.  Without this, sage-finalboss selects
+      ;; green-sagecage-daxter-sacrifice (the WRONG cutscene).  Advancing the
+      ;; task here selects need-introduction -> green-sagecage-outro-beat-boss-a:
+      ;; Jak's light-eco blast, robot explosion, spinning head, and silo close.
+      (close-specific-task! (game-task finalboss-movies) (task-status unknown))
+
+      ;; Birth the same sage-finalboss actor retail uses for that victory movie.
+      ;; We still intentionally skip robotboss-white-eco-movie/light-eco pickup.
+      (entity-birth-no-kill (-> self alts 5))
+      (let ((play-ending (new 'stack-no-clear 'event-message-block)))
+        (set! (-> play-ending from) self)
+        (set! (-> play-ending num-params) 0)
+        (set! (-> play-ending message) 'play-anim)
+        (let ((send-ending send-event-function)
+              (ending-actor (-> self alts 5)))
+          (send-ending
+            (if ending-actor (-> ending-actor extra process))
+            play-ending)))
+
+      ;; CUSTOM ENDING AUDIO ONLY.
+      ;; play-anim starts the retail movie actor, which normally also starts its
+      ;; STR audio.  Stop that stream immediately so it never becomes the audible
+      ;; soundtrack for our scrubbed victory sequence.  A second stop is issued
+      ;; once movie? confirms ownership below, covering either RPC ordering.
+      (str-play-stop "green-sagecage-outro-beat-boss-a"))
+
+  :exit
+    (behavior ()
+      (set! *boss-movie-skip-frame* -1.0)
+      (set! *boss-ending-custom-audio-started?* #f)
+      (set-blackout-frames 0))
+
+  :trans
+    (behavior ()
+      ;; Give the movie a short hidden preload at frame 268, then reveal it at
+      ;; frame 269 and advance the authored timeline at 30 movie frames/sec.
+      (cond
+        ((not (time-elapsed? (-> self state-time) (seconds 0.20)))
+         (set-blackout-frames (seconds 0.05)))
+        (else
+         (when (< *boss-movie-skip-frame* 269.0)
+           (set! *boss-movie-skip-frame* 269.0)
+           (set-blackout-frames 0)
+
+           ;; The custom WAV is authored to begin at this exact cutscene beat.
+           ;; Use the user's live SFX-volume setting, just like the fishing mod's
+           ;; other play-sound-file calls.
+           (when (not *boss-ending-custom-audio-started?*)
+             (set! *boss-ending-custom-audio-started?* #t)
+             (play-sound-file
+               "end-cutscene-sound.wav"
+               (the int (-> *setting-control* current sfx-volume)))))
+         (when (movie?)
+           (+! *boss-movie-skip-frame*
+               (* 30.0 (-> *display* seconds-per-frame)))))))
+
+  :code
+    (behavior ()
+      ;; Wait for the ending movie to take ownership, then let it run from the
+      ;; explosion onward.  Once it ends, clean up the real gameplay robot just
+      ;; like retail does after the white-eco pickup handoff.
+      (until (movie?)
+        (suspend))
+
+      ;; Confirm the vanilla STR is silent after the movie actor has actually
+      ;; taken ownership.  From here onward the ONLY ending soundtrack we start
+      ;; is end-cutscene-sound.wav at authored frame 269.
+      (str-play-stop "green-sagecage-outro-beat-boss-a")
+
+      (while (movie?)
+        (suspend))
+      (set! *boss-movie-skip-frame* -1.0)
+      (set-blackout-frames 0)
+      (cleanup-for-death self)
+      (deactivate self))
+
+  :post transform-post)
+
+
+(defstate robotboss-custom-final-idle (robotboss)
+  :event robotboss-handler
+
+  :enter
+    (behavior ()
+      (set! (-> self old-loc quad) (-> self desired-loc quad))
+      (set-vector! (-> self desired-loc) 13653.333 77824.0 491520.0 1.0)
+      (set! (-> self loc-t) 0.0)
+      (set! (-> self loc-t-start) (-> *display* game-frame-counter))
+      (set! (-> self loc-t-duration) (seconds 3))
+      (set! (-> self desired-pool-y) -18432.0))
+
+  :trans
+    (behavior ()
+      (robotboss-always-trans (the-as (state robotboss) #f))
+      (cond
+        (*boss-defeated*
+         (go robotboss-custom-defeat-movie))
+        (else
+         (robotboss-position))))
+
+  :code
+    (behavior ()
+      ;; Continue only the UPWARD remainder of the no-yellow reveal that was
+      ;; frozen at 25 percent, while the root moves back to the aerial position.
+      (ja-no-eval :num! (seek!))
+      (while (not (ja-done? 0))
+        (suspend)
+        (ja-eval))
+
+      (when (not (ja-group? robotboss-idle-hover-no-yellow-ja))
+        (ja-channel-push! 1 (seconds 0.2))
+        (ja :group! robotboss-idle-hover-no-yellow-ja))
+
+      (loop
+        (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
+        (until (ja-done? 0)
+          (suspend)
+          (ja :num! (seek!)))))
+
+  :post transform-post)
+
+;; Custom defeat handoff.  The retail light-eco acquisition sequence is bypassed.
+;; *boss-movie-skip-frame* is a mod-local movie scrub value consumed by the
+;; current-str-pos hook above; driving it forward makes the existing ending animation begin
+;; at the authored robot-explosion beat instead of showing frames 0..268.
+;;
+;; The attached ending cutscene's command list activates group-robotboss-explode
+;; at authored frame 269, so that is the exact starting point used here.
+
 (defstate robotboss-yellow-dark-bomb (robotboss)
   :enter
     (behavior ()
@@ -538,31 +924,72 @@
       (set! (-> self loc-t-start) (-> *display* game-frame-counter))
       (set! (-> self loc-t-duration) (seconds 4))
       (set! (-> self desired-pool-y) -16384.0)
+      (set! *boss-waiting-for-5th-phase* #f)
       (play-ambient (-> self ambient) "GOL-AM01" #t (the-as vector #f)))
+
   :trans
     (behavior ()
+      ;; Absolutely no finalbosscam-white-eco spool and no white-eco movie here.
       (robotboss-always-trans (the-as (state robotboss) #f))
-      (spool-push *art-control* "finalbosscam-white-eco" 0 self (the-as float -1.0))
-      (if (>= (-> self loc-t) 1.0) (go robotboss-white-eco-movie))
-      (robotboss-position))
+      (cond
+        (*boss-waiting-for-5th-phase*
+         (+! (-> self loc-t-start) 1))
+        (else
+         (robotboss-position))))
+
   :code
     (behavior ()
-      (ja-channel-push! 1 (seconds 0.2))
-      (ja :group! robotboss-dark-reveal-no-yellow-ja)
-      (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-      (until (ja-done? 0)
-        (suspend)
-        (ja :num! (seek!)))
-      (when (not (ja-group? robotboss-idle-hover-no-yellow-ja))
+      (let ((hold-frame 0.0)
+            (held-loc (new 'stack-no-clear 'vector)))
         (ja-channel-push! 1 (seconds 0.2))
-        (ja :group! robotboss-idle-hover-no-yellow-ja))
-      (loop
-        (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-        (until (ja-done? 0)
+        (ja-no-eval
+          :group! robotboss-dark-reveal-no-yellow-ja
+          :num! (seek!)
+          :frame-num 0.0)
+
+        (suspend)
+        (ja :num! (seek!))
+        (set! hold-frame (* 0.25 (the float (ja-num-frames 0))))
+
+        (until
+          (or
+            (>= (ja-frame-num 0) hold-frame)
+            (ja-done? 0))
           (suspend)
-          (ja :num! (seek!)))))
+          (ja :num! (seek!)))
+
+        (vector-lerp!
+          held-loc
+          (-> self old-loc)
+          (-> self desired-loc)
+          (ease-loc-t self))
+
+        (set! *boss-waiting-for-5th-phase* #t)
+
+        (robotboss-custom-freeze-camera)
+
+        (while (not *boss-enter-5th-phase*)
+          (ja
+            :group! robotboss-dark-reveal-no-yellow-ja
+            :num-func num-func-identity
+            :frame-num hold-frame)
+          (suspend))
+
+        ;; Phase 5 does NOT launch the retail light-eco setup.  Start the robot's
+        ;; final upward motion from the exact frozen position instead.
+        (set! *boss-waiting-for-5th-phase* #f)
+        (set! *boss-enter-5th-phase* #f)
+        (set! (-> self ignore-camera) #f)
+        (set! (-> self des-cam-entity) #f)
+        (set! (-> self desired-loc quad) (-> held-loc quad))
+        (robotboss-custom-resume-camera)
+        (go robotboss-custom-final-idle)))
+
   :post transform-post)
 
+;; After Phase 5 is released, the real gameplay robot rises back to its normal
+;; airborne height and then remains in the authored no-yellow idle forever.
+;; Nothing in this state can create light eco or enter the retail white-eco movie.
 (defbehavior robotboss-yellowshot robotboss ()
   (+! (-> self children-spawned) 1)
   (let ((gp-0 (new 'stack-no-clear 'vector)))
@@ -772,10 +1199,14 @@
       (robotboss-position))
   :code
     (behavior ()
-      (ja-no-eval :num! (seek!))
-      (while (not (ja-done? 0))
-        (suspend)
-        (ja-eval))
+      (cond
+        (*boss-custom-yellow-return*
+         (set! *boss-custom-yellow-return* #f))
+        (else
+         (ja-no-eval :num! (seek!))
+         (while (not (ja-done? 0))
+           (suspend)
+           (ja-eval))))
       (ja-channel-push! 1 (seconds 0.2))
       (ja :group! robotboss-dark-return-after-red-ja)
       (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
@@ -847,28 +1278,68 @@
       (set! (-> self loc-t) 0.0)
       (set! (-> self loc-t-start) (-> *display* game-frame-counter))
       (set! (-> self loc-t-duration) (seconds 3))
-      (set! (-> self desired-pool-y) -20480.0))
+      (set! (-> self desired-pool-y) -20480.0)
+      (set! *boss-waiting-for-4th-phase* #f)
+      (set! *boss-custom-yellow-return* #f))
+
   :trans
     (behavior ()
-      (robotboss-always-trans robotboss-red-dark-bomb-wait)
-      (robotboss-position)
-      (if (>= (-> self loc-t) 1.0) (go robotboss-red-dark-bomb-wait)))
+      ;; Never enter robotboss-red-dark-bomb-wait: that is the Red bomb phase.
+      (robotboss-always-trans (the-as (state robotboss) #f))
+      (cond
+        (*boss-waiting-for-4th-phase*
+         (+! (-> self loc-t-start) 1))
+        (else
+         (robotboss-position))))
+
   :code
     (behavior ()
-      (ja-channel-push! 1 (seconds 0.2))
-      (ja :group! robotboss-dark-reveal-no-red-ja)
-      (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-      (until (ja-done? 0)
-        (suspend)
-        (ja :num! (seek!)))
-      (when (not (ja-group? robotboss-idle-hover-no-red-ja))
+      (let ((hold-frame 0.0)
+            (held-loc (new 'stack-no-clear 'vector)))
         (ja-channel-push! 1 (seconds 0.2))
-        (ja :group! robotboss-idle-hover-no-red-ja))
-      (loop
-        (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-        (until (ja-done? 0)
+        (ja-no-eval
+          :group! robotboss-dark-reveal-no-red-ja
+          :num! (seek!)
+          :frame-num 0.0)
+
+        (suspend)
+        (ja :num! (seek!))
+        (set! hold-frame (* 0.25 (the float (ja-num-frames 0))))
+
+        (until
+          (or
+            (>= (ja-frame-num 0) hold-frame)
+            (ja-done? 0))
           (suspend)
-          (ja :num! (seek!)))))
+          (ja :num! (seek!)))
+
+        (vector-lerp!
+          held-loc
+          (-> self old-loc)
+          (-> self desired-loc)
+          (ease-loc-t self))
+
+        (set! *boss-waiting-for-4th-phase* #t)
+
+        (robotboss-custom-freeze-camera)
+
+        (while (not *boss-enter-4th-phase*)
+          (ja
+            :group! robotboss-dark-reveal-no-red-ja
+            :num-func num-func-identity
+            :frame-num hold-frame)
+          (suspend))
+
+        ;; Skip Red's bomb state and begin Yellow's authored return.
+        (set! *boss-waiting-for-4th-phase* #f)
+        (set! *boss-enter-4th-phase* #f)
+        (set! (-> self ignore-camera) #f)
+        (set! (-> self des-cam-entity) #f)
+        (set! (-> self desired-loc quad) (-> held-loc quad))
+        (robotboss-custom-resume-camera)
+        (set! *boss-custom-yellow-return* #t)
+        (go robotboss-yellow)))
+
   :post transform-post)
 
 (deftype redshot-launch-info (structure)
@@ -999,7 +1470,7 @@
         (set! (-> a1-2 from) self)
         (set! (-> a1-2 num-params) 1)
         (set! (-> a1-2 message) 'open)
-        (set! (-> a1-2 param 0) (the-as uint 0.3))
+        (set! (-> a1-2 param 0) (the-as uint 0.4))
         (let ((t9-2 send-event-function)
               (v1-17 (-> self alts 0)))
           (t9-2 (if v1-17 (-> v1-17 extra process)) a1-2)))
@@ -1011,7 +1482,7 @@
       (let ((a1-3 (new 'stack-no-clear 'event-message-block)))
         (set! (-> a1-3 from) self)
         (set! (-> a1-3 num-params) 0)
-        (set! (-> a1-3 message) 'show)
+        (set! (-> a1-3 message) (if *boss-activate-blue-eco* 'show 'hide))
         (let ((t9-4 send-event-function)
               (v1-27 (-> self alts 11)))
           (t9-4 (if v1-27 (-> v1-27 extra process)) a1-3))))
@@ -1025,7 +1496,7 @@
          (let ((a1-0 (new 'stack-no-clear 'event-message-block)))
            (set! (-> a1-0 from) self)
            (set! (-> a1-0 num-params) 0)
-           (set! (-> a1-0 message) 'show)
+           (set! (-> a1-0 message) (if *boss-activate-blue-eco* 'show 'hide))
            (let ((t9-3 send-event-function)
                  (v1-3 (-> self alts 11)))
              (t9-3 (if v1-3 (-> v1-3 extra process)) a1-0)))
@@ -1137,10 +1608,14 @@
       (robotboss-position))
   :code
     (behavior ()
-      (ja-no-eval :num! (seek!))
-      (while (not (ja-done? 0))
-        (suspend)
-        (ja-eval))
+      (cond
+        (*boss-custom-red-return*
+         (set! *boss-custom-red-return* #f))
+        (else
+         (ja-no-eval :num! (seek!))
+         (while (not (ja-done? 0))
+           (suspend)
+           (ja-eval))))
       (ja-channel-push! 1 (seconds 0.2))
       (ja :group! robotboss-dark-return-after-green-ja)
       (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
@@ -1208,28 +1683,70 @@
       (set! (-> self loc-t-start) (-> *display* game-frame-counter))
       (set! (-> self loc-t-duration) (seconds 3))
       (set! (-> self desired-pool-y) -24576.0)
+      (set! *boss-waiting-for-3rd-phase* #f)
+      (set! *boss-custom-red-return* #f)
       (play-ambient (-> self ambient) "MAI-AM01" #t (the-as vector #f)))
+
   :trans
     (behavior ()
-      (robotboss-always-trans robotboss-green-dark-bomb-wait)
-      (robotboss-position)
-      (if (>= (-> self loc-t) 1.0) (go robotboss-green-dark-bomb-wait)))
+      ;; Never enter robotboss-green-dark-bomb-wait: that is the Green bomb phase.
+      (robotboss-always-trans (the-as (state robotboss) #f))
+      (cond
+        (*boss-waiting-for-3rd-phase*
+         (+! (-> self loc-t-start) 1))
+        (else
+         (robotboss-position))))
+
   :code
     (behavior ()
-      (ja-channel-push! 1 (seconds 0.2))
-      (ja :group! robotboss-dark-reveal-green-ja)
-      (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-      (until (ja-done? 0)
-        (suspend)
-        (ja :num! (seek!)))
-      (when (not (ja-group? robotboss-idle-hover-no-blue-ja))
+      (let ((hold-frame 0.0)
+            (held-loc (new 'stack-no-clear 'vector)))
         (ja-channel-push! 1 (seconds 0.2))
-        (ja :group! robotboss-idle-hover-no-blue-ja))
-      (loop
-        (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-        (until (ja-done? 0)
+        (ja-no-eval
+          :group! robotboss-dark-reveal-green-ja
+          :num! (seek!)
+          :frame-num 0.0)
+
+        (suspend)
+        (ja :num! (seek!))
+        (set! hold-frame (* 0.25 (the float (ja-num-frames 0))))
+
+        (until
+          (or
+            (>= (ja-frame-num 0) hold-frame)
+            (ja-done? 0))
           (suspend)
-          (ja :num! (seek!)))))
+          (ja :num! (seek!)))
+
+        (vector-lerp!
+          held-loc
+          (-> self old-loc)
+          (-> self desired-loc)
+          (ease-loc-t self))
+
+        (set! *boss-waiting-for-3rd-phase* #t)
+
+        ;; Give control back to the gameplay camera during the custom intermission.
+        (robotboss-custom-freeze-camera)
+
+        (while (not *boss-enter-3rd-phase*)
+          (ja
+            :group! robotboss-dark-reveal-green-ja
+            :num-func num-func-identity
+            :frame-num hold-frame)
+          (suspend))
+
+        ;; Skip Green's bomb state and begin Red's authored return from the exact
+        ;; location where the down/reveal animation was frozen.
+        (set! *boss-waiting-for-3rd-phase* #f)
+        (set! *boss-enter-3rd-phase* #f)
+        (set! (-> self ignore-camera) #f)
+        (set! (-> self des-cam-entity) #f)
+        (set! (-> self desired-loc quad) (-> held-loc quad))
+        (robotboss-custom-resume-camera)
+        (set! *boss-custom-red-return* #t)
+        (go robotboss-red)))
+
   :post transform-post)
 
 (defbehavior robotboss-greenshot robotboss ((arg0 vector) (arg1 float) (arg2 int) (arg3 symbol))
@@ -1267,7 +1784,7 @@
          (let ((a1-2 (new 'stack-no-clear 'event-message-block)))
            (set! (-> a1-2 from) self)
            (set! (-> a1-2 num-params) 0)
-           (set! (-> a1-2 message) 'show)
+           (set! (-> a1-2 message) (if *boss-activate-blue-eco* 'show 'hide))
            (let ((t9-2 send-event-function)
                  (v1-5 (-> self alts 11)))
              (t9-2 (if v1-5 (-> v1-5 extra process)) a1-2))))
@@ -1307,7 +1824,7 @@
         (set! (-> a1-2 from) self)
         (set! (-> a1-2 num-params) 1)
         (set! (-> a1-2 message) 'open)
-        (set! (-> a1-2 param 0) (the-as uint 0.2))
+        (set! (-> a1-2 param 0) (the-as uint 0.4))
         (let ((t9-2 send-event-function)
               (v1-17 (-> self alts 0)))
           (t9-2 (if v1-17 (-> v1-17 extra process)) a1-2)))
@@ -1318,7 +1835,7 @@
       (let ((a1-3 (new 'stack-no-clear 'event-message-block)))
         (set! (-> a1-3 from) self)
         (set! (-> a1-3 num-params) 0)
-        (set! (-> a1-3 message) 'show)
+        (set! (-> a1-3 message) (if *boss-activate-blue-eco* 'show 'hide))
         (let ((t9-4 send-event-function)
               (v1-27 (-> self alts 11)))
           (t9-4 (if v1-27 (-> v1-27 extra process)) a1-3))))
@@ -1400,10 +1917,17 @@
       (robotboss-position))
   :code
     (behavior ()
-      (ja-no-eval :num! (seek!))
-      (while (not (ja-done? 0))
-        (suspend)
-        (ja-eval))
+      ;; Vanilla normally finishes whatever animation the bomb state left active
+      ;; before starting dark-return.  The custom Blue intermission deliberately
+      ;; freezes dark-reveal mid-animation, so do NOT resume its upward half here.
+      (cond
+        (*boss-custom-green-return*
+         (set! *boss-custom-green-return* #f))
+        (else
+         (ja-no-eval :num! (seek!))
+         (while (not (ja-done? 0))
+           (suspend)
+           (ja-eval))))
       (ja-channel-push! 1 (seconds 0.2))
       (ja :group! robotboss-dark-return-ja)
       (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
@@ -1433,7 +1957,12 @@
   :trans
     (behavior ()
       (robotboss-always-trans robotboss-green)
-      (if (and (< (-> self children-spawned) 0) (or (not *target*) (!= (-> *target* control mod-surface name) 'launch-jump)))
+      (if
+        (and
+          (< (-> self children-spawned) 0)
+          (or
+            (not *target*)
+            (!= (-> *target* control mod-surface name) 'launch-jump)))
         (go robotboss-green))
       (robotboss-position))
   :code
@@ -1446,28 +1975,47 @@
       (ja :group! robotboss-dark-shoot-ja)
       (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
       (until (ja-done? 0)
-        (when (and (>= (ja-frame-num 0) 15.0) (< (-> self children-spawned) 1))
-          (robotboss-darkecobomb (new 'static 'vector :y 32768.0) (the-as float 3600.0))
+        (when
+          (and
+            (>= (ja-frame-num 0) 15.0)
+            (< (-> self children-spawned) 1))
+          (robotboss-darkecobomb
+            (new 'static 'vector :y 32768.0)
+            (the-as float 3600.0))
           (set! (-> self des-cam-entity) "camera-365")
-          (play-ambient (-> self ambient) "MAI-AM04" #t (the-as vector #f)))
+          (play-ambient
+            (-> self ambient)
+            "MAI-AM04"
+            #t
+            (the-as vector #f)))
         (suspend)
         (ja :num! (seek!)))
       (loop
         (cond
-          ((and *target* (< (+ 81920.0 (-> self entity extra trans y)) (-> (target-pos 0) y)))
-           (when (not (ja-group? robotboss-idle-hover-lookup-no-blue-ja))
-             (ja-channel-push! 1 (seconds 0.8))
-             (ja :group! robotboss-idle-hover-lookup-no-blue-ja)))
+          ((and
+              *target*
+              (<
+                (+ 81920.0 (-> self entity extra trans y))
+                (-> (target-pos 0) y)))
+            (when
+              (not (ja-group? robotboss-idle-hover-lookup-no-blue-ja))
+              (ja-channel-push! 1 (seconds 0.8))
+              (ja :group! robotboss-idle-hover-lookup-no-blue-ja)))
           ((not (ja-group? robotboss-idle-hover-no-blue-ja))
-           (ja-channel-push! 1 (seconds 0.2))
-           (ja :group! robotboss-idle-hover-no-blue-ja)))
-        (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
+            (ja-channel-push! 1 (seconds 0.2))
+            (ja :group! robotboss-idle-hover-no-blue-ja)))
+        (ja-no-eval
+          :group! (ja-group)
+          :num! (seek!)
+          :frame-num 0.0)
         (until (ja-done? 0)
           (suspend)
           (ja :num! (seek!)))))
   :post transform-post)
 
 (defstate robotboss-blue-dark-bomb (robotboss)
+  :event robotboss-bomb-handler
+
   :enter
     (behavior ()
       (set! (-> self old-loc quad) (-> self desired-loc quad))
@@ -1475,28 +2023,142 @@
       (set! (-> self loc-t) 0.0)
       (set! (-> self loc-t-start) (-> *display* game-frame-counter))
       (set! (-> self loc-t-duration) (seconds 3))
-      (set! (-> self desired-pool-y) -28672.0))
+      (set! (-> self desired-pool-y) -28672.0)
+      (set! (-> self children-spawned) 0)
+
+      ;; Fresh intermission: nothing is allowed to fire automatically.
+      (set! *boss-waiting-for-2nd-phase* #f)
+      ;; Do NOT write *boss-activate-blue-eco* here.  It is a persistent boolean
+      ;; owned by custom code: #t always means on, #f always means off.
+      (set! *boss-trigger-blue-bomb-explosion* #f)
+      (set! *boss-custom-green-return* #f)
+
+      ;; Enforce the exact boolean immediately on state entry too.
+      (cond
+        (*boss-activate-blue-eco*
+         (robotboss-custom-activate-blue-eco))
+        (else
+         (robotboss-custom-deactivate-blue-eco)))
+      (robotboss-yellow-eco-off))
+
   :trans
     (behavior ()
-      (robotboss-always-trans robotboss-blue-dark-bomb-wait)
-      (robotboss-position)
-      (if (>= (-> self loc-t) 1.0) (go robotboss-blue-dark-bomb-wait)))
+      ;; We intentionally do NOT auto-enter robotboss-blue-dark-bomb-wait.
+      ;; That state owns the vanilla bomb shot, and this custom transition skips it.
+      (robotboss-always-trans (the-as (state robotboss) #f))
+
+      (cond
+        (*boss-waiting-for-2nd-phase*
+         ;; Freeze the root interpolation clock on the same frame as the skeleton.
+         (+! (-> self loc-t-start) 1))
+        (else
+         (robotboss-position))))
+
   :code
     (behavior ()
-      (ja-channel-push! 1 (seconds 0.2))
-      (ja :group! robotboss-dark-reveal-ja)
-      (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-      (until (ja-done? 0)
-        (suspend)
-        (ja :num! (seek!)))
-      (when (not (ja-group? robotboss-idle-hover-no-blue-ja))
+      (let ((hold-frame 0.0)
+            (held-loc (new 'stack-no-clear 'vector)))
         (ja-channel-push! 1 (seconds 0.2))
-        (ja :group! robotboss-idle-hover-no-blue-ja))
-      (loop
-        (ja-no-eval :group! (ja-group) :num! (seek!) :frame-num 0.0)
-        (until (ja-done? 0)
+
+        ;; Start the authored down/up reveal animation.
+        (ja-no-eval
+          :group! robotboss-dark-reveal-ja
+          :num! (seek!)
+          :frame-num 0.0)
+
+        ;; Let the group become current, then stop safely inside its DOWNWARD
+        ;; section.  This is the exact pose that remains clamped during custom play.
+        (suspend)
+        (ja :num! (seek!))
+        (set! hold-frame (* 0.25 (the float (ja-num-frames 0))))
+
+        (until
+          (or
+            (>= (ja-frame-num 0) hold-frame)
+            (ja-done? 0))
           (suspend)
-          (ja :num! (seek!)))))
+          (ja :num! (seek!)))
+
+        ;; Capture the logical robot position at the SAME instant as the pose.
+        ;; This prevents robotboss-green from snapping to the full bomb position
+        ;; when the custom intermission eventually releases.
+        (vector-lerp!
+          held-loc
+          (-> self old-loc)
+          (-> self desired-loc)
+          (ease-loc-t self))
+
+        ;; From here on, BOTH skeleton and root are paused.
+        (set! *boss-waiting-for-2nd-phase* #t)
+
+        ;; Restore normal fight camera while custom content runs.
+        (robotboss-custom-freeze-camera)
+
+        ;; Hold until the phase-release command arrives.  Blue eco is a persistent
+        ;; state controlled directly by *boss-activate-blue-eco*.  The bomb remains
+        ;; an independent one-shot command.  Neither is tied to the waiting flag.
+        (while (not *boss-enter-2nd-phase*)
+          ;; Blue eco is a STATE, not a one-shot command:
+          ;;   #f = it must remain off
+          ;;   #t = activate it (once) and keep the global true while active.
+          ;; Do NOT consume/reset *boss-activate-blue-eco* here.
+          (cond
+            (*boss-activate-blue-eco*
+             (robotboss-custom-activate-blue-eco))
+            (else
+             (robotboss-custom-deactivate-blue-eco)))
+
+          ;; The bomb trigger is intentionally still a one-shot command.
+          (when *boss-trigger-blue-bomb-explosion*
+            (set! *boss-trigger-blue-bomb-explosion* #f)
+            (robotboss-custom-blue-bomb-explode-now))
+
+          (ja
+            :group! robotboss-dark-reveal-ja
+            :num-func num-func-identity
+            :frame-num hold-frame)
+          (suspend))
+
+        ;; Honor flags that change on the exact frame the phase is released.
+        ;; Blue eco remains stateful; only the bomb command is consumed.
+        (cond
+          (*boss-activate-blue-eco*
+           (robotboss-custom-activate-blue-eco))
+          (else
+           (robotboss-custom-deactivate-blue-eco)))
+        (when *boss-trigger-blue-bomb-explosion*
+          (set! *boss-trigger-blue-bomb-explosion* #f)
+          (robotboss-custom-blue-bomb-explode-now))
+
+        ;; *boss-enter-2nd-phase* has now been set.  During the custom intermission
+        ;; the silo is held fully open at 0.4; return it to the original Phase 1
+        ;; door position (0.1) before the robot rises into Green.
+        (let ((silo-reset (new 'stack-no-clear 'event-message-block)))
+          (set! (-> silo-reset from) self)
+          (set! (-> silo-reset num-params) 1)
+          (set! (-> silo-reset message) 'open)
+          (set! (-> silo-reset param 0) (the-as uint 0.1))
+          (let ((silo-send send-event-function)
+                (silo-alt (-> self alts 0)))
+            (silo-send (if silo-alt (-> silo-alt extra process)) silo-reset)))
+
+        ;; Release directly into vanilla Green's RETURN state.  Do not resume the
+        ;; second half of dark-reveal and do not enter the vanilla Blue bomb state.
+        ;; robotboss-green then rises normally and transitions to robotboss-green-wait,
+        ;; which is the vanilla enemy-spawning phase.
+        (set! *boss-waiting-for-2nd-phase* #f)
+        (set! *boss-enter-2nd-phase* #f)
+        (set! (-> self ignore-camera) #f)
+        (set! (-> self des-cam-entity) #f)
+
+        ;; Green's :enter copies desired-loc into old-loc, so replace desired-loc
+        ;; with the exact held location first.  That makes the return start here
+        ;; rather than snapping to the full bomb/down position.
+        (set! (-> self desired-loc quad) (-> held-loc quad))
+        (robotboss-custom-resume-camera)
+        (set! *boss-custom-green-return* #t)
+        (go robotboss-green)))
+
   :post transform-post)
 
 (defbehavior robotboss-blue-beam robotboss ((arg0 int) (arg1 symbol))
@@ -1617,7 +2279,7 @@
   (let ((a1-0 (new 'stack-no-clear 'event-message-block)))
     (set! (-> a1-0 from) self)
     (set! (-> a1-0 num-params) 0)
-    (set! (-> a1-0 message) 'show)
+    (set! (-> a1-0 message) (if *boss-activate-blue-eco* 'show 'hide))
     (let ((t9-1 send-event-function)
           (v1-1 (-> self alts 11)))
       (t9-1 (if v1-1 (-> v1-1 extra process)) a1-0))))
@@ -1631,7 +2293,7 @@
       (let ((a1-1 (new 'stack-no-clear 'event-message-block)))
         (set! (-> a1-1 from) self)
         (set! (-> a1-1 num-params) 0)
-        (set! (-> a1-1 message) 'hide)
+        (set! (-> a1-1 message) (if *boss-activate-blue-eco* 'show 'hide))
         (let ((t9-1 send-event-function)
               (v1-3 (-> self alts 11)))
           (t9-1 (if v1-3 (-> v1-3 extra process)) a1-1)))
@@ -1641,19 +2303,16 @@
   :exit
     (behavior ()
       (let ((a0-1 (handle->process (-> self shot-attractor)))) (if a0-1 (deactivate a0-1)))
-      (let ((a1-1 (new 'stack-no-clear 'event-message-block)))
-        (set! (-> a1-1 from) self)
-        (set! (-> a1-1 num-params) 1)
-        (set! (-> a1-1 message) 'open)
-        (set! (-> a1-1 param 0) (the-as uint group-robotboss-blue-claw-glow))
-        (let ((t9-1 send-event-function)
-              (v1-10 (-> self alts 3)))
-          (t9-1 (if v1-10 (-> v1-10 extra process)) a1-1)))
+      ;; Vanilla opened group-robotboss-blue-claw-glow here immediately after
+      ;; the Blue part was destroyed.  That automatic activation is intentionally
+      ;; removed.  *boss-activate-blue-eco* is now the sole owner of this glow.
+      (when (not *boss-activate-blue-eco*)
+        (robotboss-custom-deactivate-blue-eco))
       (let ((a1-2 (new 'stack-no-clear 'event-message-block)))
         (set! (-> a1-2 from) self)
         (set! (-> a1-2 num-params) 1)
         (set! (-> a1-2 message) 'open)
-        (set! (-> a1-2 param 0) (the-as uint 0.1))
+        (set! (-> a1-2 param 0) (the-as uint 0.4))
         (let ((t9-2 send-event-function)
               (v1-17 (-> self alts 0)))
           (t9-2 (if v1-17 (-> v1-17 extra process)) a1-2)))
@@ -1665,7 +2324,14 @@
       (if (nonzero? (-> self looping-sound 0)) (stop! (-> self looping-sound 0)))
       (if (nonzero? (-> self looping-sound 1)) (stop! (-> self looping-sound 1)))
       (robotboss-set-dda)
-      (robotboss-cut-cam-exit))
+      (robotboss-cut-cam-exit)
+      ;; The roar cut is over.  Hand control back through the camera state
+      ;; system so the downward spin begins on the normal robot-boss camera.
+      (set! *camera-look-through-other* 0)
+      (send-event *camera* 'point-of-interest #f)
+      (when (not (send-event *camera* 'query-state cam-robotboss))
+        (send-event *camera* 'change-state cam-robotboss (seconds 0.25)))
+      (send-event *camera* 'clear-entity))
   :trans
     (behavior ()
       (robotboss-always-trans robotboss-blue-dark-bomb)
@@ -1679,16 +2345,14 @@
          (ja-channel-push! 1 (seconds 0.1))
          (ja :group! robotboss-blue-last-hit-ja)
          (sound-play "explod-eye")
-         (set! (-> self blue-smoke) #t)
+         ;; Delay blue smoke/eco presentation until the inter-phase gate opens.
+         (set! (-> self blue-smoke) #f)
          (let ((gp-1 (new 'stack-no-clear 'vector)))
            (vector<-cspace! gp-1 (joint-node robotboss-basic-lod0-jg blue_eco_piece))
            (process-spawn part-tracker :init part-tracker-init group-robotboss-blue-blowup 300 #f #f #f gp-1 :to *entity-pool*))
-         (let ((gp-2 (manipy-spawn (-> self root trans) (-> self entity) *robotboss-blueeco-sg* #f :to self)))
-           (send-event (ppointer->process (-> self parent)) 'flash 255.0)
-           (send-event (ppointer->process gp-2) 'anim-mode 'play1)
-           (send-event (ppointer->process gp-2) 'rot-quat (-> self root quat))
-           ;; og:preserve-this the zero passed here was missing in the original game, but is a bug that causes undefined behavior
-           (send-event (ppointer->process gp-2) 'art-joint-anim "robotboss-blueeco-blue-last-hit" 0)))
+         ;; The blueeco manipy used to spawn here immediately on the last hit.
+         ;; It is intentionally delayed until *boss-waiting-for-2nd-phase* is #t.
+         )
         ((-> self took-hit)
          (if (not (play-ambient (-> self ambient) "GOL-AM17" #t (the-as vector #f)))
            (play-ambient (-> self ambient) "MAI-AM06" #t (the-as vector #f)))
@@ -1951,6 +2615,20 @@
   (set! (-> this looping-sound 3)
         (new 'process 'ambient-sound (static-sound-spec "bfg-buzz" :fo-max 80) (-> this root trans)))
   (set! (-> this blue-smoke) #f)
+  (set! *boss-enter-2nd-phase* #f)
+  (set! *boss-waiting-for-2nd-phase* #f)
+  (set! *boss-enter-3rd-phase* #f)
+  (set! *boss-waiting-for-3rd-phase* #f)
+  (set! *boss-enter-4th-phase* #f)
+  (set! *boss-waiting-for-4th-phase* #f)
+  (set! *boss-enter-5th-phase* #f)
+  (set! *boss-waiting-for-5th-phase* #f)
+  (set! *boss-defeated* #f)
+  (set! *boss-activate-blue-eco* #f)
+  (set! *boss-trigger-blue-bomb-explosion* #f)
+  (set! *boss-custom-green-return* #f)
+  (set! *boss-custom-red-return* #f)
+  (set! *boss-custom-yellow-return* #f)
   (set! (-> this red-smoke) #f)
   (set! (-> this yellow-smoke) #f)
   (ambient-control-method-9 (-> this ambient))

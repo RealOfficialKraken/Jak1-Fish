@@ -5837,7 +5837,8 @@
             (= species (the-as int (fisher-species fire-canyon-cellfish)))
             (or
               (= cell-task (the-as int (game-task lavatube-end)))
-              (= cell-task (the-as int (game-task lavatube-buzzer)))))
+              (= cell-task (the-as int (game-task lavatube-buzzer)))
+              (= cell-task (the-as int (game-task citadel-buzzer)))))
           (rand-vu-int-range 6 10)
           (rand-vu-int-range
             (-> info button-count-min)
@@ -8252,6 +8253,13 @@
     ((and
         (= (-> self caught-fish-species)
           (the-as int (fisher-species fire-canyon-cellfish)))
+        (= (-> self caught-power-cell-task)
+          (the-as int (game-task citadel-buzzer))))
+      (format *fish-ui-str* "CITADEL SCOUT FLY FISH"))
+
+    ((and
+        (= (-> self caught-fish-species)
+          (the-as int (fisher-species fire-canyon-cellfish)))
         (or
           (= (-> self caught-power-cell-task)
             (the-as int (game-task lavatube-end)))
@@ -8266,7 +8274,9 @@
           (= (-> self caught-power-cell-task)
             (the-as int (game-task ogre-boss)))
           (= (-> self caught-power-cell-task)
-            (the-as int (game-task ogre-end)))))
+            (the-as int (game-task ogre-end)))
+          (= (-> self caught-power-cell-task)
+            (the-as int (game-task ogre-buzzer)))))
       (format *fish-ui-str* "MOUNTAIN PASS CELL FISH"))
 
     ((= (-> self caught-fish-species) 4)
@@ -8527,15 +8537,15 @@
 
         ((= suffix 14)
           (draw-fisher-large-font-scaled
-            "WHERE DOES THE L TETROMINO FISH GO? THATS RIGHT!"
+            "GRATEFUL FOREST SAYS"
             256 (+ 94 menu-offset)
             0.32)
           (draw-fisher-large-font-scaled
-            "THE L TETROMINO FISH GOES IN THE L TETROMINO HOLE!"
+            "WHERE DOES THE L TETROMINO FISH GO? THATS RIGHT!"
             256 (+ 114 menu-offset)
             0.32)
           (draw-fisher-large-font-scaled
-            "THANKS, GRATEFUL FOREST!"
+            "IT GOES IN THE SQUARE HOLE!"
             256 (+ 134 menu-offset)
             0.32))
 
