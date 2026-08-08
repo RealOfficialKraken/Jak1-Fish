@@ -114,11 +114,15 @@
     (set! (-> gp-0 far-fade-dist) 245760.0)
     (set! (-> gp-0 waveform) ripple-for-dark-eco-pool)
     (set! (-> gp-0 query) (new 'process 'ripple-merc-query 100))
-    (case (-> this look)
-      ((32) (set! (-> gp-0 waveform) ripple-for-misty-dark-eco-pool))
-      ((15 16 17 18 19 20) (set! (-> gp-0 waveform) ripple-for-maincave-dark-eco-pool))
-      ((40) (set! (-> gp-0 waveform) ripple-for-sunken-dark-eco-helix-room))
-      ((41) (set! (-> gp-0 waveform) ripple-for-finalboss-dark-eco-pool))))
+    (cond
+      ((= (-> this look) 32)
+        (set! (-> gp-0 waveform) ripple-for-misty-dark-eco-pool))
+      ((and (>= (-> this look) 15) (<= (-> this look) 20))
+        (set! (-> gp-0 waveform) ripple-for-maincave-dark-eco-pool))
+      ((= (-> this look) 40)
+        (set! (-> gp-0 waveform) ripple-for-sunken-dark-eco-helix-room))
+      ((= (-> this look) 41)
+        (set! (-> gp-0 waveform) ripple-for-finalboss-dark-eco-pool))))
   (none))
 
 (defpartgroup group-dark-eco-nasty
@@ -311,7 +315,27 @@
   :virtual #t
   :trans
     (behavior ()
-      (let ((t9-0 (-> (method-of-type water-anim water-vol-idle) trans))) (if t9-0 (t9-0)))
+      ;; Main Cave Dark Eco uses looks 15-20.  Preserve the REAL dark-eco-pool
+      ;; surface from underneath by bypassing water-anim's camera-height hide
+      ;; test for those instances, exactly like the Village3 lava persistence
+      ;; override.  Every other Dark Eco pool keeps stock behavior.
+      (if
+        (and
+          (>= (-> self look) 15)
+          (<= (-> self look) 20))
+        (begin
+          (let ((parent-trans
+                  (-> (method-of-type water-vol water-vol-idle) trans)))
+            (when parent-trans
+              (parent-trans)))
+
+          ;; Always allow Main Cave's Dark Eco surface to render from below.
+          (logclear! (-> self draw status) (draw-status hidden)))
+        (let ((parent-trans
+                (-> (method-of-type water-anim water-vol-idle) trans)))
+          (when parent-trans
+            (parent-trans))))
+
       (let* ((gp-0 (-> self draw ripple))
              (f0-1 (the float (logand (current-time) #xffff)))
              (f30-0 (square (cos (* 5.0 f0-1)))))
@@ -333,10 +357,10 @@
                                (-> s5-0 data s3-0)
                                :to
                                *entity-pool*)))))
-        (case (-> self look)
-          ((32)
-           (set! (-> gp-0 global-scale) (* 4096.0 (* 1.5 (+ 1.0 f30-0))))
-           (set! (-> gp-0 individual-normal-scale) (+ 0.5 (/ f30-0 2))))
-          (else
-           (set! (-> gp-0 global-scale) (* 4096.0 (* 3.0 (+ 1.0 f30-0))))
-           (set! (-> gp-0 individual-normal-scale) (+ 0.5 (/ f30-0 2))))))))
+        (if (= (-> self look) 32)
+          (begin
+            (set! (-> gp-0 global-scale) (* 4096.0 (* 1.5 (+ 1.0 f30-0))))
+            (set! (-> gp-0 individual-normal-scale) (+ 0.5 (/ f30-0 2))))
+          (begin
+            (set! (-> gp-0 global-scale) (* 4096.0 (* 3.0 (+ 1.0 f30-0))))
+            (set! (-> gp-0 individual-normal-scale) (+ 0.5 (/ f30-0 2))))))))

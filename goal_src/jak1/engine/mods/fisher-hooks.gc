@@ -1,10 +1,241 @@
 ;;-*-Lisp-*-
 (in-package goal)
 (bundles "JUN.DGO")
+(require "engine/common-obs/water-anim.gc")
 
 ;; name: fisher-hooks.gc
 
 (define *fisher-active-location-id* -1)
+
+
+;; --------------------------------------------------------------------------
+;; Snow runtime water patch
+;;
+;; Visible art: native Training Lake water-anim skeleton, enlarged 3x from
+;; the previous visible size and driven by its native idle animation group.
+;; Gameplay region: 1.3x the requested X/Z rectangle about the same center.
+;; --------------------------------------------------------------------------
+
+(deftype fisher-snow-water (water-anim)
+  ((min-x float)
+   (max-x float)
+   (min-z float)
+   (max-z float)
+   (surface-y float)
+   (volume-bottom-y float))
+  (:states
+    fisher-snow-water-idle))
+
+(define *fisher-snow-water* (the-as (pointer fisher-snow-water) #f))
+(define *fisher-snow-water-reset-pending?* #f)
+
+(define *fisher-snow-water-center*
+  (new 'static 'vector
+    :x (meters 702.4139)
+    :y (meters 218.8179)
+    :z (meters -3368.8300)
+    :w 1.0))
+
+(defun fisher-snow-water-target-inside? ((self fisher-snow-water))
+  (when *target*
+    (let ((p (target-pos 0)))
+      (return
+        (and
+          (>= (-> p x) (-> self min-x))
+          (<= (-> p x) (-> self max-x))
+          (>= (-> p z) (-> self min-z))
+          (<= (-> p z) (-> self max-z))
+          (>= (-> p y) (-> self volume-bottom-y))
+          (<= (-> p y) (+ (-> self surface-y) (meters 2.0)))))))
+  #f)
+
+(defun fisher-snow-water-release-target! ((self fisher-snow-water))
+  (when
+    (and
+      *target*
+      (handle->process (-> *target* water volume))
+      (= (handle->process (-> *target* water volume)) self))
+    (let ((water (-> *target* water)))
+      (logclear!
+        (-> water flag)
+        (water-flag
+          active
+          can-wade
+          can-swim
+          use-ocean
+          tar
+          mud
+          deadly
+          use-ripple-offset
+          no-grab-sound
+          part-water
+          dark-eco
+          lava
+          wt26))
+      (set! (-> water volume) (the-as handle #f))))
+  (set! (-> self target) (the-as handle #f))
+  (none))
+
+(defun fisher-snow-water-update! ((this fisher-snow-water))
+  (cond
+    ((handle->process (-> this target))
+      (when (not (fisher-snow-water-target-inside? this))
+        (fisher-snow-water-release-target! this)))
+
+    ((and
+       *target*
+       (not (handle->process (-> *target* water volume)))
+       (fisher-snow-water-target-inside? this))
+      (let ((water (-> *target* water)))
+        (set! (-> water volume) (process->handle this))
+        (set! (-> this target) (process->handle *target*))
+        (logior! (-> water flag) (water-flag active))
+        (set! (-> water base-height) (-> this water-height))
+        (set! (-> water ocean-offset) 0.0)
+        (logior! (-> water flag) (-> this flag))
+        (set! (-> water wade-height) (-> this wade-height))
+        (set! (-> water swim-height) (-> this swim-height))
+        (set! (-> water bottom-height) (-> this bottom-height))
+        (set-zero! (-> water bob)))))
+  (none))
+
+(defstate fisher-snow-water-idle (fisher-snow-water)
+  :enter
+  (behavior ()
+    ;; Use the real Training Lake animation group exactly like other animated
+    ;; runtime skeletons do.  The previous manual channel setup left the water
+    ;; on frame 0 and never entered the native animation group.
+    (ja-no-eval
+      :group! water-anim-training-idle-ja
+      :num! (seek!)
+      :frame-num 0.0))
+
+  :trans
+  (behavior ()
+    (fisher-snow-water-update! self))
+
+  :exit
+  (behavior ()
+    (fisher-snow-water-release-target! self)
+    ;; If loader/death removes this process, allow the manager to recreate it.
+    (set! *fisher-snow-water* (the-as (pointer fisher-snow-water) #f)))
+
+  :code
+  (behavior ()
+    (loop
+      (suspend)
+      (ja :num! (seek!))))
+
+  :post
+  ja-post)
+
+(defbehavior fisher-snow-water-init fisher-snow-water ()
+  (set! (-> self root) (new 'process 'trsqv))
+
+  ;; Training Lake has local bounds centered about X=-18m.  The visible art is
+  ;; 3x larger than the previous build.  Keep Y unchanged and shift the
+  ;; visible pool +60m on world Z from the previous art placement.
+  (set-vector!
+    (-> self root trans)
+    (meters 697.7586)
+    (meters 218.8179)
+    (meters -3378.8300)
+    1.0)
+  (set-vector! (-> self root scale) 3.6302625 1.0 2.2209975 1.0)
+
+  ;; Gameplay bounds are 1.3x the originally requested rectangle, expanded
+  ;; around the exact same center (702.4139, -3368.8300).
+  (set! (-> self min-x) (meters 639.4893))
+  (set! (-> self max-x) (meters 765.3385))
+  (set! (-> self min-z) (meters -3407.3273))
+  (set! (-> self max-z) (meters -3330.3327))
+  (set! (-> self surface-y) (meters 218.8179))
+  (set! (-> self volume-bottom-y) (meters 206.8179))
+
+  (set! (-> self water-height) (meters 218.8179))
+  (set! (-> self wade-height) (meters 0.70))
+  (set! (-> self swim-height) (meters 1.40))
+  (set! (-> self bottom-height) (meters 12.0))
+  (set! (-> self target) (the-as handle #f))
+  (set! (-> self attack-event) #f)
+  (set! (-> self look) 36) ; water-anim-training-lake
+  (set! (-> self play-ambient-sound?) #f)
+  (set! (-> self flag) (water-flag can-wade can-swim part-water part-splash))
+
+  ;; Restore the native Training Lake art group.  Animation selection is done
+  ;; in fisher-snow-water-idle :enter with water-anim-training-idle-ja.
+  (initialize-skeleton self *water-anim-training-lake-sg* '())
+  (logior! (-> self skel status) (janim-status inited))
+  (ja-channel-set! 1)
+
+  (logclear! (-> self mask) (process-mask actor-pause))
+  (go fisher-snow-water-idle)
+  (none))
+
+(defun fisher-snow-water-near? ((max-distance meters))
+  ;; Activation distance still uses the originally requested body footprint,
+  ;; so enlarging gameplay collision does not make the manager live farther
+  ;; away than intended.
+  (when *target*
+    (let* ((p (target-pos 0))
+           (dx 0.0)
+           (dz 0.0))
+      (cond
+        ((< (-> p x) (meters 654.0104))
+          (set! dx (- (meters 654.0104) (-> p x))))
+        ((> (-> p x) (meters 750.8174))
+          (set! dx (- (-> p x) (meters 750.8174)))))
+      (cond
+        ((< (-> p z) (meters -3398.4433))
+          (set! dz (- (meters -3398.4433) (-> p z))))
+        ((> (-> p z) (meters -3339.2167))
+          (set! dz (- (-> p z) (meters -3339.2167)))))
+      (return
+        (<= (+ (* dx dx) (* dz dz))
+            (* max-distance max-distance)))))
+  #f)
+
+(defun fisher-spawn-snow-water! ()
+  (when (not *fisher-snow-water*)
+    (set!
+      *fisher-snow-water*
+      (the-as
+        (pointer fisher-snow-water)
+        (process-spawn
+          fisher-snow-water
+          :init fisher-snow-water-init
+          :to *entity-pool*))))
+  (none))
+
+(defun fisher-despawn-snow-water! ()
+  (when *fisher-snow-water*
+    (let ((water (the-as fisher-snow-water (-> *fisher-snow-water* 0))))
+      (fisher-snow-water-release-target! water))
+    (kill-by-name "fisher-snow-water" *entity-pool*)
+    (set! *fisher-snow-water* (the-as (pointer fisher-snow-water) #f)))
+  (none))
+
+(defun maintain-fisher-snow-water! ()
+  (let ((inside (when *level* (level-get-target-inside *level*)))
+        (in-snow? #f))
+    (when inside
+      (set! in-snow? (= (-> inside name) 'snow)))
+
+    (when
+      (and
+        in-snow?
+        (not *fisher-snow-water*)
+        (fisher-snow-water-near? (meters 150.0)))
+      (fisher-spawn-snow-water!))
+
+    (when
+      (and
+        *fisher-snow-water*
+        (or
+          (not in-snow?)
+          (not (fisher-snow-water-near? (meters 150.0)))))
+      (fisher-despawn-snow-water!)))
+  (none))
 
 (define *fisher-cell-repair-pending?* #f)
 (define *fisher-cell-repair-clear-frames* 0)
@@ -22,6 +253,8 @@
 (define *fisher-pool-center-sunken* (new 'static 'vector :x (meters 856.0955) :y (meters -143.8908) :z (meters -1761.6607) :w 1.0))
 (define *fisher-pool-center-swamp* (new 'static 'vector :x (meters 571.2822) :y (meters 0.3981) :z (meters -2116.4223) :w 1.0))
 (define *fisher-pool-center-village3* (new 'static 'vector :x (meters 1050.9093) :y (meters 40.2031) :z (meters -3456.7578) :w 1.0))
+(define *fisher-pool-center-snow* (new 'static 'vector :x (meters 750.9037) :y (meters 220.2108) :z (meters -3346.3452) :w 1.0))
+(define *fisher-pool-center-maincave* (new 'static 'vector :x (meters 1023.0690) :y (meters 37.7192) :z (meters -3027.2181) :w 1.0))
 
 (defun fisher-pool-center-for-location ((location-id int))
   (cond
@@ -34,6 +267,8 @@
     ((= location-id 6) *fisher-pool-center-sunken*)
     ((= location-id 7) *fisher-pool-center-swamp*)
     ((= location-id 8) *fisher-pool-center-village3*)
+    ((= location-id 9) *fisher-pool-center-snow*)
+    ((= location-id 10) *fisher-pool-center-maincave*)
     (else (the-as vector #f))))
 
 (defun fisher-player-near-location? ((location-id int) (max-distance meters))
@@ -307,7 +542,57 @@
         (degrees 30.5125)
         (degrees 120.5125))
 
-      (set! *fisher-active-location-id* 8)))
+      (set! *fisher-active-location-id* 8))
+
+    ((= level-name 'snow)
+      (spawn-fisher-game
+        9
+        (new 'static 'vector
+          :x (meters 753.3205)
+          :y (meters 220.1279)
+          :z (meters -3340.1640)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 750.9037)
+          :y (meters 220.2108)
+          :z (meters -3346.3452)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 752.7998)
+          :y (meters 223.6957)
+          :z (meters -3354.0970)
+          :w 1.0)
+        (meters 218.8179)
+        (degrees -14.3021)
+        (degrees -105.9730))
+
+      (set! *fisher-active-location-id* 9))
+
+    ((= level-name 'maincave)
+      (spawn-fisher-game
+        10
+        ;; No separate net vector was supplied, so place the net 4.5m into
+        ;; the fishfield from Jak along the measured playfield axis.
+        (new 'static 'vector
+          :x (meters 1019.1751)
+          :y (meters 37.7192)
+          :z (meters -3024.9626)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 1023.0690)
+          :y (meters 37.7192)
+          :z (meters -3027.2181)
+          :w 1.0)
+        (new 'static 'vector
+          :x (meters 1029.4232)
+          :y (meters 40.4485)
+          :z (meters -3016.3500)
+          :w 1.0)
+        (meters 37.1875)
+        (degrees -149.6867)
+        (degrees -59.9186))
+
+      (set! *fisher-active-location-id* 10)))
 
   (none))
 
@@ -325,7 +610,9 @@
         ((= (-> inside name) 'village2) (set! wanted-location-id 5))
         ((= (-> inside name) 'sunken) (set! wanted-location-id 6))
         ((= (-> inside name) 'swamp) (set! wanted-location-id 7))
-        ((= (-> inside name) 'village3) (set! wanted-location-id 8))))
+        ((= (-> inside name) 'village3) (set! wanted-location-id 8))
+        ((= (-> inside name) 'snow) (set! wanted-location-id 9))
+        ((= (-> inside name) 'maincave) (set! wanted-location-id 10))))
 
     ;; Hysteresis prevents repeated spawning right on the boundary.
     (when
@@ -376,6 +663,14 @@
       (= (pause-allowed?) #t)
       (= (paused?) #f)
     )
+    ;; Do loader/death cleanup here, not from the death callback itself.
+    ;; Then maintain-fisher-snow-water! can immediately recreate the patch.
+    (when *fisher-snow-water-reset-pending?*
+      (kill-by-name "fisher-snow-water" *entity-pool*)
+      (set! *fisher-snow-water* (the-as (pointer fisher-snow-water) #f))
+      (set! *fisher-snow-water-reset-pending?* #f))
+
+    (maintain-fisher-snow-water!)
     (maintain-training-pontoon!)
     (maintain-sentinel-pontoon!)
     (maintain-misty-pontoon!)
@@ -432,7 +727,10 @@
               (-> *fisher-man* 0 level-name))
             (and
               (= current-level 'ogre)
-              (task-complete? *game-info* (game-task ogre-end)))))
+              (task-complete? *game-info* (game-task ogre-end)))
+            (and
+              (= current-level 'lavatube)
+              (task-complete? *game-info* (game-task lavatube-end)))))
 
         (kill-by-name "fisher-man" *active-pool*)
         (set! *fisher-man* #f))
@@ -474,6 +772,21 @@
                 :w 1.0)
               2
               'ogre))
+
+          ((and
+              (= current-level 'lavatube)
+              (not
+                (task-complete?
+                  *game-info*
+                  (game-task lavatube-end))))
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 1311.4960)
+                :y (meters 43.5360)
+                :z (meters -3572.3410)
+                :w 1.0)
+              4
+              'lavatube))
 
           ((= current-level 'firecanyon)
             (spawn-fisher-man
@@ -553,6 +866,10 @@
 
 (defun runs-on-jak-spawn ()
   (fisher-refill-lures!)
+  ;; The level loader may have killed the runtime Snow-water process while
+  ;; leaving our raw pointer value behind.  Reset it on the first safe frame.
+  (when *fisher-snow-water*
+    (set! *fisher-snow-water-reset-pending?* #t))
   ;; This callback can occur while level/art loading is still settling.
   ;; Queue cleanup instead of destroying process or art objects here.
   (when *fisher-game*
@@ -562,8 +879,14 @@
 
 (defun runs-on-jak-death ((death-event symbol))
   (case death-event
-    (('dying) (fisher-refill-lures!))
-    (('blackout) (fisher-refill-lures!)))
+    (('dying)
+      (fisher-refill-lures!)
+      (when *fisher-snow-water*
+        (set! *fisher-snow-water-reset-pending?* #t)))
+    (('blackout)
+      (fisher-refill-lures!)
+      (when *fisher-snow-water*
+        (set! *fisher-snow-water-reset-pending?* #t))))
   ;; Do not walk or kill the fish/manipy process tree from a death or blackout
   ;; callback.  These callbacks may overlap the loader's art-record iteration.
   ;; Queue one delayed teardown instead.

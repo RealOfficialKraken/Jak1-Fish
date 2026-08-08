@@ -1,6 +1,7 @@
 ;;-*-Lisp-*-
 (in-package goal)
 (bundles "JUN.DGO")
+(require "engine/common-obs/dark-eco-pool.gc")
 
 ;; name: fisher-game.gc
 
@@ -240,6 +241,16 @@
 (define *fisher-heal-line-cooldown-color*
   (new 'static 'rgba :r #x38 :g #xe8 :b #x78 :a #xe8)
 )
+
+
+(defun fisher-level-lure-speed-multiplier ()
+  ;; Fishing progression: +5% reel/drop speed per fishing level, capped at 2x.
+  ;; Level 10 = 1.5x, level 20 = 2.0x.  Skill multipliers stack on top.
+  (fmin
+    2.0
+    (+
+      1.0
+      (* (the float (fisher-current-level)) 0.05))))
 
 (defun fisher-level-up-window-active? ()
   (!= *fisher-level-up-window-state* 'hidden)
@@ -502,13 +513,13 @@
         0.40)
 
       (draw-fisher-large-font-scaled
-        "LOWER LEVEL FISH DEAL LESS LINE DAMAGE,"
+        "YOUR LINE IS STRONGER, AND YOU CAN"
         256
         (+ (if (> skill-mask 0) 82 108) menu-offset)
         0.36)
 
       (draw-fisher-large-font-scaled
-        "BUT ALSO GRANT LESS XP."
+        "REEL FASTER!"
         256
         (+ (if (> skill-mask 0) 99 125) menu-offset)
         0.38)
@@ -863,6 +874,14 @@
     (set! (-> self lure-reel-x-speed) (* (-> self lure-reel-x-speed) 0.70))
     (set! (-> self lure-reel-y-speed) (* (-> self lure-reel-y-speed) 0.70)))
 
+  ;; Snow's tight frozen pool deliberately has heavier, slower lure movement.
+  ;; Fishing-level and skill multipliers still stack normally afterward.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+    (set! (-> self lure-fall-speed) (* (-> self lure-fall-speed) 0.75))
+    (set! (-> self lure-reel-x-speed) (* (-> self lure-reel-x-speed) 0.75))
+    (set! (-> self lure-reel-y-speed) (* (-> self lure-reel-y-speed) 0.75)))
+
   (set! (-> self lure-x-velocity) 0.0)
   (set! (-> self reel-hint-time) 0.0)
   (fisher-reset-level-up-window!)
@@ -944,6 +963,11 @@
   (set! (-> self lava-fire-slot) -1)
   (set! (-> self lava-trail-time) 0.0)
   (set! (-> self lava-flame-time) 0.0)
+  (set! (-> self snowball-spawn-timer) 2.5)
+  (set! (-> self snowball-handle) (the-as handle #f))
+  (set! (-> self dark-eco-teleport-timer) 45.0)
+  (set! (-> self dark-eco-warning-played?) #f)
+  (set! (-> self dark-eco-displaced-slot) -1)
   (set! (-> self fish-count) 0)
   (dotimes (slot-index *fisher-max-fish-slots*)
     (set! (-> self fish-data slot slot-index visual)
@@ -2699,6 +2723,7 @@
   (set! (-> self casted?) #f)
   (set! (-> self hooked-fish) #f)
   (set! (-> self fish-state) 'free)
+  (set! (-> self dark-eco-displaced-slot) -1)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
   (set! (-> self skill-message) #f)
@@ -2740,7 +2765,33 @@
   (none))
 
 
+(defun fisher-debug-print-lure-loss! ((self fisher-game) (cause string))
+  (when *fisher-in-debug?*
+    (format #t "[FISHER] ========================================~%")
+    (format #t "[FISHER] LURE LOST CAUSE: ~A~%" cause)
+    (format #t "[FISHER] cast-state: ~A~%" (-> self cast-state))
+    (format #t "[FISHER] fish-state: ~A~%" (-> self fish-state))
+    (format #t "[FISHER] hooked-fish-slot: ~D~%" (-> self hooked-fish-slot))
+
+    (when (>= (-> self hooked-fish-slot) 0)
+      (format
+        #t
+        "[FISHER] species: ~A~%"
+        (fisher-species-name
+          self
+          (fisher-fish-species self (-> self hooked-fish-slot)))))
+
+    (format #t "[FISHER] ========================================~%"))
+
+  (none))
+
+
 (defun fisher-begin-lure-stolen-return! ((self fisher-game))
+  ;; Central fallback: if a caller was ever missed, this proves the lure-loss
+  ;; transition itself was entered.
+  (when *fisher-in-debug?*
+    (format #t "[FISHER] >>> fisher-begin-lure-stolen-return! ENTERED <<<~%"))
+
   ;; Losing a lure should not snap the camera back to Jak.  Keep the current
   ;; lure position long enough for the camera to follow it back to the normal
   ;; reeling point, then blend smoothly to the before-cast camera.
@@ -2755,6 +2806,7 @@
     (set! (-> self fish-state) 'free)
     (set! (-> self hooked-fish) #f)
     (set! (-> self hooked-fish-slot) -1)
+    (set! (-> self dark-eco-displaced-slot) -1)
     (set! (-> self fish-fighting?) #f)
     (set! (-> self hooked-fish-poison-dps) 0.0)
     (set! (-> self reel-camera-blend) 0.0)
@@ -3523,9 +3575,16 @@
     (set! (-> owner hooked-fish) self)
     (set!
       (-> self approach-speed)
-      (rand-vu-float-range
-        *fisher-approach-speed-min*
-        *fisher-approach-speed-max*))
+      (*
+        (rand-vu-float-range
+          *fisher-approach-speed-min*
+          *fisher-approach-speed-max*)
+        ;; Fish close on the lure 1.4x faster in the Village3 lava pool only.
+        (if
+          (= (-> owner location-id)
+            (the-as int (fisher-zone village3-lava)))
+          1.40
+          1.0)))
     (set! (-> owner fish-state) 'approaching)
     (go-virtual singlefish-approach))
 
@@ -3561,6 +3620,7 @@
 
     (cond
       (snap-on-bite?
+        (fisher-debug-print-lure-loss! owner "SINGLEFISH SNAP-ON-BITE / SCARED-OFF")
         (fisher-begin-lure-stolen-return! owner))
 
       (else
@@ -3642,6 +3702,7 @@
 
 (defun singlefish-break-line! ((self singlefish-base))
   (let ((owner (the-as fisher-game (-> self owner))))
+    (fisher-debug-print-lure-loss! owner "SINGLEFISH LINE BROKEN")
     (fisher-begin-lure-stolen-return! owner)
     (set! (-> self fighting?) #f)
     (set! (-> self direction) (if (rand-vu-percent? 0.5) 1.0 -1.0))
@@ -3740,11 +3801,16 @@
       (bottom-y
         (- (-> owner water-level) (fisher-playfield-max-depth owner)))
 
+      (level-speed-mult
+        (fisher-level-lure-speed-multiplier))
+
       (reel-mult
-        (if
-          (-> owner tug-line-active?)
-          *fisher-tug-line-reel-multiplier*
-          1.0)))
+        (*
+          level-speed-mult
+          (if
+            (-> owner tug-line-active?)
+            *fisher-tug-line-reel-multiplier*
+            1.0))))
 
     (singlefish-update-fight-rate-limit! self dt)
 
@@ -4147,6 +4213,23 @@
             pos
             #f
             (cond
+              ;; Main Cave fish retain their requested skeletons on the catch
+              ;; card too; rare suffixes may still add their normal attachments.
+              ((and
+                  (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                  (or
+                    (= (-> self caught-fish-species) (the-as int (fisher-species helix-voidfish)))
+                    (= (-> self caught-fish-species) (the-as int (fisher-species megaloviathan)))))
+                *fisher-junglefish-sg*)
+              ((and
+                  (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                  (= (-> self caught-fish-species) (the-as int (fisher-species dark-precursor-fangfish))))
+                *catch-fishc-sgc*)
+              ((and
+                  (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                  (= (-> self caught-fish-species) (the-as int (fisher-species phantasm-shark))))
+                *sharkey-sgc*)
+
               ((or
                   (= (-> self caught-fish-suffix) 7)
                   (= (-> self caught-fish-suffix) 11)
@@ -4221,6 +4304,41 @@
                   (the-as int (fisher-species inferno-shark)))
                 *sharkey-sgc*)
 
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species frost-biter)))
+                *catch-fisha-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species crystal-fish)))
+                *catch-fishb-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species ice-shark)))
+                *sharkey-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species helix-voidfish)))
+                *fisher-junglefish-sg*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species dark-precursor-fangfish)))
+                *catch-fishc-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species phantasm-shark)))
+                *sharkey-sgc*)
+
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species megaloviathan)))
+                *fisher-junglefish-sg*)
+
               (else
                 *catch-fisha-sgc*))
             #f
@@ -4251,7 +4369,14 @@
           (fisher-spawn-rare-fish-attachments!
             fish-proc
             (-> self caught-fish-suffix)
-            #t)))))
+            #t)
+
+          (when
+            (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+            (fisher-spawn-snow-ice-crystal!
+              fish-proc
+              (-> self caught-fish-species)
+              #t))))))
 
   (none))
 
@@ -4688,6 +4813,21 @@
         (fisher-fish-species self (-> self hooked-fish-slot))
         (the-as int (fisher-species black-lurker-shark)))
       (meters 0.70))
+
+    ((=
+        (fisher-fish-species self (-> self hooked-fish-slot))
+        (the-as int (fisher-species helix-voidfish)))
+      (meters 0.78))
+
+    ((=
+        (fisher-fish-species self (-> self hooked-fish-slot))
+        (the-as int (fisher-species phantasm-shark)))
+      (meters 1.05))
+
+    ((=
+        (fisher-fish-species self (-> self hooked-fish-slot))
+        (the-as int (fisher-species megaloviathan)))
+      (meters 5.60))
 
     (else
       (meters 0.42))))
@@ -5203,10 +5343,16 @@
         (the-as int (fisher-species magma-serpent))) (meters 15.0))
       ((= (fisher-fish-species self slot)
         (the-as int (fisher-species inferno-shark))) (meters 7.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species frost-biter))) (meters 10.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species crystal-fish))) (meters 16.0))
+      ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species ice-shark))) (meters 7.0))
       (else (meters 8.5)))))
 
 (defun fisher-update-lure! ((self fisher-game))
-  (let ((dt (-> *display* seconds-per-frame))
+  (let* ((dt (-> *display* seconds-per-frame))
       (from-jak (new 'stack-no-clear 'vector))
       (horizontal-distance 0.0)
       (saved-y 0.0)
@@ -5214,13 +5360,17 @@
       (bottom-y (- (-> self water-level) (fisher-playfield-max-depth self)))
       (current-speed -0.18)
       (bottom-current-speed -0.28)
+      (level-speed-mult
+        (fisher-level-lure-speed-multiplier))
       (reel-mult
-        (if
-          (and
-            (= (-> self fish-state) 'reeling)
-            (-> self tug-line-active?))
-          *fisher-tug-line-reel-multiplier*
-          1.0)))
+        (*
+          level-speed-mult
+          (if
+            (and
+              (= (-> self fish-state) 'reeling)
+              (-> self tug-line-active?))
+            *fisher-tug-line-reel-multiplier*
+            1.0))))
 
     (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
 
@@ -5298,7 +5448,9 @@
 
         (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-reel-y-speed) reel-mult dt))
 
-        (set! (-> self lure-x-velocity) (- (-> self lure-reel-x-speed)))
+        (set!
+          (-> self lure-x-velocity)
+          (- (* (-> self lure-reel-x-speed) reel-mult)))
 
         (set! (-> self lure-y-velocity) 0.0)
       )
@@ -5342,16 +5494,18 @@
         (let ((sink-mult
               (if (-> self lure-sink-active?) 3.0 1.0)))
 
-          (-! (-> self lure-y-velocity) (* 1.2 sink-mult dt))
+          (-!
+            (-> self lure-y-velocity)
+            (* 1.2 level-speed-mult sink-mult dt))
 
           (when
             (<
               (-> self lure-y-velocity)
-              (- (* (-> self lure-fall-speed) sink-mult)))
+              (- (* (-> self lure-fall-speed) level-speed-mult sink-mult)))
 
             (set!
               (-> self lure-y-velocity)
-              (- (* (-> self lure-fall-speed) sink-mult))))
+              (- (* (-> self lure-fall-speed) level-speed-mult sink-mult))))
         )
 
         (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-y-velocity) dt))
@@ -5456,6 +5610,13 @@
           ((= species (the-as int (fisher-species lava-drum))) 600.0)
           ((= species (the-as int (fisher-species magma-serpent))) 275.0)
           ((= species (the-as int (fisher-species inferno-shark))) 50.0)
+          ((= species (the-as int (fisher-species frost-biter))) 75.0)
+          ((= species (the-as int (fisher-species crystal-fish))) 125.0)
+          ((= species (the-as int (fisher-species ice-shark))) 75.0)
+          ((= species (the-as int (fisher-species helix-voidfish))) 165.0)
+          ((= species (the-as int (fisher-species dark-precursor-fangfish))) 165.0)
+          ((= species (the-as int (fisher-species phantasm-shark))) 250.0)
+          ((= species (the-as int (fisher-species megaloviathan))) 3000.0)
           ((= species 1) 35.0)
           ((= species 2) 30.0)
           (else 15.0))))
@@ -5489,6 +5650,13 @@
           ((= species (the-as int (fisher-species lava-drum))) 56.0)
           ((= species (the-as int (fisher-species magma-serpent))) 52.0)
           ((= species (the-as int (fisher-species inferno-shark))) 38.0)
+          ((= species (the-as int (fisher-species frost-biter))) 38.0)
+          ((= species (the-as int (fisher-species crystal-fish))) 44.0)
+          ((= species (the-as int (fisher-species ice-shark))) 58.0)
+          ((= species (the-as int (fisher-species helix-voidfish))) 55.0)
+          ((= species (the-as int (fisher-species dark-precursor-fangfish))) 45.0)
+          ((= species (the-as int (fisher-species phantasm-shark))) 75.0)
+          ((= species (the-as int (fisher-species megaloviathan))) 110.0)
           (else 34.0)))
 
       (fish-level
@@ -5660,12 +5828,20 @@
 (defun fisher-start-button-fight! ((self fisher-game))
   (let* ((slot (-> self hooked-fish-slot))
       (species (fisher-fish-species self slot))
+      (cell-task (fisher-fish-power-cell-task self slot))
       (info (fisher-species-info-for species))
       (data (-> self button-fight-data))
       (count
-        (rand-vu-int-range
-          (-> info button-count-min)
-          (-> info button-count-max)))
+        (if
+          (and
+            (= species (the-as int (fisher-species fire-canyon-cellfish)))
+            (or
+              (= cell-task (the-as int (game-task lavatube-end)))
+              (= cell-task (the-as int (game-task lavatube-buzzer)))))
+          (rand-vu-int-range 6 10)
+          (rand-vu-int-range
+            (-> info button-count-min)
+            (-> info button-count-max))))
       (launch-time 0.0))
 
     (fisher-clear-button-fight! self)
@@ -5802,6 +5978,7 @@
         (when (>= (-> data slot i y) 448.0)
           (fisher-clear-button-fight! self)
           (fisher-fish-scared-off! self slot)
+          (fisher-debug-print-lure-loss! self "BUTTON FIGHT FAILED / PROMPT MISSED")
           (fisher-begin-lure-stolen-return! self)
           (return #t))))
 
@@ -5874,6 +6051,7 @@
           (when (>= slot 0)
             (fisher-fish-scared-off! self slot))
 
+          (fisher-debug-print-lure-loss! self "LINE HP BROKEN")
           (fisher-begin-lure-stolen-return! self)))
 
       ((-> self fish-fighting?)
@@ -5927,6 +6105,7 @@
             (when (>= slot 0)
               (fisher-fish-scared-off! self slot))
 
+            (fisher-debug-print-lure-loss! self "BUTTON FIGHT LINE HP BROKEN")
             (fisher-begin-lure-stolen-return! self))))
 
       (else
@@ -5970,6 +6149,132 @@
         particle-pos)))
   (none))
 
+(defun fisher-megaloviathan-center!
+  ((fish-proc manipy) (dst vector))
+  ;; junglefish's authored center is above the root.  Megaloviathan is 4x
+  ;; gameplay scale, so lift the collision center into the visible body.
+  (singlefish-vector-copy-safe! dst (-> fish-proc root trans))
+  (+! (-> dst y) (meters 4.0))
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun fisher-megaloviathan-face-point!
+  ((self fisher-game) (slot int) (fish-proc manipy) (dst vector))
+  ;; Use one small interception point directly in front of whichever end of
+  ;; the giant fish is currently facing forward.  This replaces the old broad
+  ;; body-center sensing sphere, so Megaloviathan only notices the active line
+  ;; when it passes immediately in front of its face.
+  (fisher-megaloviathan-center! fish-proc dst)
+  (singlefish-vector-add-scaled-safe!
+    dst
+    dst
+    (-> self playfield-axis)
+    (* (fisher-fish-direction self slot) (meters 7.0)))
+  (set! (-> dst w) 1.0)
+  dst)
+
+(defun fisher-megaloviathan-try-special!
+  ((self fisher-game) (slot int) (fish-proc manipy))
+
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (= (fisher-fish-species self slot) (the-as int (fisher-species megaloviathan)))
+      (= (-> self cast-state) 'line-active)
+      (-> self casted?)
+      (not
+        (logtest?
+          (-> fish-proc draw status)
+          (draw-status hidden))))
+
+    (let ((mega-center (new 'stack-no-clear 'vector))
+        (mega-face (new 'stack-no-clear 'vector))
+        (hook-pos (new 'stack-no-clear 'vector)))
+
+      (fisher-megaloviathan-center! fish-proc mega-center)
+      (fisher-megaloviathan-face-point! self slot fish-proc mega-face)
+      (fisher-hook-target! self hook-pos)
+
+      (cond
+        ;; While another fish is being reeled, Megaloviathan alone is allowed
+        ;; to detect the visible fishing LINE.  Detection is now a small 1.5m
+        ;; sphere directly in front of its current face, not a broad body
+        ;; radius, so the line must actually pass in front of its mouth.
+        ((and
+            (= (-> self fish-state) 'reeling)
+            (>= (-> self hooked-fish-slot) 0)
+            (!= (-> self hooked-fish-slot) slot)
+            (!=
+              (fisher-fish-species self (-> self hooked-fish-slot))
+              (the-as int (fisher-species megaloviathan))))
+
+          (let ((line-start (new 'stack-no-clear 'vector))
+              (line-end (new 'stack-no-clear 'vector)))
+            (vector-copy! line-start (target-pos 0))
+            (+! (-> line-start y) (meters 3.25))
+            (set! (-> line-start w) 1.0)
+            (fisher-hook-target! self line-end)
+
+            (when
+              (fisher-point-near-segment?
+                mega-face
+                line-start
+                line-end
+                (meters 1.50))
+
+              ;; Preserve the fish that was being reeled.  It is deleted ONLY
+              ;; if the player successfully hooks Megaloviathan.
+              (set!
+                (-> self dark-eco-displaced-slot)
+                (-> self hooked-fish-slot))
+              (fisher-clear-button-fight! self)
+              (set! (-> self fish-fighting?) #f)
+              (set! (-> self fish-fight-time) 0.0)
+              (set! (-> self hooked-fish-poison-dps) 0.0)
+              (set! (-> self hooked-fish-slot) slot)
+              (fisher-begin-hook-transition! self fish-proc hook-pos)
+              (set! (-> self fish-hook-time) 0.28)
+              (set! (-> self fish-scare-on-arrival?) #f)
+              (set! (-> self lure-stop-active?) #f)
+              (set! (-> self lure-stop-time) 0.0)
+              (set! (-> self lure-sink-active?) #f)
+              (set! (-> self lure-sink-time) 0.0)
+              (set! (-> self tug-line-active?) #f)
+              (set! (-> self tug-line-time) 0.0)
+              (fisher-play-fish-bite-sound!)
+              (set! (-> self fish-state) 'hook-window)
+
+              (when *fisher-in-debug?*
+                (format #t "[FISHER] MEGALOVIATHAN DETECTED ACTIVE FISHING LINE~%"))
+
+              (return #t))))
+
+        ;; Outside the special reel-interception case, only the HOOK itself can
+        ;; be corrupted.  The line is intentionally ignored here.
+        ((and
+            ;; Once Megaloviathan has deliberately intercepted the active line,
+            ;; its own approach/takeover movement must NEVER trigger corruption.
+            ;; dark-eco-displaced-slot is set at interception and cleared only
+            ;; when that takeover resolves.
+            (< (-> self dark-eco-displaced-slot) 0)
+            (!= (-> self fish-state) 'reeling)
+            (!= (-> self hooked-fish-slot) slot)
+            ;; Corruption is a very tight mouth/face contact check now.
+            ;; Do not use the giant body's center/radius here.
+            (<=
+              (vector-vector-distance hook-pos mega-face)
+              (meters 1.25)))
+
+          (when *fisher-in-debug?*
+            (format #t "[FISHER] MEGALOVIATHAN HOOK CORRUPTION~%"))
+          (fisher-debug-print-lure-loss! self "MEGALOVIATHAN HOOK CORRUPTION")
+          (fisher-begin-lure-stolen-return! self)
+          (set! (-> self fish-message) "LINE CORRUPTED")
+          (set! (-> self fish-message-time) 1.75)
+          (return #t)))))
+
+  #f)
+
 (defun fisher-update-gameplay-fish-one!
   ((self fisher-game) (slot int) (fish (pointer manipy)))
 
@@ -5992,9 +6297,22 @@
             (direction
               (fisher-fish-direction self slot)))
 
-          (cond
+          ;; Megaloviathan owns a separate hook/body interception path.
+          ;; If it handled this frame, skip the ordinary resident AI.
+          (unless (fisher-megaloviathan-try-special! self slot fish-proc)
+            (cond
             ((= slot (-> self hooked-fish-slot))
-              (cond
+              ;; A fish can become hidden AFTER it was selected.  If that
+              ;; happens, cancel the encounter before it can reach the lure
+              ;; or expire a snap-on-bite hook window invisibly.
+              (if
+                (logtest?
+                  (-> fish-proc draw status)
+                  (draw-status hidden))
+
+                (fisher-fish-scared-off! self slot)
+
+                (cond
                 ((= (-> self fish-state) 'approaching)
                   (fisher-hook-target! self hook-target)
 
@@ -6025,10 +6343,15 @@
                           (set!
                             (-> self fish-hook-time)
                             (if
-                              (fisher-species-snap-on-bite?
-                                (fisher-fish-species self slot))
-                              0.45
-                              1.15))
+                              (=
+                                (-> self location-id)
+                                (the-as int (fisher-zone maincave-dark-eco)))
+                              0.28
+                              (if
+                                (fisher-species-snap-on-bite?
+                                  (fisher-fish-species self slot))
+                                0.45
+                                1.15)))
 
                           (fisher-play-fish-bite-sound!)
 
@@ -6055,6 +6378,7 @@
                         ;; Species with snap-on-bite enabled steal the lure when
                         ;; their hook window expires.
                         (fisher-fish-scared-off! self slot)
+                        (fisher-debug-print-lure-loss! self "SNAP-ON-BITE HOOK WINDOW EXPIRED")
                         (fisher-begin-lure-stolen-return! self))
 
                       (else
@@ -6142,7 +6466,7 @@
                   (set! (-> fish-proc root trans quad) (-> hook-target quad))
 
                   (fisher-set-manipy-facing! self slot fish-proc)
-                  (fisher-apply-slot-appearance! self slot fish-proc #t))))
+                  (fisher-apply-slot-appearance! self slot fish-proc #t)))))
 
             (else
               (fisher-fish-position! self slot wanted-pos)
@@ -6229,6 +6553,21 @@
                   (= (-> self hooked-fish-slot) -1)
                   (= (-> self fish-state) 'free)
                   (= (-> self cast-state) 'line-active)
+
+                  ;; Megaloviathan never performs ordinary lure sensing.  It
+                  ;; only detects the line during another fish's reel, through
+                  ;; fisher-megaloviathan-try-special!.
+                  (!=
+                    (fisher-fish-species self slot)
+                    (the-as int (fisher-species megaloviathan)))
+
+                  ;; Safety gate: an invisible resident fish must never be
+                  ;; allowed to sense, approach, bite, or steal the lure.
+                  (not
+                    (logtest?
+                      (-> fish-proc draw status)
+                      (draw-status hidden)))
+
                   (<= (fisher-fish-cooldown self slot) 0.0)
                   (fisher-manipy-can-sense-lure?
                     self
@@ -6245,7 +6584,7 @@
 
                 (set!
                   (-> self fish-state)
-                  'approaching))))
+                  'approaching)))))
 
           (fisher-apply-slot-appearance!
             self
@@ -6742,6 +7081,121 @@
 
   (none))
 
+(defun fisher-force-dark-eco-underwater-background! ()
+  ;; There is deliberately no ordinary geometry curtain in Main Cave.  Paint
+  ;; the existing sky base deep purple-black so the cloned intro-particle wall
+  ;; is the only visible artificial background layer.
+  (dotimes (i 12)
+    (set! (-> sky-base-polygons i col x) 7.0)
+    (set! (-> sky-base-polygons i col y) 0.0)
+    (set! (-> sky-base-polygons i col z) 18.0)
+    (set! (-> sky-base-polygons i col w) 128.0))
+  (fisher-force-underwater-horizon! 7.0 0.0 18.0)
+  (none))
+
+(defun fisher-submit-dark-eco-background! ((self fisher-game))
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      *fisher-background-cloud-session-active?*
+      (-> self casted?)
+      (-> self camera-underwater?))
+
+    (-! (-> self background-mist-time) (-> *display* seconds-per-frame))
+    (when (<= (-> self background-mist-time) 0.0)
+      ;; Native Dark Eco groups linger and generate their own bound trails, so
+      ;; do not spawn them at the old single-particle rate.
+      (set! (-> self background-mist-time) 0.18)
+
+      (let ((forward (new 'stack-no-clear 'vector))
+          (side (new 'stack-no-clear 'vector))
+          (center (new 'stack-no-clear 'vector))
+          (particle-pos (new 'stack-no-clear 'vector)))
+
+        ;; Same close forward depth as the Swamp and Village3 curtains.
+        (singlefish-vector-copy-safe! forward (-> self camera-axis))
+        (set! (-> forward y) 0.0)
+        (set! (-> forward w) 0.0)
+        (singlefish-vector-normalize-safe! forward 1.0)
+
+        (set! (-> side x) (-> forward z))
+        (set! (-> side y) 0.0)
+        (set! (-> side z) (- (-> forward x)))
+        (set! (-> side w) 0.0)
+        (singlefish-vector-normalize-safe! side 1.0)
+
+        (singlefish-vector-add-scaled-safe!
+          center
+          (-> self fisher-cam)
+          forward
+          (meters 27.0))
+        (singlefish-vector-add-scaled-safe!
+          center
+          center
+          (-> self playfield-axis)
+          (meters 27.75))
+        (set! (-> center y) (+ (-> self water-level) (meters 16.0)))
+        (set! (-> center w) 1.0)
+
+        ;; 2859 clone: overlapping purple bigpuffs are what make the intro
+        ;; actually fill the screen.  Keep them broad enough to form a complete
+        ;; curtain instead of enlarging the streak particles themselves.
+        (dotimes (i 5)
+          (singlefish-vector-add-scaled-safe!
+            particle-pos
+            center
+            side
+            (rand-vu-float-range (meters -48.0) (meters 48.0)))
+          (set!
+            (-> particle-pos y)
+            (+
+              (-> center y)
+              (rand-vu-float-range (meters -32.0) (meters 18.0))))
+          (set! (-> particle-pos w) 1.0)
+
+          (launch-particles
+            :system *sp-particle-system-3d*
+            (-> *part-id-table* 3586)
+            particle-pos))
+
+        ;; Use the REAL Dark Eco pool particle group for the little moving
+        ;; layer instead of the old straight-line 3584/3585 approximation.
+        ;;
+        ;; group-dark-eco-pool-nasty contains the same bound launcher chain the
+        ;; actual pools use:
+        ;;   starflash seeds -> conerot burst -> 2052/2054 hotdots ->
+        ;;   2053/2055 trailing continuations.
+        ;;
+        ;; That binding/cone/omega behavior is what creates the small curling
+        ;; swirl with a visible tail.
+        (dotimes (i 2)
+          (singlefish-vector-add-scaled-safe!
+            particle-pos
+            center
+            side
+            (rand-vu-float-range (meters -52.0) (meters 52.0)))
+          (set!
+            (-> particle-pos y)
+            (+
+              (-> center y)
+              (rand-vu-float-range (meters -34.0) (meters 20.0))))
+          (set! (-> particle-pos w) 1.0)
+
+          (process-spawn
+            part-tracker
+            :init
+            part-tracker-init
+            group-dark-eco-pool-nasty
+            -1
+            #f
+            #f
+            #f
+            particle-pos
+            :to
+            *entity-pool*)))))
+
+  (none))
+
 (defun fisher-build-background-curtain-vertex!
   ((self fisher-game)
     (dst vector)
@@ -6912,14 +7366,23 @@
               (the-as int (fisher-zone swamp-sludge)))
             (=
               (-> self location-id)
-              (the-as int (fisher-zone village3-lava))))
-          ;; Swamp and Village3 use the close curtain depth requested for their
-          ;; opaque sludge/lava pools instead of the standard distant wall.
+              (the-as int (fisher-zone village3-lava)))
+            (=
+              (-> self location-id)
+              (the-as int (fisher-zone maincave-dark-eco))))
+          ;; Swamp/Village3 use the existing close curtain.  Main Cave uses a
+          ;; curtain just behind its particle wall so the particles remain the
+          ;; frontmost background layer.
           (vector+float*!
             curtain-center
             (-> self fisher-cam)
             curtain-forward
-            (meters 32.0))
+            (if
+              (=
+                (-> self location-id)
+                (the-as int (fisher-zone maincave-dark-eco)))
+              (meters 30.0)
+              (meters 32.0)))
 
           (vector+float*!
             curtain-center
@@ -6956,6 +7419,13 @@
             (-> curtain-center y)
             (+ (-> self water-level) (meters 12.0))))
 
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone maincave-dark-eco)))
+          (set!
+            (-> curtain-center y)
+            (+ (-> self water-level) (meters 16.0))))
+
         (else
           (set! (-> curtain-center y) (-> self water-level))))
       (set! (-> curtain-center w) 1.0)
@@ -6983,6 +7453,12 @@
               (-> self location-id)
               (the-as int (fisher-zone village3-lava)))
             (fisher-village3-curtain-color! self active-curtain-color))
+
+          ((=
+              (-> self location-id)
+              (the-as int (fisher-zone maincave-dark-eco)))
+            ;; Nearly black with the faintest purple bias.
+            (set-vector! active-curtain-color 3.0 0.0 5.0 255.0))
 
           (else
             (set!
@@ -7119,22 +7595,40 @@
             (the-as int (fisher-zone village3-lava)))
           (fisher-force-lava-underwater-background! self))
 
+        ((=
+            (-> self location-id)
+            (the-as int (fisher-zone maincave-dark-eco)))
+          (fisher-force-dark-eco-underwater-background!))
+
         (else
           (fisher-force-underwater-background!)))
 
-      ;; Sunken deliberately exposes the real level background.
+      ;; Sunken exposes the real level background.  Snow keeps its normal
+      ;; background too: no artificial curtain and no shafts.
       (when
         (!= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
-        (fisher-draw-background-curtain! self)
         (when
-          (!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (!= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+          (fisher-draw-background-curtain! self))
+
+        (when
+          (and
+            (!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+            (!= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))))
           (fisher-submit-background-mist! self))
 
-        ;; Black sludge and lava have no sun shafts.
+        (when
+          (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+          (fisher-submit-dark-eco-background! self))
+
+        ;; Black sludge, lava, Snow, and the dark-eco particle wall have no
+        ;; ordinary sun shafts.
         (when
           (and
             (!= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
-            (!= (-> self location-id) (the-as int (fisher-zone village3-lava))))
+            (!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+            (!= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+            (!= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))))
           (fisher-submit-god-rays! self))))
 
     (else
@@ -7159,10 +7653,14 @@
 
       (smooth-progress (* depth-progress depth-progress (- 3.0 (* 2.0 depth-progress))))
 
-      (starting-y-speed -2.0)
+      (level-speed-mult
+        (fisher-level-lure-speed-multiplier))
+
+      (starting-y-speed
+        (* -2.0 level-speed-mult))
 
       (ending-y-speed
-        (- (-> self lure-fall-speed))))
+        (- (* (-> self lure-fall-speed) level-speed-mult))))
 
     (set!
       (-> self lure-y-velocity)
@@ -7185,7 +7683,9 @@
 
       (set! (-> self lure-x-velocity) 0.0)
 
-      (set! (-> self lure-y-velocity) (- (-> self lure-fall-speed)))
+      (set!
+        (-> self lure-y-velocity)
+        (- (* (-> self lure-fall-speed) level-speed-mult)))
 
       (set!
         (-> self cast-state)
@@ -7475,6 +7975,21 @@
         (cpad-pressed? 0 x))
 
       (cpad-clear! 0 x)
+
+      ;; Megaloviathan can hijack a line while another fish is already being
+      ;; reeled.  Only a successful X hook commits that takeover and deletes
+      ;; the displaced fish.
+      (when
+        (and
+          (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+          (>= (-> self hooked-fish-slot) 0)
+          (=
+            (fisher-fish-species self (-> self hooked-fish-slot))
+            (the-as int (fisher-species megaloviathan)))
+          (>= (-> self dark-eco-displaced-slot) 0))
+        (fisher-delete-resident-slot! self (-> self dark-eco-displaced-slot))
+        (set! (-> self dark-eco-displaced-slot) -1))
+
       (set! (-> self fish-state) 'reeling)
       (set! (-> self fish-scare-on-arrival?) #f)
       (set! (-> self fish-reel-progress) 0.0)
@@ -7733,6 +8248,16 @@
 
     ((= (-> self caught-fish-suffix) 16)
       (format *fish-ui-str* "SCREAMING FISH"))
+
+    ((and
+        (= (-> self caught-fish-species)
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (or
+          (= (-> self caught-power-cell-task)
+            (the-as int (game-task lavatube-end)))
+          (= (-> self caught-power-cell-task)
+            (the-as int (game-task lavatube-buzzer)))))
+      (format *fish-ui-str* "LAVA TUBE CELL FISH"))
 
     ((and
         (= (-> self caught-fish-species)
@@ -8291,6 +8816,7 @@
                   (-> data position)
                   *fisher-yellow-hook-hit-radius*)
                 (fisher-submit-yellow-explosion! self hook-pos)
+                (fisher-debug-print-lure-loss! self "YELLOW PROJECTILE HIT LURE")
                 (fisher-begin-lure-stolen-return! self)
                 (set! (-> self lure-destroyed?) #t)
                 (set! (-> self fish-message) "LURE DESTROYED")
@@ -9075,6 +9601,7 @@
         :system *sp-particle-system-3d*
         (-> *part-id-table* 3573)
         hook-pos))
+    (fisher-debug-print-lure-loss! self "LAVA / FIRE INCINERATED LURE")
     (fisher-begin-lure-stolen-return! self)
     (set! (-> self lure-incinerated?) #t)
     (set! (-> self fish-message) "LURE INCINERATED")
@@ -9317,6 +9844,462 @@
                 flame-pos)))))))
   (none))
 
+
+;; --------------------------------------------------------------------------
+;; Snow fishing obstacle: straight-crossing snowball
+;; --------------------------------------------------------------------------
+
+(deftype fisher-snowball-obstacle (process-drawable)
+  ((owner        (pointer fisher-game))
+   (side-axis    vector :inline)
+   (move-dir     vector :inline)
+   (spawn-pos    vector :inline)
+   (despawn-pos  vector :inline)
+   (side-sign    float)
+   (target-side  float)
+   (speed        float))
+  (:states fisher-snowball-obstacle-idle))
+
+(defun fisher-debug-draw-snowball-hitbox!
+  ((self fisher-snowball-obstacle))
+
+  (when *fisher-in-debug?*
+    (let ((center (-> self root trans))
+        (radius (meters 1.25))
+        (p0 (new 'stack-no-clear 'vector))
+        (p1 (new 'stack-no-clear 'vector))
+        (cyan (new 'static 'rgba :r #x20 :g #xff :b #xff :a #xff)))
+
+      ;; Exact hit sphere: three 24-segment great circles using the SAME
+      ;; 1.25m radius used by fisher-snowball-hook-hit?.
+      (dotimes (i 24)
+        (let* ((a0 (* (degrees 360.0) (/ (the float i) 24.0)))
+            (a1 (* (degrees 360.0) (/ (the float (+ i 1)) 24.0)))
+            (c0 (cos a0))
+            (s0 (sin a0))
+            (c1 (cos a1))
+            (s1 (sin a1)))
+
+          ;; XY ring
+          (singlefish-vector-copy-safe! p0 center)
+          (singlefish-vector-copy-safe! p1 center)
+          (+! (-> p0 x) (* radius c0))
+          (+! (-> p0 y) (* radius s0))
+          (+! (-> p1 x) (* radius c1))
+          (+! (-> p1 y) (* radius s1))
+          (set! (-> p0 w) 1.0)
+          (set! (-> p1 w) 1.0)
+          (fisher-debug-line! p0 p1 cyan)
+
+          ;; XZ ring
+          (singlefish-vector-copy-safe! p0 center)
+          (singlefish-vector-copy-safe! p1 center)
+          (+! (-> p0 x) (* radius c0))
+          (+! (-> p0 z) (* radius s0))
+          (+! (-> p1 x) (* radius c1))
+          (+! (-> p1 z) (* radius s1))
+          (set! (-> p0 w) 1.0)
+          (set! (-> p1 w) 1.0)
+          (fisher-debug-line! p0 p1 cyan)
+
+          ;; YZ ring
+          (singlefish-vector-copy-safe! p0 center)
+          (singlefish-vector-copy-safe! p1 center)
+          (+! (-> p0 y) (* radius c0))
+          (+! (-> p0 z) (* radius s0))
+          (+! (-> p1 y) (* radius c1))
+          (+! (-> p1 z) (* radius s1))
+          (set! (-> p0 w) 1.0)
+          (set! (-> p1 w) 1.0)
+          (fisher-debug-line! p0 p1 cyan)))
+
+      ;; Three full diameters make the sphere impossible to miss and also
+      ;; show its exact center.
+      (singlefish-vector-copy-safe! p0 center)
+      (singlefish-vector-copy-safe! p1 center)
+      (-! (-> p0 x) radius)
+      (+! (-> p1 x) radius)
+      (fisher-debug-line! p0 p1 cyan)
+
+      (singlefish-vector-copy-safe! p0 center)
+      (singlefish-vector-copy-safe! p1 center)
+      (-! (-> p0 y) radius)
+      (+! (-> p1 y) radius)
+      (fisher-debug-line! p0 p1 cyan)
+
+      (singlefish-vector-copy-safe! p0 center)
+      (singlefish-vector-copy-safe! p1 center)
+      (-! (-> p0 z) radius)
+      (+! (-> p1 z) radius)
+      (fisher-debug-line! p0 p1 cyan)))
+
+  (none))
+
+(defun fisher-debug-draw-snowball-trajectory!
+  ((self fisher-snowball-obstacle))
+
+  (when *fisher-in-debug?*
+    (let ((yellow (new 'static 'rgba :r #xff :g #xff :b #x20 :a #xff))
+        (red (new 'static 'rgba :r #xff :g #x20 :b #x20 :a #xff))
+        (a (new 'stack-no-clear 'vector))
+        (b (new 'stack-no-clear 'vector))
+        (mark-size (meters 0.9)))
+
+      ;; Exact full travel path from the point where this snowball spawned
+      ;; to the point where its despawn test becomes true.
+      (fisher-debug-line! (-> self spawn-pos) (-> self despawn-pos) yellow)
+
+      ;; Red 3-axis X/cross at the exact despawn point.
+      (singlefish-vector-copy-safe! a (-> self despawn-pos))
+      (singlefish-vector-copy-safe! b (-> self despawn-pos))
+      (-! (-> a x) mark-size)
+      (-! (-> a y) mark-size)
+      (+! (-> b x) mark-size)
+      (+! (-> b y) mark-size)
+      (fisher-debug-line! a b red)
+
+      (singlefish-vector-copy-safe! a (-> self despawn-pos))
+      (singlefish-vector-copy-safe! b (-> self despawn-pos))
+      (-! (-> a x) mark-size)
+      (+! (-> a y) mark-size)
+      (+! (-> b x) mark-size)
+      (-! (-> b y) mark-size)
+      (fisher-debug-line! a b red)
+
+      ;; A second X in the XZ plane keeps the marker readable from the
+      ;; fishing camera even when the first X is edge-on.
+      (singlefish-vector-copy-safe! a (-> self despawn-pos))
+      (singlefish-vector-copy-safe! b (-> self despawn-pos))
+      (-! (-> a x) mark-size)
+      (-! (-> a z) mark-size)
+      (+! (-> b x) mark-size)
+      (+! (-> b z) mark-size)
+      (fisher-debug-line! a b red)
+
+      (singlefish-vector-copy-safe! a (-> self despawn-pos))
+      (singlefish-vector-copy-safe! b (-> self despawn-pos))
+      (-! (-> a x) mark-size)
+      (+! (-> a z) mark-size)
+      (+! (-> b x) mark-size)
+      (-! (-> b z) mark-size)
+      (fisher-debug-line! a b red)))
+
+  (none))
+
+(defun fisher-snowball-hook-hit?
+  ((owner fisher-game) (ball fisher-snowball-obstacle))
+  ;; Snowballs steal the lure ONLY by physically hitting the hook/lure point.
+  ;; The fishing line itself is not collidable.
+  (let ((snow-pos (-> ball root trans)))
+    (when
+      (and
+        (-> owner casted?)
+        (= (-> owner cast-state) 'line-active)
+
+        ;; Do not steal the lure while a fish is already being reeled.
+        (not (= (-> owner fish-state) 'reeling))
+
+        ;; The 10m approach/exit margins remain harmless warning space.
+        (>= (vector-vector-distance snow-pos (-> ball spawn-pos)) (meters 10.0))
+        (>= (vector-vector-distance snow-pos (-> ball despawn-pos)) (meters 10.0)))
+
+      (let ((hook-pos (new 'stack-no-clear 'vector))
+          (delta (new 'stack-no-clear 'vector))
+          (hit-distance 0.0))
+
+        ;; This is the exact hook/lure anchor used by the fishing system.
+        (fisher-hook-target! owner hook-pos)
+
+        (vector-! delta snow-pos hook-pos)
+        (set! hit-distance (vector-length delta))
+
+        (when (<= hit-distance (meters 1.25))
+          ;; Debug mode affects diagnostics ONLY.  The collision itself works
+          ;; identically in retail.
+          (when *fisher-in-debug?*
+            (format #t "[FISHER] SNOWBALL HOOK COLLISION TRUE~%")
+            (format #t "[FISHER] snowball-pos: ~A~%" snow-pos)
+            (format #t "[FISHER] hook-pos: ~A~%" hook-pos)
+            (format #t "[FISHER] distance-to-hook: ~F~%" hit-distance)
+            (format #t "[FISHER] hit-radius: ~F~%" (meters 1.25))
+            (format
+              #t
+              "[FISHER] distance-from-spawn: ~F~%"
+              (vector-vector-distance snow-pos (-> ball spawn-pos)))
+            (format
+              #t
+              "[FISHER] distance-to-despawn: ~F~%"
+              (vector-vector-distance snow-pos (-> ball despawn-pos))))
+
+          ;; IMPORTANT: this return is deliberately OUTSIDE the debug gate.
+          (return #t)))))
+
+  #f)
+
+(defun fisher-snowball-obstacle-finish! ((self fisher-snowball-obstacle))
+  ;; Each snowball owns its own lifetime.  Do not touch a shared process
+  ;; handle here; multiple snowballs may be active at once.
+  (deactivate self)
+  (none))
+
+(defstate fisher-snowball-obstacle-idle (fisher-snowball-obstacle)
+  :trans
+  (behavior ()
+    (let ((owner (the-as fisher-game (-> self owner)))
+        (dt (-> *display* seconds-per-frame)))
+
+      (cond
+        ((or
+            (not owner)
+            (!= (-> owner location-id) (the-as int (fisher-zone snow-ice)))
+            (not (-> owner casted?))
+            (= (-> owner cast-state) 'lure-stolen-return))
+          (fisher-snowball-obstacle-finish! self))
+
+        (else
+          ;; Constant side-to-side motion: no steering and no path following.
+          (vector+float*!
+            (-> self root trans)
+            (-> self root trans)
+            (-> self move-dir)
+            (* (-> self speed) dt))
+          (set! (-> self root trans w) 1.0)
+
+          ;; Snowball debug: exact hit sphere, full yellow trajectory,
+          ;; and red X at the exact despawn point.
+          (fisher-debug-draw-snowball-hitbox! self)
+          (fisher-debug-draw-snowball-trajectory! self)
+
+          (cond
+            ((fisher-snowball-hook-hit? owner self)
+              (fisher-debug-print-lure-loss! owner "SNOWBALL HIT HOOK")
+              (fisher-begin-lure-stolen-return! owner)
+              (fisher-snowball-obstacle-finish! self))
+
+            (else
+              ;; Measure signed side displacement from the fishing-player
+              ;; origin. target-side is 10m past the opposite lane edge.
+              (let ((relative (new 'stack-no-clear 'vector)))
+                (vector-! relative (-> self root trans) (-> owner fishing-player-pos))
+                (when
+                  (if (> (-> self side-sign) 0.0)
+                    (<= (vector-dot relative (-> self side-axis)) (-> self target-side))
+                    (>= (vector-dot relative (-> self side-axis)) (-> self target-side)))
+                  (fisher-snowball-obstacle-finish! self)))))))))
+  :code
+  (behavior ()
+    (ja-channel-set! 1)
+    (ja :group! snow-ball-idle-ja :num! min)
+    (transform-post)
+    (loop
+      (suspend)))
+  :post ja-post)
+
+(defbehavior fisher-snowball-obstacle-init fisher-snowball-obstacle
+  ((owner fisher-game) (side-sign float) (forward-distance float) (spawn-y float))
+  ;; process-drawable's transform path expects a collide-shape root.
+  ;; We do not add a collision primitive here: line collision is handled
+  ;; manually by fisher-snowball-hook-hit?.
+  (let ((root
+          (new 'process
+            'collide-shape-moving
+            self
+            (collide-list-enum hit-by-others))))
+    (set! (-> root dynam) (copy *standard-dynamics* 'process))
+    (set! (-> root reaction) default-collision-reaction)
+    (set! (-> root no-reaction)
+      (the-as
+        (function collide-shape-moving collide-shape-intersect vector vector none)
+        nothing))
+
+    ;; A collide-shape root must have a root primitive before initialize-skeleton.
+    (let ((prim
+            (new 'process
+              'collide-shape-prim-sphere
+              root
+              (the-as uint 0))))
+      (set! (-> prim prim-core collide-as) (collide-kind enemy))
+      (set! (-> prim collide-with) (collide-kind target))
+      (set! (-> prim prim-core action) (collide-action solid))
+      (set! (-> prim prim-core offense) (collide-offense indestructible))
+
+      ;; Microscopic engine collision only; fishing-line collision is manual.
+      (set-vector! (-> prim local-sphere) 0.0 0.0 0.0 1.0)
+      (set-root-prim! root prim))
+
+    (backup-collide-with-as root)
+    (set! (-> self root) root))
+
+  (set! (-> self owner) (the-as (pointer fisher-game) owner))
+  (set! (-> self side-sign) side-sign)
+  (set! (-> self speed) (meters 3.25))
+
+  ;; Literal screen-left/right basis. camera-axis points horizontally
+  ;; into the fishing view, so its perpendicular is the camera's horizontal
+  ;; right vector.  Using playfield-axis here made Snowballs travel
+  ;; toward/away from the camera in the Snow setup.
+  (set! (-> self side-axis x) (-> owner camera-axis z))
+  (set! (-> self side-axis y) 0.0)
+  (set! (-> self side-axis z) (- (-> owner camera-axis x)))
+  (set! (-> self side-axis w) 0.0)
+  (vector-normalize! (-> self side-axis) 1.0)
+
+  ;; Find the TRUE screen-left/screen-right extent of the entire fishing
+  ;; rectangle, not just a fixed distance from Jak.  Snow's playfield is
+  ;; strongly diagonal relative to the camera, so its far end projects much
+  ;; farther sideways on screen than its near end.
+  (let* ((play-side (new 'stack-no-clear 'vector))
+      (near-distance (meters 3.5))
+      (far-distance (fisher-playfield-far-distance owner))
+      (half-width (meters 1.5))
+      (forward-dot (vector-dot (-> owner playfield-axis) (-> self side-axis)))
+      (near-proj (* near-distance forward-dot))
+      (far-proj (* far-distance forward-dot))
+      (lane-dot 0.0)
+      (lane-proj 0.0)
+      (left-edge 0.0)
+      (right-edge 0.0)
+      (spawn-proj 0.0)
+      (base-proj (* forward-distance forward-dot))
+      (side-offset 0.0))
+
+    ;; Actual +/-1.5m fish lane axis.
+    (set! (-> play-side x) (-> owner playfield-axis z))
+    (set! (-> play-side y) 0.0)
+    (set! (-> play-side z) (- (-> owner playfield-axis x)))
+    (set! (-> play-side w) 0.0)
+    (vector-normalize! play-side 1.0)
+
+    (set! lane-dot (fabs (vector-dot play-side (-> self side-axis))))
+    (set! lane-proj (* half-width lane-dot))
+
+    ;; These are the leftmost/rightmost screen-horizontal projections of all
+    ;; four corners of the complete fishable rectangle.
+    (set! left-edge (- (fmin near-proj far-proj) lane-proj))
+    (set! right-edge (+ (fmax near-proj far-proj) lane-proj))
+
+    ;; Spawn a full 10m beyond whichever OUTER edge was selected.
+    (set!
+      spawn-proj
+      (if (> side-sign 0.0)
+        (+ right-edge (meters 10.0))
+        (- left-edge (meters 10.0))))
+
+    ;; We already place the ball forward by forward-distance. Remove that
+    ;; forward vector's screen-horizontal projection so the final point lands
+    ;; exactly on spawn-proj, regardless of the randomly chosen depth.
+    (set! side-offset (- spawn-proj base-proj))
+
+    (singlefish-vector-add-scaled-safe!
+      (-> self root trans)
+      (-> owner fishing-player-pos)
+      (-> owner playfield-axis)
+      forward-distance)
+    (singlefish-vector-add-scaled-safe!
+      (-> self root trans)
+      (-> self root trans)
+      (-> self side-axis)
+      side-offset)
+
+    ;; Travel until 10m beyond the opposite TRUE edge.
+    (set!
+      (-> self target-side)
+      (if (> side-sign 0.0)
+        (- left-edge (meters 10.0))
+        (+ right-edge (meters 10.0)))))
+
+  (set! (-> self root trans y) spawn-y)
+  (set! (-> self root trans w) 1.0)
+
+  ;; Move straight toward and through the playfield. Never steer.
+  (singlefish-vector-scale-safe!
+    (-> self move-dir)
+    (-> self side-axis)
+    (- side-sign))
+
+  ;; Cache exact world-space debug endpoints once.  These are also derived
+  ;; from the same target-side value used by the real despawn test.
+  (singlefish-vector-copy-safe! (-> self spawn-pos) (-> self root trans))
+  (let ((relative (new 'stack-no-clear 'vector))
+      (current-side 0.0)
+      (remaining-side 0.0))
+    (vector-! relative (-> self root trans) (-> owner fishing-player-pos))
+    (set! current-side (vector-dot relative (-> self side-axis)))
+    (set! remaining-side (- (-> self target-side) current-side))
+    (singlefish-vector-add-scaled-safe!
+      (-> self despawn-pos)
+      (-> self root trans)
+      (-> self side-axis)
+      remaining-side)
+    (set! (-> self despawn-pos y) spawn-y)
+    (set! (-> self despawn-pos w) 1.0))
+
+  (set! (-> self root scale x) 0.65)
+  (set! (-> self root scale y) 0.65)
+  (set! (-> self root scale z) 0.65)
+  (set! (-> self root scale w) 1.0)
+  (quaternion-identity! (-> self root quat))
+
+  (initialize-skeleton self *fisher-snow-ball-sgc* '())
+  (logclear! (-> self mask) (process-mask actor-pause))
+  (go fisher-snowball-obstacle-idle)
+  (none))
+
+(defun fisher-reset-snowball-obstacle! ((self fisher-game))
+  ;; Active snowballs clean themselves up on their next update when the cast
+  ;; or Snow fishing session ends.  Only reset the shared spawn clock here.
+  (set! (-> self snowball-handle) (the-as handle #f))
+  (set! (-> self snowball-spawn-timer) (rand-vu-float-range 1.8 3.5))
+  (none))
+
+(defun fisher-update-snowball-obstacle! ((self fisher-game))
+  (cond
+    ((!= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (fisher-reset-snowball-obstacle! self))
+
+    ((or
+        (not (-> self casted?))
+        (not
+          (or
+            (= (-> self cast-state) 'casting)
+            (= (-> self cast-state) 'water-entry)
+            (= (-> self cast-state) 'line-active))))
+      ;; Existing balls will see the invalid cast state and despawn themselves.
+      (fisher-reset-snowball-obstacle! self))
+
+    (else
+      ;; No single-active-ball gate: every timer expiration may launch another
+      ;; crossing snowball, so several can coexist in the playfield.
+      (-! (-> self snowball-spawn-timer) (-> *display* seconds-per-frame))
+      (when (<= (-> self snowball-spawn-timer) 0.0)
+        (let* ((side-sign (if (rand-vu-percent? 0.5) 1.0 -1.0))
+            (forward-distance
+              (rand-vu-float-range
+                (meters 7.0)
+                (- (fisher-playfield-far-distance self) (meters 4.0))))
+            (top-y (- (-> self water-level) (meters 2.0)))
+            (bottom-y
+              (+ (- (-> self water-level) (fisher-playfield-max-depth self))
+                (meters 2.0)))
+            (spawn-y (rand-vu-float-range bottom-y top-y)))
+
+          ;; side-sign chooses which side of the screen it starts on.
+          ;; fisher-snowball-obstacle-init sets move-dir to -side-sign, so the
+          ;; ball always moves inward through the playfield and exits opposite.
+          (process-spawn
+            fisher-snowball-obstacle
+            :init fisher-snowball-obstacle-init
+            self
+            side-sign
+            forward-distance
+            spawn-y
+            :to self)
+
+          (set! (-> self snowball-spawn-timer)
+            (rand-vu-float-range 1.8 3.5))))))
+
+  (none))
+
 (defun fisher-update-lava-fire-system! ((self fisher-game))
   (cond
     ((!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
@@ -9431,12 +10414,46 @@
 
   (none))
 
+(defun fisher-update-dark-eco-teleport! ((self fisher-game))
+  (when
+    (and
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      *fisher-session-active?*)
+    (let ((dt (-> *display* seconds-per-frame)))
+      (-! (-> self dark-eco-teleport-timer) dt)
+
+      ;; Exactly ten seconds before the swap, warn once.
+      (when
+        (and
+          (<= (-> self dark-eco-teleport-timer) 10.0)
+          (not (-> self dark-eco-warning-played?)))
+        (set! (-> self dark-eco-warning-played?) #t)
+        (play-sound-file
+          "dark-eco-warning.mp3"
+          (the int (-> *setting-control* current sfx-volume))))
+
+      ;; Fire on the actual 45-second cadence even during a fish encounter.
+      ;; The teleport helper changes resident logical locations only; the
+      ;; currently hooked/reeling fish remains owned by the hook state machine,
+      ;; while every free resident snaps to its swapped location this frame.
+      (when
+        (<= (-> self dark-eco-teleport-timer) 0.0)
+        (fisher-dark-eco-teleport-fish! self)
+        (set! (-> self dark-eco-teleport-timer) 45.0)
+        (set! (-> self dark-eco-warning-played?) #f)
+        (when *fisher-in-debug?*
+          (format #t "[FISHER] DARK ECO FISH TELEPORTED~%")))))
+
+  (none))
+
 (defun fisher-update-casting! ((self fisher-game))
   (fisher-update-ability-cooldowns! self)
+  (fisher-update-dark-eco-teleport! self)
   (fisher-update-voltage-surge! self)
   (fisher-update-electric-system! self)
   (fisher-update-yellow-system! self)
   (fisher-update-lava-fire-system! self)
+  (fisher-update-snowball-obstacle! self)
   (fisher-submit-village3-lava-ambient! self)
   (fisher-submit-lava-fish-effects! self)
   (fisher-draw-voltage-meter! self)
@@ -9978,19 +10995,34 @@
   (behavior ()
     (set! *fisher-session-active?* #t)
 
+    (when
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (set! (-> self dark-eco-teleport-timer) 45.0)
+      (set! (-> self dark-eco-warning-played?) #f)
+      (set! (-> self dark-eco-displaced-slot) -1))
+
     (set! (-> *target* root trans quad) (-> self fishing-player-pos quad))
 
     (set! (-> *target* control trans quad) (-> self fishing-player-pos quad))
 
     (play-main-music
-      (if
-        (or
-          (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
-          (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
-          (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
-          (= (-> self location-id) (the-as int (fisher-zone village3-lava))))
-        "fishing-theme-b.mp3"
-        "fishing-theme-a.wav")
+      (cond
+        ;; Main Cave / Spider Cave Dark Eco pool gets its own fishing theme.
+        ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+          "dark-eco-pool-theme.mp3")
+
+        ;; Lava pool gets its own fishing theme.
+        ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          "lava-pool-theme.mp3")
+
+        ((or
+            (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
+            (= (-> self location-id) (the-as int (fisher-zone village2-electric)))
+            (= (-> self location-id) (the-as int (fisher-zone sunken-voltage))))
+          "fishing-theme-b.mp3")
+
+        (else
+          "fishing-theme-a.wav"))
       (the int (-> *setting-control* current sfx-volume)))
     (set! (-> self stored-music-vol) (-> *setting-control* current music-volume))
     (set-setting! 'music-volume 'abs 0.0 0)

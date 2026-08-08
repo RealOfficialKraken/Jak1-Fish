@@ -1,8 +1,14 @@
 ;;-*-Lisp-*-
 (in-package goal)
 (bundles "JUN.DGO")
+(require "engine/common-obs/water-anim.gc")
 
 ;name: fisher-game-h.gc
+
+;; Runtime Snow water patch.  The concrete type is defined in fisher-hooks.gc.
+(declare-type fisher-snow-water water-anim)
+(define-extern *fisher-snow-water* (pointer fisher-snow-water))
+
 
 ;;this file is used for everything pertaining to defining everything externally
 
@@ -11,11 +17,11 @@
 (define *fisher-stop-lure-unlock-level* 2)
 (define *fisher-stop-lure-active-seconds* 3.0)
 (define *fisher-stop-lure-cooldown-seconds* 20.0)
-(define *fisher-sink-lure-unlock-level* 5)
-(define *fisher-tug-line-unlock-level* 7)
-(define *fisher-fishing-clock-unlock-level* 10)
-(define *fisher-rip-line-unlock-level* 12)
-(define *fisher-heal-line-unlock-level* 14)
+(define *fisher-sink-lure-unlock-level* 4)
+(define *fisher-tug-line-unlock-level* 6)
+(define *fisher-fishing-clock-unlock-level* 8)
+(define *fisher-rip-line-unlock-level* 10)
+(define *fisher-heal-line-unlock-level* 12)
 (define *fisher-sink-lure-active-seconds* 3.5)
 (define *fisher-sink-lure-cooldown-seconds* 15.0)
 (define *fisher-tug-line-active-seconds* 2.0)
@@ -253,6 +259,8 @@
 (define *fisher-max-fish-slots* 30)
 
 (define-extern *fisher-platformius-plat-sgc* skeleton-group)
+(define-extern *fisher-ice-crystal-sgc* skeleton-group)
+(define-extern *fisher-snow-ball-sgc* skeleton-group)
 
 (defenum fisher-species
   (eco-drum 0)
@@ -270,7 +278,14 @@
   (black-lurker-shark 12)
   (lava-drum 13)
   (magma-serpent 14)
-  (inferno-shark 15))
+  (inferno-shark 15)
+  (frost-biter 16)
+  (crystal-fish 17)
+  (ice-shark 18)
+  (helix-voidfish 19)
+  (dark-precursor-fangfish 20)
+  (phantasm-shark 21)
+  (megaloviathan 22))
 
 (defenum fisher-zone
   (sandover-dock 0)
@@ -281,7 +296,9 @@
   (village2-electric 5)
   (sunken-voltage 6)
   (swamp-sludge 7)
-  (village3-lava 8))
+  (village3-lava 8)
+  (snow-ice 9)
+  (maincave-dark-eco 10))
 
 (deftype fisher-species-info (basic)
   ((name                 string)
@@ -326,14 +343,14 @@
     (shark-chance           float)
     (fire-canyon-cellfish?  symbol)))
 
-(define *fisher-species-count* 16)
-(define *fisher-zone-count* 9)
+(define *fisher-species-count* 23)
+(define *fisher-zone-count* 11)
 
 (deftype fisher-species-table (basic)
-  ((entry fisher-species-info 16 :inline)))
+  ((entry fisher-species-info 23 :inline)))
 
 (deftype fisher-zone-table (basic)
-  ((entry fisher-zone-info 9 :inline)))
+  ((entry fisher-zone-info 11 :inline)))
 
 (define *fisher-species-table* (new 'global 'fisher-species-table))
 (define *fisher-zone-table* (new 'global 'fisher-zone-table))
@@ -373,7 +390,7 @@
 (define *fisher-fish-runtime* (new 'global 'fisher-fish-runtime))
 
 
-(define *fisher-max-button-fight-slots* 7)
+(define *fisher-max-button-fight-slots* 20)
 
 (deftype fisher-button-fight-slot (structure)
   ((state       int32)
@@ -391,7 +408,7 @@
     (elapsed       float)
     (wrong-mask    int32)
     (hint-visible? symbol)
-    (slot fisher-button-fight-slot 7 :inline)))
+    (slot fisher-button-fight-slot 20 :inline)))
 
 (define *fisher-button-fight-runtime*
   (new 'global 'fisher-button-fight-runtime))
@@ -541,6 +558,11 @@
     (lava-fire-slot               int)
     (lava-trail-time              float)
     (lava-flame-time              float)
+    (snowball-spawn-timer         float)
+    (snowball-handle              handle)
+    (dark-eco-teleport-timer      float)
+    (dark-eco-warning-played?     symbol)
+    (dark-eco-displaced-slot      int)
     (catch-transition-time        float)
     (catch-menu-offset            float)
     (sandover-eco-count           int)
@@ -655,6 +677,7 @@
 (defun-extern fisher-update-xp-gain-animation! none)
 (defun-extern fisher-calculate-catch-xp int int int)
 (defun-extern fisher-current-level int)
+(defun-extern fisher-level-lure-speed-multiplier float)
 (defun-extern fisher-draw-xp-meter! none)
 (defun-extern fisher-draw-skill-cooldowns! fisher-game none)
 (defun-extern fisher-camera-follow-lure! fisher-game none)
@@ -775,6 +798,10 @@
 (defun-extern fisher-configure-sunken-table! fisher-game none)
 (defun-extern fisher-configure-swamp-table! fisher-game none)
 (defun-extern fisher-configure-village3-table! fisher-game none)
+(defun-extern fisher-configure-snow-table! fisher-game none)
+(defun-extern fisher-configure-dark-eco-table! fisher-game none)
+(defun-extern fisher-dark-eco-teleport-fish! fisher-game none)
+(defun-extern fisher-delete-resident-slot! fisher-game int none)
 (defun-extern fisher-count-live-species fisher-game int int)
 (defun-extern fisher-fish-species fisher-game int int)
 (defun-extern fisher-fish-speed fisher-game int float)
@@ -794,6 +821,7 @@
 (defun-extern fisher-apply-hidden-population-count! fisher-game symbol none)
 (defun-extern fisher-maintain-pool-rendering! fisher-game none)
 (defun-extern fisher-set-resident-fish-visible! fisher-game symbol none)
+(defun-extern fisher-pool-visuals-needed? fisher-game symbol)
 (defun-extern fisher-pool-fish-invisible? fisher-game symbol)
 (defun-extern fisher-remove-lure-snake! fisher-game none)
 (defun-extern fisher-set-fish-cooldown! fisher-game int float none)
@@ -811,6 +839,7 @@
 (defun-extern fisher-rare-fish? int symbol)
 (defun-extern fisher-spawn-rare-fish-attachments! manipy int symbol none)
 (defun-extern fisher-spawn-rare-attachment! manipy skeleton-group vector float string (pointer manipy))
+(defun-extern fisher-spawn-snow-ice-crystal! manipy int symbol none)
 (defun-extern fisher-update-rare-attachment-transform! manipy none)
 (defun-extern fisher-update-rare-attachment-rotated! manipy float float float float none)
 (defun-extern fisher-configure-rare-orb! (pointer manipy) float float float none)

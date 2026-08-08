@@ -26,16 +26,24 @@
 
 
 (defun fisher-playfield-far-distance ((self fisher-game))
-  (if
-    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
-    *fisher-sunken-far-distance*
-    (meters 55.5)))
+  (cond
+    ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+      *fisher-sunken-far-distance*)
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (meters 70.6917))
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (meters 58.9957))
+    (else (meters 55.5))))
 
 (defun fisher-playfield-max-depth ((self fisher-game))
-  (if
-    (= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
-    *fisher-sunken-max-depth*
-    (meters 36.0)))
+  (cond
+    ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
+      *fisher-sunken-max-depth*)
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (meters 19.6246))
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (meters 34.5113))
+    (else (meters 36.0))))
 
 (defun fisher-set-zone-species-range!
   ((zone fisher-zone-info)
@@ -265,6 +273,60 @@
     40 60 2.0 0.38 0.22 1.00 0.035 0.005
     (meters 4.0) (meters 8.0))
 
+  ;; Snow fishing species.  The per-zone appearance pass forces all three to
+  ;; the same bright cyan even when ordinary suffix tinting is present.
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species frost-biter))
+    "FROST BITER"
+    *catch-fisha-sgc*
+    50 100 2.0 0.70 0.42 0.05 1.00 1.00
+    (meters 2.0) (meters 6.0))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species crystal-fish))
+    "CRYSTAL FISH"
+    *catch-fishb-sgc*
+    100 150 3.0 1.55 1.05 0.05 1.00 1.00
+    (meters 18.2) (meters 19.2))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species ice-shark))
+    "ICE SHARK"
+    *sharkey-sgc*
+    50 100 2.5 0.34 0.18 0.05 1.00 1.00
+    (meters 9.0) (meters 15.0))
+
+  ;; Main Cave dark-eco pool.  The 34.5113m water column is divided into
+  ;; three clean vertical bands so topwater/deepwater/bottom-feeder fish use
+  ;; the whole pool without stacking into one narrow depth range.
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species helix-voidfish))
+    "HELIX VOIDFISH"
+    *fisher-junglefish-sg*
+    30 300 3.4 0.90 0.58 0.52 0.005 1.00
+    (meters 2.0) (meters 10.5))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species dark-precursor-fangfish))
+    "DARK PRECURSOR FANGFISH"
+    *catch-fishc-sgc*
+    30 300 3.8 0.88 0.56 0.030 0.002 0.18
+    (meters 24.0) (meters 33.5))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species phantasm-shark))
+    "PHANTASM SHARK"
+    *sharkey-sgc*
+    100 400 4.4 0.72 0.42 0.001 0.001 0.001
+    (meters 12.0) (meters 22.5))
+
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species megaloviathan))
+    "MEGALOVIATHAN"
+    *fisher-junglefish-sg*
+    2000 4000 7.5 2.00 4.00 0.015 0.000 0.060
+    (meters 16.0) (meters 18.5))
+
   (dotimes (species *fisher-species-count*)
     (fisher-set-normal-fight-info!
       (fisher-species-info-for species)))
@@ -431,6 +493,99 @@
     (-> (fisher-species-info-for (fisher-species inferno-shark)) snap-on-bite?)
     #t)
 
+  ;; Snow: Frost Biter and Crystal Fish use ordinary reel fights only; Ice
+  ;; Shark uses the reusable button fight.  All three may steal the lure.
+  (let ((frost (fisher-species-info-for (fisher-species frost-biter))))
+    (set! (-> frost fight-chance) 0.24)
+    (set! (-> frost fight-pull-speed) (meters 1.05))
+    (set! (-> frost fight-recover-min) 1.00)
+    (set! (-> frost fight-recover-max) 1.55))
+
+  (let ((crystal (fisher-species-info-for (fisher-species crystal-fish))))
+    (set! (-> crystal fight-chance) 0.25)
+    (set! (-> crystal fight-pull-speed) (meters 1.15))
+    (set! (-> crystal fight-recover-min) 1.00)
+    (set! (-> crystal fight-recover-max) 1.55))
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species ice-shark))
+    (meters 1.55)
+    0.75
+    1.15
+    0.42
+    5
+    9
+    0.20
+    0.31
+    150.0
+    162.0
+    0.0
+    1.0)
+
+  (set! (-> (fisher-species-info-for (fisher-species frost-biter)) snap-on-bite?) #t)
+  (set! (-> (fisher-species-info-for (fisher-species crystal-fish)) snap-on-bite?) #t)
+  (set! (-> (fisher-species-info-for (fisher-species ice-shark)) snap-on-bite?) #t)
+
+  ;; Main Cave dark-eco fish all have extremely short hook windows.
+  ;; Helix/Phantasm/Megaloviathan use the reusable button fight; Fangfish
+  ;; keeps the ordinary reel fight.  The runtime hook-window code applies
+  ;; the zone-specific fast steal timer.
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species helix-voidfish))
+    (meters 1.55)
+    0.72
+    1.10
+    0.38
+    2
+    10
+    0.17
+    0.30
+    154.0
+    166.0
+    0.0
+    1.0)
+
+  (let ((fang (fisher-species-info-for (fisher-species dark-precursor-fangfish))))
+    (set! (-> fang fight-chance) 0.30)
+    (set! (-> fang fight-pull-speed) (meters 1.30))
+    (set! (-> fang fight-recover-min) 0.80)
+    (set! (-> fang fight-recover-max) 1.25))
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species phantasm-shark))
+    (meters 1.85)
+    0.62
+    0.95
+    0.56
+    5
+    10
+    0.15
+    0.26
+    158.0
+    170.0
+    0.0
+    1.0)
+
+  (fisher-set-button-fight-info!
+    (fisher-species-info-for (fisher-species megaloviathan))
+    (meters 2.10)
+    0.48
+    0.78
+    0.72
+    12
+    20
+    0.12
+    0.22
+    162.0
+    174.0
+    0.0
+    1.0)
+
+  (set! (-> (fisher-species-info-for (fisher-species helix-voidfish)) snap-on-bite?) #t)
+  (set! (-> (fisher-species-info-for (fisher-species dark-precursor-fangfish)) snap-on-bite?) #t)
+  (set! (-> (fisher-species-info-for (fisher-species phantasm-shark)) snap-on-bite?) #t)
+  (set! (-> (fisher-species-info-for (fisher-species megaloviathan)) snap-on-bite?) #t)
+
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone sandover-dock))
     1 3 3 6 8 14 0.0)
@@ -492,6 +647,27 @@
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village3-lava)) 0 (fisher-species lava-drum) 4 5 6 7)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village3-lava)) 1 (fisher-species magma-serpent) 3 3 4 4)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone village3-lava)) 2 (fisher-species inferno-shark) 8 10 10 14)
+
+
+  ;; Snow pool.  Custom builder below enforces the exact requested species
+  ;; counts; these ranges are also used as replacement weights.
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone snow-ice))
+    18 20 15 19 19 26 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone snow-ice)) 0 (fisher-species frost-biter) 4 5 5 7)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone snow-ice)) 1 (fisher-species crystal-fish) 1 2 2 3)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone snow-ice)) 2 (fisher-species ice-shark) 10 12 12 16)
+
+  ;; Main Cave dark-eco pool.  Fishing levels continue upward from Snow.
+  ;; Megaloviathan is always exactly one resident and is kept in slot zero by
+  ;; the custom builder below.
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone maincave-dark-eco))
+    21 25 6 19 14 25 0.0)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 0 (fisher-species helix-voidfish) 2 10 5 10)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 1 (fisher-species dark-precursor-fangfish) 2 6 6 10)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 2 (fisher-species phantasm-shark) 1 2 2 4)
+  (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 3 (fisher-species megaloviathan) 1 1 1 1)
 
   (set! (-> (fisher-zone-info-for (fisher-zone sandover-dock)) fire-canyon-cellfish?) #t)
   (set! (-> (fisher-zone-info-for (fisher-zone jungle-pillar)) fire-canyon-cellfish?) #t)
@@ -877,18 +1053,22 @@
   (none))
 
 (defun fisher-set-fish-depth! ((self fisher-game) (slot int) (value float))
-  ;; Village3 Scout Flies are deepwater-only.  Enforce this at the shared
-  ;; setter so respawns, rerolls, replacements, and later depth changes cannot
-  ;; move one into the topwater or bottom-feeder bands.
+  ;; Village3 Scout Flies live on deepwater; Snow Scout Flies live on the
+  ;; bottom plane.  Enforce both at the shared setter.
   (set!
     (-> self fish-data slot slot depth)
-    (if
-      (and
-        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
-        (= (fisher-fish-species self slot)
-          (the-as int (fisher-species scout-fly))))
-      (meters 27.5)
-      value))
+    (cond
+      ((and
+          (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+          (= (fisher-fish-species self slot)
+            (the-as int (fisher-species scout-fly))))
+        (meters 27.5))
+      ((and
+          (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+          (= (fisher-fish-species self slot)
+            (the-as int (fisher-species scout-fly))))
+        (meters 19.2))
+      (else value)))
   (none))
 
 (defun fisher-set-fish-direction! ((self fisher-game) (slot int) (value float))
@@ -1087,14 +1267,23 @@
 (defun fisher-species-name
   ((self fisher-game) (species int))
 
-  (if
-    (and
-      (= species (the-as int (fisher-species fire-canyon-cellfish)))
-      (or
-        (= (-> self caught-power-cell-task) (the-as int (game-task ogre-boss)))
-        (= (-> self caught-power-cell-task) (the-as int (game-task ogre-end)))))
-    "MOUNTAIN PASS CELL FISH"
-    (-> (fisher-species-info-for species) name)))
+  (cond
+    ((and
+        (= species (the-as int (fisher-species fire-canyon-cellfish)))
+        (or
+          (= (-> self caught-power-cell-task) (the-as int (game-task lavatube-end)))
+          (= (-> self caught-power-cell-task) (the-as int (game-task lavatube-buzzer)))))
+      "LAVA TUBE CELL FISH")
+
+    ((and
+        (= species (the-as int (fisher-species fire-canyon-cellfish)))
+        (or
+          (= (-> self caught-power-cell-task) (the-as int (game-task ogre-boss)))
+          (= (-> self caught-power-cell-task) (the-as int (game-task ogre-end)))))
+      "MOUNTAIN PASS CELL FISH")
+
+    (else
+      (-> (fisher-species-info-for species) name))))
 
 (defun fisher-suffix-value-multiplier ((suffix int))
   (cond
@@ -1134,6 +1323,32 @@
           (= species (the-as int (fisher-species lava-drum)))
           (= species (the-as int (fisher-species magma-serpent)))
           (= species (the-as int (fisher-species inferno-shark)))))
+      (return base-weight))
+
+    ;; Snow ordinary catches also keep the authored 5-10 / 10-15 / 5-10 lb
+    ;; species ranges.  True rare-fish suffixes retain their special weights.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (not (fisher-rare-fish? suffix))
+        (or
+          (= species (the-as int (fisher-species frost-biter)))
+          (= species (the-as int (fisher-species crystal-fish)))
+          (= species (the-as int (fisher-species ice-shark)))))
+      (return base-weight))
+
+    ;; Main Cave species always stay inside their authored weight ranges,
+    ;; even when a global rare suffix is rolled.  Rare suffix visuals/attachments
+    ;; are still preserved; they just cannot turn a 3-30lb Void/Fangfish or a
+    ;; 10-40lb Phantasm into an out-of-range 100lb catch.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+        (or
+          (= species (the-as int (fisher-species helix-voidfish)))
+          (= species (the-as int (fisher-species dark-precursor-fangfish)))
+          (= species (the-as int (fisher-species phantasm-shark)))
+          (= species (the-as int (fisher-species megaloviathan)))))
       (return base-weight))
 
     (cond
@@ -1308,6 +1523,11 @@
     ((= (-> self location-id) 6) 9)
     ((= (-> self location-id) 7) 9)
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava))) 1)
+    ;; All Snow cells except Stop the 3 Lurker Glacier Troops (snow-ram).
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice))) 6)
+    ;; Main Cave uses its five non-Scout-Fly cave objectives. Ogre tasks are
+    ;; outside this fishing pool and are deliberately not included.
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))) 5)
     ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
     (else 0)))
 
@@ -1370,6 +1590,23 @@
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
       (game-task village3-extra1))
 
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (cond
+        ((= index 0) (game-task snow-eggtop))
+        ((= index 1) (game-task snow-fort))
+        ((= index 2) (game-task snow-ball))
+        ((= index 3) (game-task snow-bunnies))
+        ((= index 4) (game-task snow-bumpers))
+        (else (game-task snow-cage))))
+
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (cond
+        ((= index 0) (game-task cave-dark-climb))
+        ((= index 1) (game-task cave-robot-climb))
+        ((= index 2) (game-task cave-swing-poles))
+        ((= index 3) (game-task cave-spider-tunnel))
+        (else (game-task cave-platforms))))
+
     (else (game-task none))))
 
 (defun fisher-find-missing-power-cell-task ((self fisher-game))
@@ -1419,7 +1656,9 @@
         (= (-> self location-id) 5)
         (= (-> self location-id) 6)
         (= (-> self location-id) 7)
-        (= (-> self location-id) (the-as int (fisher-zone village3-lava))))
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))))
       (> (-> self fish-count) 0)
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
@@ -1437,6 +1676,9 @@
             (when
               (and
                 (!= (fisher-fish-species self candidate) 4)
+                (!=
+                  (fisher-fish-species self candidate)
+                  (the-as int (fisher-species megaloviathan)))
                 (<= (fisher-fish-power-cell-task self candidate) 1)
                 (not
                   (or
@@ -1579,6 +1821,106 @@
     (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end)))
   (none))
 
+(defun fisher-lava-tube-cellfish-eligible? ((self fisher-game))
+  ;; These two final cell sharks belong only to the Main Cave Dark Eco pool
+  ;; and are a hard 72-cell unlock.  Debug mode deliberately does not bypass
+  ;; this threshold.
+  (and
+    (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+    *target*
+    (>=
+      (the int
+        (the float
+          (send-event
+            *target*
+            'query
+            'pickup
+            (pickup-type fuel-cell))))
+      72)
+    (or
+      (not (task-complete? *game-info* (game-task lavatube-end)))
+      (not (task-complete? *game-info* (game-task lavatube-buzzer))))))
+
+(defun fisher-add-one-lava-tube-cellfish!
+  ((self fisher-game) (task game-task))
+
+  (when
+    (and
+      (> (-> self fish-count) 0)
+      (not (task-complete? *game-info* task))
+      (not (fisher-has-power-cell-task? self task))
+      ;; Do not recreate a carrier while its just-caught reward is still
+      ;; walking through the catch/reward transition.
+      (!= (-> self caught-power-cell-task) (the int task)))
+
+    (let ((step 0)
+        (slot -1)
+        (candidate 0))
+
+      ;; Preserve Megaloviathan and Phantasm Shark.  Replace only an ordinary,
+      ;; non-collectible Dark Eco resident so both Lava Tube cell sharks can
+      ;; coexist with the authored predators.
+      (while (and (< step (-> self fish-count)) (< slot 0))
+        (set! candidate step)
+        (when
+          (and
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species scout-fly)))
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species megaloviathan)))
+            (!= (fisher-fish-species self candidate)
+              (the-as int (fisher-species phantasm-shark)))
+            (<= (fisher-fish-power-cell-task self candidate) 1))
+          (set! slot candidate))
+        (+! step 1))
+
+      (when (>= slot 0)
+        (fisher-set-fish-species!
+          self
+          slot
+          (the-as int (fisher-species fire-canyon-cellfish)))
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (rand-vu-int-range 100 140))
+        (fisher-set-fish-power-cell-task! self slot (the int task))
+
+        ;; Keep both carriers down in the Dark Eco pool's deep band.
+        (fisher-set-fish-depth!
+          self
+          slot
+          (rand-vu-float-range (meters 30.0) (meters 33.0)))
+
+        (let ((old-fish (fisher-fish-pointer self slot)))
+          (when old-fish
+            (fisher-destroy-manipy! old-fish)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (the-as (pointer manipy) #f)))
+
+          ;; If the persistent pool already exists, replace the resident now
+          ;; so refill cannot reroll this guaranteed carrier.
+          (when (-> self pool-rendered?)
+            (fisher-set-fish-pointer!
+              self
+              slot
+              (fisher-spawn-gameplay-fish self slot)))))))
+
+  (none))
+
+(defun fisher-add-lava-tube-cellfish-slots! ((self fisher-game))
+  (when (fisher-lava-tube-cellfish-eligible? self)
+    ;; Exactly one carrier for each missing Lava Tube reward.
+    (fisher-add-one-lava-tube-cellfish! self (game-task lavatube-end))
+    (fisher-add-one-lava-tube-cellfish! self (game-task lavatube-buzzer)))
+  (none))
+
 (defun fisher-existing-zone? ((self fisher-game))
   (and
     (>= (-> self location-id) 0)
@@ -1605,6 +1947,12 @@
 
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
       (the-as int (fisher-species inferno-shark)))
+
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (the-as int (fisher-species ice-shark)))
+
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (the-as int (fisher-species phantasm-shark)))
 
     (else
       (the-as int (fisher-species eco-drum)))))
@@ -1778,7 +2126,11 @@
       (and
         (= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
         (= (fisher-fish-species self slot)
-          (the-as int (fisher-species black-lurker-shark)))))
+          (the-as int (fisher-species black-lurker-shark))))
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+        (= (fisher-fish-species self slot)
+          (the-as int (fisher-species megaloviathan)))))
     (return #f))
 
   (when
@@ -1838,6 +2190,14 @@
           slot
           (fisher-roll-level-for-current-zone self))
         (fisher-set-fish-weight-tenths! self slot buzzer-index)
+        ;; This slot may already contain a normal fish depth because the
+        ;; fill-pool replacement path changes species after randomization.
+        ;; Force the Village3 Scout Fly onto deepwater immediately.
+        (cond
+          ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+            (fisher-set-fish-depth! self slot (meters 27.5)))
+          ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+            (fisher-set-fish-depth! self slot (meters 19.2))))
         (return #t))))
 
   (when
@@ -1849,7 +2209,9 @@
         (= (-> self location-id) 5)
         (= (-> self location-id) 6)
         (= (-> self location-id) 7)
-        (= (-> self location-id) (the-as int (fisher-zone village3-lava))))
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))))
       (not (fisher-has-power-cell-fish? self))
       (rand-vu-percent?
         (if *fisher-in-debug?* 0.90 *fisher-power-cell-fish-chance*)))
@@ -1883,6 +2245,10 @@
     ((= (-> self location-id) 7) (game-task swamp-buzzer))
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
       (game-task village3-buzzer))
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (game-task snow-buzzer))
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (game-task cave-buzzer))
     (else (game-task village1-buzzer))))
 
 (defun fisher-find-missing-buzzer-index
@@ -1916,8 +2282,6 @@
 
     (when
       (and
-        ;; Training never owns Scout Fly fish.  The ten-orb Fisherman quest
-        ;; directly awards all four training cells instead.
         (!= (-> self location-id) (the-as int (fisher-zone training-lagoon)))
         (> remaining 0)
         (> (-> self fish-count) 0)
@@ -1930,8 +2294,6 @@
 
       (when (>= first-index 0)
         (let ((slot (- (-> self fish-count) 1)))
-          ;; Do not let a Scout Fly insertion overwrite either Mountain Pass
-          ;; Cell Fish, a local cell carrier, or a protected Hub 2 shark.
           (while
             (and
               (>= slot 0)
@@ -1942,7 +2304,9 @@
                 (= (fisher-fish-species self slot)
                   (the-as int (fisher-species black-lurker-shark)))
                 (= (fisher-fish-species self slot)
-                  (the-as int (fisher-species inferno-shark)))))
+                  (the-as int (fisher-species inferno-shark)))
+                (= (fisher-fish-species self slot)
+                  (the-as int (fisher-species megaloviathan)))))
             (-! slot 1))
 
           (when (>= slot 0)
@@ -1954,6 +2318,13 @@
               slot
               (fisher-roll-level-for-current-zone self))
             (fisher-set-fish-weight-tenths! self slot first-index)
+            ;; The dedicated Scout Fly insertion also reuses an existing slot,
+            ;; so do not inherit that fish's topwater/bottom-feeder depth.
+            (cond
+              ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+                (fisher-set-fish-depth! self slot (meters 27.5)))
+              ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+                (fisher-set-fish-depth! self slot (meters 19.2))))
 
             (let ((old-fish (fisher-fish-pointer self slot)))
               (when old-fish
@@ -1979,6 +2350,11 @@
                 (-> self fish-level-min)
                 (-> self fish-level-max)))
             (fisher-set-fish-weight-tenths! self slot second-index)
+            (cond
+              ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+                (fisher-set-fish-depth! self slot (meters 27.5)))
+              ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+                (fisher-set-fish-depth! self slot (meters 19.2))))
 
             (let ((old-fish (fisher-fish-pointer self slot)))
               (when old-fish
@@ -2305,6 +2681,104 @@
 
   (none))
 
+(defun fisher-configure-snow-table! ((self fisher-game))
+  (let* ((zone (fisher-zone-info-for (fisher-zone snow-ice)))
+      (golden? (fisher-golden-hour?))
+      (frost-count
+        (if golden?
+          (rand-vu-int-range 5 7)
+          (rand-vu-int-range 4 5)))
+      (crystal-count
+        (if golden?
+          (rand-vu-int-range 2 3)
+          (rand-vu-int-range 1 2)))
+      (shark-count
+        (if golden?
+          (rand-vu-int-range 12 16)
+          (rand-vu-int-range 10 12)))
+      (slot 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min *fisher-max-fish-slots* (+ frost-count crystal-count shark-count)))
+    (fisher-clear-power-cell-tasks! self)
+
+    (dotimes (i frost-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species frost-biter)))
+        (+! slot 1)))
+
+    (dotimes (i crystal-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species crystal-fish)))
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-configure-random-fish-slot!
+        self slot (the-as int (fisher-species ice-shark)))
+      (+! slot 1)))
+
+  (none))
+
+(defun fisher-configure-dark-eco-table! ((self fisher-game))
+  (let* ((zone (fisher-zone-info-for (fisher-zone maincave-dark-eco)))
+      (golden? (fisher-golden-hour?))
+      (helix-count
+        (if golden?
+          (rand-vu-int-range 5 10)
+          (rand-vu-int-range 2 10)))
+      (fang-count
+        (if golden?
+          (rand-vu-int-range 6 10)
+          (rand-vu-int-range 2 6)))
+      (phantasm-count
+        (if golden?
+          (rand-vu-int-range 2 4)
+          (rand-vu-int-range 1 2)))
+      (slot 0))
+
+    (set! (-> self fish-level-min) (-> zone level-min))
+    (set! (-> self fish-level-max) (-> zone level-max))
+    (set! (-> self fish-count)
+      (min
+        *fisher-max-fish-slots*
+        (+ 1 helix-count fang-count phantasm-count)))
+    (fisher-clear-power-cell-tasks! self)
+
+    ;; The giant is always slot zero.  Keeping it anchored here means hidden
+    ;; population shrink/grow transitions can never trim it from the active
+    ;; prefix of the resident table.
+    (when (< slot (-> self fish-count))
+      (fisher-set-fish-species!
+        self slot (the-as int (fisher-species megaloviathan)))
+      (fisher-set-fish-suffix! self slot 2)
+      (fisher-set-fish-power-cell-task! self slot 0)
+      (fisher-set-fish-level! self slot (fisher-roll-level-for-current-zone self))
+      (fisher-set-fish-weight-tenths! self slot (rand-vu-int-range 2000 4000))
+      (+! slot 1))
+
+    (dotimes (i helix-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species helix-voidfish)))
+        (+! slot 1)))
+
+    (dotimes (i fang-count)
+      (when (< slot (-> self fish-count))
+        (fisher-configure-random-fish-slot!
+          self slot (the-as int (fisher-species dark-precursor-fangfish)))
+        (+! slot 1)))
+
+    (while (< slot (-> self fish-count))
+      (fisher-configure-random-fish-slot!
+        self slot (the-as int (fisher-species phantasm-shark)))
+      (+! slot 1)))
+
+  (none))
+
 (defun fisher-configure-zone-table! ((self fisher-game))
   ;; Build every ordinary population directly from fisher-zone-info.  The old
   ;; area-specific builders hardcoded species, and hidden growth randomized a
@@ -2477,6 +2951,54 @@
         (else
           (return (the-as int (fisher-species inferno-shark)))))))
 
+  ;; Snow preserves the requested three-species population weighting when a
+  ;; hidden resident is replaced.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+    (let ((frost-weight (if golden? 7 5))
+        (crystal-weight (if golden? 3 2))
+        (shark-weight (if golden? 16 12))
+        (roll 0))
+      (set! roll
+        (rand-vu-int-range
+          0
+          (+ frost-weight crystal-weight shark-weight -1)))
+      (cond
+        ((< roll frost-weight)
+          (return (the-as int (fisher-species frost-biter))))
+        ((< roll (+ frost-weight crystal-weight))
+          (return (the-as int (fisher-species crystal-fish))))
+        (else
+          (return (the-as int (fisher-species ice-shark)))))))
+
+  ;; Main Cave keeps exactly one Megaloviathan and otherwise reuses the
+  ;; requested Helix/Fang/Phantasm weighting during hidden refills.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+    (when
+      (<
+        (fisher-count-live-species
+          self
+          (the-as int (fisher-species megaloviathan)))
+        1)
+      (return (the-as int (fisher-species megaloviathan))))
+
+    (let ((helix-weight (if golden? 10 10))
+        (fang-weight (if golden? 10 6))
+        (phantasm-weight (if golden? 4 2))
+        (roll 0))
+      (set! roll
+        (rand-vu-int-range
+          0
+          (+ helix-weight fang-weight phantasm-weight -1)))
+      (cond
+        ((< roll helix-weight)
+          (return (the-as int (fisher-species helix-voidfish))))
+        ((< roll (+ helix-weight fang-weight))
+          (return (the-as int (fisher-species dark-precursor-fangfish))))
+        (else
+          (return (the-as int (fisher-species phantasm-shark)))))))
+
   ;; Pick a configured species using the current table's maximum ranges as
   ;; weights.  This is used only when an invisible normal/golden transition
   ;; grows the live pool.
@@ -2509,13 +3031,27 @@
       (fisher-configure-swamp-table! self))
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
       (fisher-configure-village3-table! self))
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+      (fisher-configure-snow-table! self))
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (fisher-configure-dark-eco-table! self))
     (else
       (fisher-configure-zone-table! self)))
 
   ;; Village3 gets its own Scout Flies and its single local hidden-cell fish,
   ;; but does not inherit the Hub 2 Fire Canyon or Mountain Pass cell fish.
   (cond
-    ((= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+    ;; Main Cave uses the cave-buzzer collection plus the five cave power-cell
+    ;; tasks supplied with the level.  The conversion helpers explicitly skip
+    ;; Megaloviathan, so the guaranteed giant can never carry a Power Cell.
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (fisher-add-buzzer-fish-slots! self)
+      (fisher-add-power-cell-fish-slot! self)
+      (fisher-add-lava-tube-cellfish-slots! self))
+
+    ((or
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= (-> self location-id) (the-as int (fisher-zone snow-ice))))
       (fisher-add-buzzer-fish-slots! self)
       (fisher-add-power-cell-fish-slot! self))
 
@@ -2853,6 +3389,162 @@
       :system *sp-particle-system-3d*
       (-> *part-id-table* 3569)
       (-> self root trans)))
+
+  (none))
+
+;; Snow ice crystal: keep the *center* of the cavecrystal locked to the
+;; center of its parent fish.  cavecrystal is authored from its bottom/base,
+;; with its visual bounds centered 4.7m above that origin.  If we simply put
+;; the root below the fish and then rotate it, the crystal rotates around that
+;; base and swings underneath the fish.  Instead, build the final rotation
+;; first, rotate the crystal's scaled center vector by that final rotation, and
+;; subtract it from the fish center.  This makes the visual center the pivot.
+(defun fisher-update-snow-ice-crystal-transform! ((self manipy))
+  (let ((parent-proc (ppointer->process (-> self parent)))
+      (seed (-> self root transv w)))
+
+    ;; Attachment manipys do not inherit the parent's draw-status.  Mirror the
+    ;; actual parent fish every frame so its crystal disappears on every path
+    ;; that hides/deactivates the fish.
+    (cond
+      ((and
+          parent-proc
+          (type-type? (-> parent-proc type) process-drawable))
+        (let ((parent-drawable (the-as process-drawable parent-proc)))
+          (cond
+            ((or
+                (logtest? (-> parent-drawable draw status) (draw-status hidden))
+                (<= (-> parent-drawable root scale x) 0.0001))
+              (logior! (-> self draw status) (draw-status hidden))
+              (send-event self 'max-vis-dist (meters 0.0)))
+            (else
+              (logclear! (-> self draw status) (draw-status hidden))
+              (send-event self 'max-vis-dist (meters 999999.0))))))
+      (else
+        (logior! (-> self draw status) (draw-status hidden))
+        (send-event self 'max-vis-dist (meters 0.0))))
+
+    (when
+      (and
+        parent-proc
+        (type-type? (-> parent-proc type) process-drawable))
+
+      (let ((parent-drawable (the-as process-drawable parent-proc))
+          (base-quat (new 'stack-no-clear 'quaternion))
+          (yaw-quat (new 'stack-no-clear 'quaternion))
+          (pitch-quat (new 'stack-no-clear 'quaternion))
+          (relative-quat (new 'stack-no-clear 'quaternion))
+          (parent-mat (new 'stack-no-clear 'matrix))
+          (fish-center-local (new 'stack-no-clear 'vector))
+          (fish-center-world-offset (new 'stack-no-clear 'vector))
+          (fish-center-world (new 'stack-no-clear 'vector))
+          (final-mat (new 'stack-no-clear 'matrix))
+          (center-local (new 'stack-no-clear 'vector))
+          (center-world-offset (new 'stack-no-clear 'vector)))
+
+        ;; Stable random orientation for this spawn, relative to the fish.
+        (quaternion-copy! base-quat (-> parent-drawable root quat))
+        (quaternion-axis-angle! yaw-quat 0.0 1.0 0.0 seed)
+        (quaternion-axis-angle! pitch-quat 1.0 0.0 0.0 (* seed 0.61803395))
+        (quaternion*! relative-quat yaw-quat pitch-quat)
+        (quaternion*! (-> self root quat) base-quat relative-quat)
+
+        ;; The fish root sits near the lower middle of the model.  transv.xyz
+        ;; stores a fish-local offset to the actual body center.  Rotate that
+        ;; offset only by the PARENT fish orientation so the target point stays
+        ;; in the center of the fish even while it pitches/turns.
+        (set-vector!
+          fish-center-local
+          (-> self root transv x)
+          (-> self root transv y)
+          (-> self root transv z)
+          0.0)
+        (quaternion->matrix parent-mat (-> parent-drawable root quat))
+        (vector-rotate*! fish-center-world-offset fish-center-local parent-mat)
+        (set! (-> fish-center-world-offset w) 0.0)
+        (vector+! fish-center-world (-> parent-drawable root trans) fish-center-world-offset)
+        (set! (-> fish-center-world w) 1.0)
+
+        ;; cavecrystal's authored visual center is (0, 4.7m, 0).  Include the
+        ;; attachment's actual scale, rotate that center by the FINAL crystal
+        ;; orientation, then move the crystal root so this point lands exactly
+        ;; on the fish BODY center above. Rotation therefore happens around the
+        ;; middle of the crystal while the whole shell sits center-middle in
+        ;; the fish rather than bottom-middle.
+        (set-vector!
+          center-local
+          0.0
+          (* (meters 4.7) (-> self root scale y))
+          0.0
+          0.0)
+
+        (quaternion->matrix final-mat (-> self root quat))
+        (vector-rotate*! center-world-offset center-local final-mat)
+        (set! (-> center-world-offset w) 0.0)
+
+        (vector-!
+          (-> self root trans)
+          fish-center-world
+          center-world-offset)
+        (set! (-> self root trans w) 1.0))))
+
+  (none))
+
+(defbehavior fisher-snow-ice-crystal-trans manipy ()
+  (fisher-update-snow-ice-crystal-transform! self)
+  (none))
+
+(defun fisher-spawn-snow-ice-crystal!
+  ((fish-proc manipy) (species int) (catch-display? symbol))
+
+  (when (!= species (the-as int (fisher-species scout-fly)))
+    ;; Tight ice shell: 1/3.5 of the older shell scale, retaining the
+    ;; per-species bound correction.
+    (let* ((parent-scale (-> fish-proc root scale x))
+        (scale
+          (*
+            parent-scale
+            (if
+              (= species (the-as int (fisher-species ice-shark)))
+              0.55555554
+              0.37037037)))
+        (offset (new 'stack-no-clear 'vector)))
+
+      ;; Store the parent fish's BODY-center target in fish-local space.
+      ;; Lowered slightly from 2.0m to 1.6m so the crystal sits a little lower
+      ;; around the fish while preserving the center-pivot rotation fix.
+      (set-vector! offset 0.0 (* (meters 1.6) parent-scale) 0.0 0.0)
+
+      (let ((attachment
+            (fisher-spawn-rare-attachment!
+              fish-proc
+              *fisher-ice-crystal-sgc*
+              offset
+              scale
+              "fisher-snow-ice-crystal")))
+
+        (when attachment
+          (let ((crystal (the-as manipy (ppointer->process attachment))))
+            (when crystal
+              ;; Store one random seed per spawn; the trans hook keeps this
+              ;; orientation stable while following the fish.
+              (set! (-> crystal root transv w)
+                (rand-vu-float-range (degrees 0.0) (degrees 360.0)))
+              (send-event crystal 'anim-mode 'still)
+              (send-event crystal 'trans-hook fisher-snow-ice-crystal-trans)
+              (set! (-> crystal draw color-mult r) 0.42)
+              (set! (-> crystal draw color-mult g) 1.00)
+              (set! (-> crystal draw color-mult b) 1.00)
+              (set! (-> crystal draw color-mult a) 1.00)
+              (set! (-> crystal draw color-emissive r) 0.08)
+              (set! (-> crystal draw color-emissive g) 0.42)
+              (set! (-> crystal draw color-emissive b) 0.48)
+              (set! (-> crystal draw color-emissive a) 1.00)
+
+              ;; Apply the center-pivot placement immediately so the crystal
+              ;; never renders for one frame with its authored base at the fish
+              ;; center before the trans-hook runs.
+              (fisher-update-snow-ice-crystal-transform! crystal)))))))
 
   (none))
 
@@ -3408,17 +4100,121 @@
         ((= species (the-as int (fisher-species magma-serpent)))
           (set! r 1.00)
           (set! g 0.025)
-          (set! b 0.005)
-          (set! base-scale (if catch-display? 3.00 2.16))
-          (*! x-scale 0.62)
-          (*! y-scale 0.70)
-          (*! z-scale 3.65))
+          (set! b 0.005))
 
         ((= species (the-as int (fisher-species inferno-shark)))
           (set! r 1.00)
           (set! g 0.035)
           (set! b 0.005)
           (set! base-scale (if catch-display? 0.38 0.22)))))
+
+    ;; Every Magma Serpent must use the stretched serpent proportions,
+    ;; regardless of suffix.  Previously this lived inside the ordinary-fish
+    ;; appearance branch, so Mutant, Golden, and rare Magma Serpents skipped
+    ;; the stretch and appeared as ordinary-sized fishc models.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= species (the-as int (fisher-species magma-serpent))))
+      (set! base-scale (if catch-display? 3.00 2.16))
+      (set! x-scale 0.62)
+      (set! y-scale 0.70)
+      (set! z-scale 3.65))
+
+    ;; Snow fish are always bright cyan.  Keep the requested species size
+    ;; hierarchy even if ordinary/rare suffix tinting ran above.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (!= species (the-as int (fisher-species scout-fly))))
+      (set! r 0.05)
+      (set! g 1.00)
+      (set! b 1.00)
+      (cond
+        ((= species (the-as int (fisher-species frost-biter)))
+          (set! base-scale (if catch-display? 0.70 0.42)))
+        ((= species (the-as int (fisher-species crystal-fish)))
+          (set! base-scale (if catch-display? 1.55 1.05)))
+        ((= species (the-as int (fisher-species ice-shark)))
+          (set! base-scale (if catch-display? 0.34 0.18))))
+      (set! x-scale 1.0)
+      (set! y-scale 1.0)
+      (set! z-scale 1.0))
+
+    ;; Main Cave dark-eco species always keep their authored body treatment,
+    ;; even when the global suffix system changes ordinary colors.  The three
+    ;; normal species scale strongly with weight so 3lb and 30/40lb specimens
+    ;; are visibly different; Megaloviathan stays at its fixed ~1/3-pool-height
+    ;; presentation scale.
+    (when
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (let* ((min-weight (the float (-> info min-weight-tenths)))
+          (max-weight (the float (-> info max-weight-tenths)))
+          (weight (the float (fisher-fish-weight-tenths self slot)))
+          (weight-range (fmax 1.0 (- max-weight min-weight)))
+          (weight-ratio
+            (fmax 0.0 (fmin 1.0 (/ (- weight min-weight) weight-range))))
+          (size-mult (+ 0.48 (* 1.22 weight-ratio))))
+
+        (cond
+          ((and
+              (= species (the-as int (fisher-species fire-canyon-cellfish)))
+              (or
+                (= power-cell-task (the-as int (game-task lavatube-end)))
+                (= power-cell-task (the-as int (game-task lavatube-buzzer)))))
+            ;; The final Lava Tube carriers are pure-black sharkey silhouettes.
+            ;; Their reddish/orange Power Cell particle is still supplied by
+            ;; the shared fire-canyon-cellfish particle path.
+            (set! r 0.001)
+            (set! g 0.001)
+            (set! b 0.001)
+            (set! base-scale (if catch-display? 0.195 0.14))
+            (set! x-scale 1.0)
+            (set! y-scale 1.0)
+            (set! z-scale 1.0))
+
+          ((= species (the-as int (fisher-species helix-voidfish)))
+            (set! r 0.52)
+            (set! g 0.005)
+            (set! b 1.35)
+            (set! base-scale
+              (* (if catch-display? 0.90 0.58) size-mult))
+            ;; Deliberately skinny/helix-like junglefish silhouette.
+            (set! x-scale 0.44)
+            (set! y-scale 0.55)
+            (set! z-scale 1.28))
+
+          ((= species (the-as int (fisher-species dark-precursor-fangfish)))
+            (set! r 0.025)
+            (set! g 0.001)
+            (set! b 0.24)
+            (set! base-scale
+              (* (if catch-display? 0.88 0.56) size-mult))
+            (set! x-scale 0.88)
+            (set! y-scale 0.88)
+            (set! z-scale 1.10))
+
+          ((= species (the-as int (fisher-species phantasm-shark)))
+            ;; Near-zero color multiplication makes the shark read as a
+            ;; pitch-black silhouette; the large A multiplier below preserves
+            ;; the requested dense/negative-looking material response.
+            (set! r 0.001)
+            (set! g 0.001)
+            (set! b 0.001)
+            (set! base-scale
+              (* (if catch-display? 0.72 0.42) (+ 0.60 (* 1.35 weight-ratio))))
+            (set! x-scale 1.0)
+            (set! y-scale 1.0)
+            (set! z-scale 1.0))
+
+          ((= species (the-as int (fisher-species megaloviathan)))
+            (set! r 0.015)
+            (set! g 0.000)
+            (set! b 0.060)
+            (set! base-scale (if catch-display? 2.00 4.00))
+            (set! x-scale 1.0)
+            (set! y-scale 1.0)
+            (set! z-scale 1.0)))))
 
     ;; Catch/loot display fish are presentation models, not gameplay scale.
     ;; Keep them compact so the full fish and any rare attachment fit above
@@ -3432,6 +4228,28 @@
     (set! (-> fish-proc draw color-mult g) g)
     (set! (-> fish-proc draw color-mult b) b)
     (set! (-> fish-proc draw color-mult a) 1.0)
+
+    ;; Dark-eco fish intentionally use alpha/color multiplication above the
+    ;; ordinary 1.0 material value.  This is a material multiplier, not sprite
+    ;; transparency, so values above one make the purple/black treatment read
+    ;; much more aggressively in the dark pool.
+    (when
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (cond
+        ((and
+            (= species (the-as int (fisher-species fire-canyon-cellfish)))
+            (or
+              (= power-cell-task (the-as int (game-task lavatube-end)))
+              (= power-cell-task (the-as int (game-task lavatube-buzzer)))))
+          (set! (-> fish-proc draw color-mult a) 6.00))
+        ((= species (the-as int (fisher-species helix-voidfish)))
+          (set! (-> fish-proc draw color-mult a) 2.40))
+        ((= species (the-as int (fisher-species dark-precursor-fangfish)))
+          (set! (-> fish-proc draw color-mult a) 3.50))
+        ((= species (the-as int (fisher-species phantasm-shark)))
+          (set! (-> fish-proc draw color-mult a) 8.00))
+        ((= species (the-as int (fisher-species megaloviathan)))
+          (set! (-> fish-proc draw color-mult a) 5.00))))
 
     (set! (-> fish-proc draw color-emissive r) 0.0)
     (set! (-> fish-proc draw color-emissive g) 0.0)
@@ -3453,6 +4271,23 @@
           (set! (-> fish-proc draw color-emissive r) 0.20)
           (set! (-> fish-proc draw color-emissive g) 0.012))))
 
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (!= species (the-as int (fisher-species scout-fly))))
+      (set! (-> fish-proc draw color-emissive r) 0.035)
+      (set! (-> fish-proc draw color-emissive g) 0.18)
+      (set! (-> fish-proc draw color-emissive b) 0.22))
+
+    (when
+      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (cond
+        ((= species (the-as int (fisher-species helix-voidfish)))
+          (set! (-> fish-proc draw color-emissive r) 0.08)
+          (set! (-> fish-proc draw color-emissive b) 0.28))
+        ((= species (the-as int (fisher-species dark-precursor-fangfish)))
+          (set! (-> fish-proc draw color-emissive b) 0.055))))
+
     (when (and catch-display? (= suffix 16))
       (quaternion-axis-angle!
         (-> fish-proc root quat)
@@ -3466,6 +4301,151 @@
 
 (defun fisher-set-fish-pointer! ((self fisher-game) (slot int) (fish (pointer manipy)))
   (set! (-> self fish-data slot slot visual) fish)
+  (none))
+
+(defun fisher-delete-resident-slot! ((self fisher-game) (slot int))
+  ;; Remove one resident without leaving a hole in the active prefix.  This is
+  ;; used when Megaloviathan steals an already-hooked fish's place.
+  (when
+    (and
+      (>= slot 0)
+      (< slot (-> self fish-count)))
+    (let* ((last-slot (- (-> self fish-count) 1))
+        (victim (fisher-fish-pointer self slot)))
+
+      (when victim
+        (fisher-destroy-manipy! victim))
+
+      (when (!= slot last-slot)
+        (set! (-> self fish-data slot slot visual)
+          (-> self fish-data slot last-slot visual))
+        (set! (-> self fish-data slot slot species)
+          (-> self fish-data slot last-slot species))
+        (set! (-> self fish-data slot slot level)
+          (-> self fish-data slot last-slot level))
+        (set! (-> self fish-data slot slot suffix)
+          (-> self fish-data slot last-slot suffix))
+        (set! (-> self fish-data slot slot weight-tenths)
+          (-> self fish-data slot last-slot weight-tenths))
+        (set! (-> self fish-data slot slot power-cell-task)
+          (-> self fish-data slot last-slot power-cell-task))
+        (set! (-> self fish-data slot slot distance)
+          (-> self fish-data slot last-slot distance))
+        (set! (-> self fish-data slot slot lane)
+          (-> self fish-data slot last-slot lane))
+        (set! (-> self fish-data slot slot depth)
+          (-> self fish-data slot last-slot depth))
+        (set! (-> self fish-data slot slot direction)
+          (-> self fish-data slot last-slot direction))
+        (set! (-> self fish-data slot slot speed)
+          (-> self fish-data slot last-slot speed))
+        (set! (-> self fish-data slot slot cooldown)
+          (-> self fish-data slot last-slot cooldown))
+        (set! (-> self fish-data slot slot turn-time)
+          (-> self fish-data slot last-slot turn-time))
+        (set! (-> self fish-data slot slot turn-old-direction)
+          (-> self fish-data slot last-slot turn-old-direction))
+        (set! (-> self fish-data slot slot turn-side)
+          (-> self fish-data slot last-slot turn-side)))
+
+      (set! (-> self fish-data slot last-slot visual)
+        (the-as (pointer manipy) #f))
+      (-! (-> self fish-count) 1)))
+
+  (none))
+
+(defun fisher-dark-eco-teleport-fish! ((self fisher-game))
+  ;; Pair fish randomly and swap complete logical positions.  Pair swaps
+  ;; guarantee that two residents can never land on the same destination.
+  ;; If the active count is odd, exactly one unpaired fish receives a fresh
+  ;; random point in its species' authored depth band.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+    (let ((used-mask 0)
+        (remaining (-> self fish-count))
+        (slot-a -1)
+        (slot-b -1))
+
+      (while (> remaining 1)
+        (set! slot-a -1)
+        (set! slot-b -1)
+
+        (while (< slot-a 0)
+          (let ((candidate (rand-vu-int-range 0 (- (-> self fish-count) 1))))
+            (when
+              (zero? (logand used-mask (ash 1 candidate)))
+              (set! slot-a candidate))))
+
+        (set! used-mask (logior used-mask (ash 1 slot-a)))
+
+        (while (< slot-b 0)
+          (let ((candidate (rand-vu-int-range 0 (- (-> self fish-count) 1))))
+            (when
+              (zero? (logand used-mask (ash 1 candidate)))
+              (set! slot-b candidate))))
+
+        (set! used-mask (logior used-mask (ash 1 slot-b)))
+
+        (let ((distance-a (fisher-fish-distance self slot-a))
+            (lane-a (-> self fish-data slot slot-a lane))
+            (depth-a (-> self fish-data slot slot-a depth)))
+          (fisher-set-fish-distance!
+            self slot-a (fisher-fish-distance self slot-b))
+          (fisher-set-fish-lane!
+            self slot-a (-> self fish-data slot slot-b lane))
+          (fisher-set-fish-depth!
+            self slot-a (-> self fish-data slot slot-b depth))
+
+          (fisher-set-fish-distance! self slot-b distance-a)
+          (fisher-set-fish-lane! self slot-b lane-a)
+          (fisher-set-fish-depth! self slot-b depth-a))
+
+        (-! remaining 2))
+
+      (when (= remaining 1)
+        (let ((odd-slot -1))
+          (dotimes (slot (-> self fish-count))
+            (when
+              (and
+                (< odd-slot 0)
+                (zero? (logand used-mask (ash 1 slot))))
+              (set! odd-slot slot)))
+
+          (when (>= odd-slot 0)
+            (let ((info
+                    (fisher-species-info-for
+                      (fisher-fish-species self odd-slot))))
+              (fisher-set-fish-distance!
+                self
+                odd-slot
+                (rand-vu-float-range
+                  (meters 4.0)
+                  (- (fisher-playfield-far-distance self) (meters 0.5))))
+              (fisher-set-fish-lane!
+                self odd-slot (rand-vu-float-range (meters -1.35) (meters 1.35)))
+              (fisher-set-fish-depth!
+                self
+                odd-slot
+                (rand-vu-float-range (-> info depth-min) (-> info depth-max))))))))
+
+      ;; Teleport swaps preserve X/Z destinations, but the two giant predators
+      ;; must remain down at the bottom instead of inheriting a topwater or
+      ;; midwater fish's Y.  Re-pin their depth after every 45-second jump.
+      (dotimes (slot (-> self fish-count))
+        (let ((species (fisher-fish-species self slot)))
+          (cond
+            ((= species (the-as int (fisher-species megaloviathan)))
+              (fisher-set-fish-depth!
+                self
+                slot
+                (rand-vu-float-range (meters 30.0) (meters 33.5))))
+
+            ((= species (the-as int (fisher-species phantasm-shark)))
+              (fisher-set-fish-depth!
+                self
+                slot
+                (rand-vu-float-range (meters 26.0) (meters 32.0))))))))
+
   (none))
 
 (defun fisher-randomize-fish-slot!
@@ -3485,8 +4465,12 @@
           (fisher-fish-species self slot))))
 
     (cond
-      ;; Every Village3 Scout Fly belongs on the pool's deepwater plane.
-      ;; This is the same 27.5m boundary drawn by the fishing debug overlay.
+      ((and
+          (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+          (= (fisher-fish-species self slot)
+            (the-as int (fisher-species scout-fly))))
+        (fisher-set-fish-depth! self slot (meters 19.2)))
+
       ((and
           (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
           (= (fisher-fish-species self slot)
@@ -3562,7 +4546,36 @@
       (fisher-set-fish-speed!
         self
         slot
-        (* (fisher-fish-speed self slot) 2.15))))
+        (* (fisher-fish-speed self slot) 2.15)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species frost-biter)))
+      (fisher-set-fish-speed! self slot (* (fisher-fish-speed self slot) 0.58)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species crystal-fish)))
+      (fisher-set-fish-speed! self slot (* (fisher-fish-speed self slot) 0.52)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species ice-shark)))
+      (fisher-set-fish-speed! self slot (* (fisher-fish-speed self slot) 2.65)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species helix-voidfish)))
+      ;; normal speed: keep the base randomized rate
+      (none))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species dark-precursor-fangfish)))
+      (fisher-set-fish-speed! self slot (* (fisher-fish-speed self slot) 0.55)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species phantasm-shark)))
+      (fisher-set-fish-speed! self slot (* (fisher-fish-speed self slot) 2.85)))
+
+    ((= (fisher-fish-species self slot)
+        (the-as int (fisher-species megaloviathan)))
+      (fisher-set-fish-speed! self slot (* (fisher-fish-speed self slot) 0.20))))
 
   (fisher-set-fish-cooldown! self slot 0.0)
 
@@ -3583,6 +4596,20 @@
           self
           slot
           (rand-vu-int-range 100 140)))
+
+      ((= (fisher-fish-species self slot)
+          (the-as int (fisher-species megaloviathan)))
+        ;; Never let the giant become Mutant/Golden/rare or a hidden cell fish.
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-power-cell-task! self slot 0)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths!
+          self
+          slot
+          (rand-vu-int-range 2000 4000)))
 
       (else
         (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
@@ -3734,6 +4761,23 @@
           pos
           #f
           (cond
+            ;; Main Cave species keep their authored body skeleton even when
+            ;; the global rare-suffix system adds an attachment/effect.
+            ((and
+                (= (-> owner location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                (or
+                  (= (fisher-fish-species owner slot) (the-as int (fisher-species helix-voidfish)))
+                  (= (fisher-fish-species owner slot) (the-as int (fisher-species megaloviathan)))))
+              *fisher-junglefish-sg*)
+            ((and
+                (= (-> owner location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                (= (fisher-fish-species owner slot) (the-as int (fisher-species dark-precursor-fangfish))))
+              *catch-fishc-sgc*)
+            ((and
+                (= (-> owner location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                (= (fisher-fish-species owner slot) (the-as int (fisher-species phantasm-shark))))
+              *sharkey-sgc*)
+
             ((or
                 (= (fisher-fish-suffix owner slot) 7)
                 (= (fisher-fish-suffix owner slot) 11)
@@ -3768,7 +4812,31 @@
         (when fish-proc
           (send-event fish-proc 'anim-mode 'loop)
           (fisher-randomize-manipy-anim-frame! (the-as manipy fish-proc))
-          (send-event fish-proc 'max-vis-dist (meters 999999.0))
+
+          ;; Manipys may be reused from the dead pool with draw-status hidden
+          ;; still set.  Explicitly initialize BOTH visibility mechanisms here
+          ;; so a newly spawned resident can never be logically active while
+          ;; remaining invisible.
+          (let ((show-now?
+                  (and
+                    (fisher-pool-visuals-needed? owner)
+                    (< slot (-> owner fish-count)))))
+            (cond
+              (show-now?
+                (logclear!
+                  (-> (the-as manipy fish-proc) draw status)
+                  (draw-status hidden)))
+              (else
+                (logior!
+                  (-> (the-as manipy fish-proc) draw status)
+                  (draw-status hidden))))
+
+            (send-event
+              fish-proc
+              'max-vis-dist
+              (if show-now?
+                (meters 999999.0)
+                (meters 0.0))))
 
           (set! (-> (the-as manipy fish-proc) root trans quad) (-> pos quad))
 
@@ -3782,7 +4850,14 @@
           (fisher-spawn-rare-fish-attachments!
             (the-as manipy fish-proc)
             (fisher-fish-suffix owner slot)
-            #f))))
+            #f)
+
+          (when
+            (= (-> owner location-id) (the-as int (fisher-zone snow-ice)))
+            (fisher-spawn-snow-ice-crystal!
+              (the-as manipy fish-proc)
+              (fisher-fish-species owner slot)
+              #f)))))
 
     fish))
 
@@ -3994,6 +5069,20 @@
 (defun fisher-desired-population-count
   ((self fisher-game) (golden? symbol))
 
+  ;; Preserve the Main Cave species-count contract when golden hours change
+  ;; while the persistent fishbox is hidden.  One Megaloviathan is included
+  ;; in both totals.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+    (return
+      (min
+        *fisher-max-fish-slots*
+        (+
+          1
+          (if golden? (rand-vu-int-range 5 10) (rand-vu-int-range 2 10))
+          (if golden? (rand-vu-int-range 6 10) (rand-vu-int-range 2 6))
+          (if golden? (rand-vu-int-range 2 4) (rand-vu-int-range 1 2))))))
+
   (let* ((zone (fisher-zone-info-for (the-as fisher-zone (-> self location-id))))
       (count
         (if golden?
@@ -4076,6 +5165,11 @@
     ;; after 45 cells.  Recheck while hidden so a persistent pool updates as
     ;; soon as the threshold is reached or after either reward is completed.
     (fisher-add-mountain-pass-cellfish-slots! self)
+
+    ;; The two Lava Tube carriers are guaranteed in the Main Cave Dark Eco
+    ;; pool once 72 cells are held.  Recheck while hidden so an already-created
+    ;; persistent pool updates immediately when the threshold is reached.
+    (fisher-add-lava-tube-cellfish-slots! self)
 
     ;; Debug mode must guarantee that the Fire Canyon Cell Fish exists even
     ;; when the persistent fishbox was created before debug was enabled or was
@@ -4666,7 +5760,7 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define *fisher-man-dialogue-count* 4)
+(define *fisher-man-dialogue-count* 5)
 
 ;; dialogue-kind:
 ;;   0 = first tutorial
@@ -4678,6 +5772,7 @@
 ;;   6 = first tutorial lure gift
 ;;   7 = Mountain Pass zoomer requirement hint
 ;;   8 = Fire Canyon cell-fish warning
+;;   9 = Lava Tube / Spider Cave cell-fish warning
 (define *fisher-man-dialogue-page-count* 6)
 (define *fisher-man-hint-count* 10)
 
@@ -4974,6 +6069,35 @@
     ""
     ""))
 
+(define *fisher-man-lavatube-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+
+    ;; Page 0
+    "AVAST!"
+    "ITS HOT IN HERE!"
+    ""
+    ""
+
+    ;; Page 1
+    "THE LAST FISH YE HAVE TO CATCH"
+    "IS THE FISH THAT HOLDS THE LAVA"
+    "TUBE POWER CELL!"
+    ""
+
+    ;; Page 2
+    "HE BE SWIMMIN IN THE DARK ECO"
+    "POOLS OF SPIDER CAVE!"
+    "ATTRACTED ONLY AFTER 72"
+    "CELLS HAVE BEEN COLLECTED!"
+
+    ;; Page 3
+    "ONLY THEN, WILL YE BE ABLE TO CROSS"
+    "THE LAVA TUBE"
+    ""
+    ""))
+
 (define *fisher-man-dialogue-buffer-0*
   (new 'global 'string 256 (the string #f)))
 
@@ -4997,6 +6121,10 @@
   ((self fisher-man))
 
   (cond
+    ((= (-> self dialogue-type) 4)
+      (set! (-> self dialogue-kind) 9)
+      (set! *fisher-man-dialogue-page-count* 4))
+
     ((= (-> self dialogue-type) 3)
       (set! (-> self dialogue-kind) 8)
       (set! *fisher-man-dialogue-page-count* 4))
@@ -5104,6 +6232,9 @@
 
       ((= (-> self dialogue-kind) 8)
         (-> *fisher-man-firecanyon-dialogue-lines* data index))
+
+      ((= (-> self dialogue-kind) 9)
+        (-> *fisher-man-lavatube-dialogue-lines* data index))
 
       (else
         (-> *fisher-man-orb-reminder-dialogue-lines* data index)))))
@@ -5764,7 +6895,8 @@
               (= (-> self dialogue-kind) 5)
               (= (-> self dialogue-kind) 6)
               (= (-> self dialogue-kind) 7)
-              (= (-> self dialogue-kind) 8))
+              (= (-> self dialogue-kind) 8)
+              (= (-> self dialogue-kind) 9))
             (go idle))
 
           (else

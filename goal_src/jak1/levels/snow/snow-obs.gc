@@ -228,22 +228,43 @@
   :event
     (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
       (case message
-        (('notify)
-         (case (-> block param 0)
-           (('pickup)
-            (if (type-type? (-> proc type) fuel-cell) (save-reminder (get-task-control (-> self entity extra perm task)) 1 4)))))))
+        ;; Activate when Jak steps onto/touches or attacks the eggtop.
+        (('touch 'attack)
+         (when
+           (not (-> self child))
+           (go snow-eggtop-activate)))))
+
   :trans
     (behavior ()
-      (if (and (not (-> self child)) (task-complete? *game-info* (-> self entity extra perm task))) (go snow-eggtop-activate))
-      (spawn (-> self part) (-> self root trans))
-      (update! (-> self sound)))
+      ;; Preserve the original activation condition too.
+      (if
+        (and
+          (not (-> self child))
+          (task-complete?
+            *game-info*
+            (-> self entity extra perm task)))
+        (go snow-eggtop-activate))
+
+      (spawn
+        (-> self part)
+        (-> self root trans))
+
+      (update!
+        (-> self sound)))
+
   :code
     (behavior ()
       (ja-channel-push! 1 0)
-      (ja :group! snow-eggtop-idle-ja :num! min)
+      (ja
+        :group! snow-eggtop-idle-ja
+        :num! min)
+
       (transform-post)
+
       (loop
-        (logior! (-> self mask) (process-mask sleep-code))
+        (logior!
+          (-> self mask)
+          (process-mask sleep-code))
         (suspend))))
 
 (defstate snow-eggtop-activate (snow-eggtop)

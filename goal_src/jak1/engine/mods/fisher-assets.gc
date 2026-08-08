@@ -2,6 +2,26 @@
 (in-package goal)
 (bundles "JUN.DGO" "GAME.CGO")
 
+;; Main Cave adds custom particle launchers 3584/3585.  Jak 1's existing
+;; launcher table ends immediately before those IDs, so writing them into the
+;; stock table corrupts the adjacent particle-group table and later crashes
+;; level unload in unlink-part-group-by-heap.
+;;
+;; Grow the launcher table once, preserve every existing launcher pointer,
+;; then let the custom defpart forms below register normally.
+(when (< (-> *part-id-table* length) 4096)
+  (let ((old-part-id-table *part-id-table*)
+      (old-part-count (-> *part-id-table* length))
+      (new-part-id-table
+        (new 'global 'boxed-array sparticle-launcher 4096)))
+
+    (dotimes (part-index old-part-count)
+      (set!
+        (-> new-part-id-table part-index)
+        (-> old-part-id-table part-index)))
+
+    (set! *part-id-table* new-part-id-table)))
+
 ;; name: fisher-assets.gc
 
 
@@ -478,7 +498,28 @@
   sharkey-lod0-jg
   sharkey-idle-ja
   ((sharkey-lod0-mg (meters 999999)))
-  :bounds (static-spherem 0 0 0 6))
+  :bounds (static-spherem 0 0 0 99))
+
+;; Snow fishing ice shell.  This is the Main Cave cavecrystal art cloned as a
+;; manipy-friendly SGC so it can be parented directly to resident/catch fish.
+(defskelgroup *fisher-ice-crystal-sgc*
+  cavecrystal
+  cavecrystal-lod0-jg
+  cavecrystal-idle-ja
+  ((cavecrystal-lod0-mg (meters 20))
+    (cavecrystal-lod1-mg (meters 999999)))
+  :bounds (static-spherem 0 4.7 0 99))
+
+
+;; Snow fishing obstacle.  Clone the native Snow Mountain snowball art into
+;; the fishing asset bundle so the runtime obstacle can use it without the
+;; stock path-following snow-ball process.
+(defskelgroup *fisher-snow-ball-sgc*
+  snow-ball
+  snow-ball-lod0-jg
+  snow-ball-idle-ja
+  ((snow-ball-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 99))
 
 (defskelgroup *buzzer-sgc*
   buzzer
@@ -495,7 +536,7 @@
   junglesnake-lod0-jg
   junglesnake-idle-ja
   ((junglesnake-lod0-mg (meters 999999)))
-  :bounds (static-spherem 0 14 0 18)
+  :bounds (static-spherem 0 14 0 99)
   :longest-edge (meters 2.5))
 
 (defskelgroup *catch-fisha-sgc*
@@ -503,21 +544,21 @@
   catch-fisha-lod0-jg
   catch-fisha-idle-ja
   ((catch-fisha-lod0-mg (meters 999999)))
-  :bounds (static-spherem 0 0 0 4))
+  :bounds (static-spherem 0 0 0 99))
 
 (defskelgroup *catch-fishb-sgc*
   catch-fishb
   catch-fishb-lod0-jg
   catch-fishb-idle-ja
   ((catch-fishb-lod0-mg (meters 999999)))
-  :bounds (static-spherem 0 0 0 4))
+  :bounds (static-spherem 0 0 0 99))
 
 (defskelgroup *catch-fishc-sgc*
   catch-fishc
   catch-fishc-lod0-jg
   catch-fishc-idle-ja
   ((catch-fishc-lod0-mg (meters 999999)))
-  :bounds (static-spherem 0 0 0 4))
+  :bounds (static-spherem 0 0 0 99))
 
 (defskelgroup *towertop-sgc*
   towertop
@@ -755,3 +796,130 @@
 
   dst)
 
+
+;; --------------------------------------------------------------------------
+;; Main Cave dark-eco background wall.
+;;
+;; Reproduce the VISUAL layers from Jak 1's intro-start sequence:
+;;   2856 - moving hotdot body
+;;   2857 - trailing hotdot, retaining native next-launcher 198
+;;   2859 - the large bigpuff layer that fills the screen
+;;
+;; The stock sequence is screen-space.  These are world-space clones for the
+;; fishing curtain.  Color/motion/fade behavior is preserved; only world-space
+;; size is adapted.  Rotation is locked so birth-func-camera-orient alone owns
+;; billboard orientation and the particles never spin away from the camera.
+;; --------------------------------------------------------------------------
+(defpart 3584
+  :init-specs
+  ((:texture (hotdot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 1.80))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:scale-y :copy scale-x)
+    (:r 0.0 96.0)
+    (:g 0.0 32.0)
+    (:b 64.0 32.0)
+    (:a 128.0)
+    (:omega 0.0 65536.0)
+    (:vel-x (meters -0.053333335) 1 (meters 0.10666667))
+    (:scalevel-x (meters -0.0012121212))
+    (:rotvel-z 0.0)
+    (:scalevel-y :copy scalevel-x)
+    (:timer (seconds 2))
+    (:flags (bit2 bit3 bit7))))
+
+(defpart 3585
+  :init-specs
+  ((:texture (hotdot effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 1.80) (meters 1.10))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:scale-y :copy scale-x)
+    (:r 32.0 96.0)
+    (:g 0.0 32.0)
+    (:b 64.0 32.0)
+    (:a 64.0 64.0)
+    (:scalevel-x (meters -0.0010952381))
+    (:rotvel-z 0.0)
+    (:scalevel-y :copy scalevel-x)
+    (:accel-y (meters 0) (meters -0.000033333334))
+    (:timer (seconds 0.1) (seconds 0.997))
+    (:flags (bit2 bit3))
+    (:next-time (seconds 0.8))
+    (:next-launcher 3587)))
+
+(defpart 3586
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 20.0) (meters 8.0))
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:scale-y (meters 20.0) (meters 8.0))
+    (:r 16.0 80.0)
+    (:g 0.0 16.0)
+    (:b 16.0 150.0)
+    (:a 0.0)
+    (:scalevel-x (meters -0.0016666667) (meters 0.0033333334))
+    (:rotvel-z 0.0)
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a 0.21333334)
+    (:timer (seconds 5))
+    (:flags (bit2 bit14))
+    (:next-time (seconds 0.5) (seconds 0.497))
+    (:next-launcher 3588)))
+
+
+;; Self-contained continuation for the cloned intro hotdot trail.
+;; Do not reference launcher 198 from VI1.DGO: that launcher is not guaranteed
+;; to be resident while fishing in Main Cave.
+;;
+;; IMPORTANT: make the continuation EXPLICITLY camera-facing too.  The earlier
+;; minimal fade-only continuation could fall back to the default upward-facing
+;; sprite orientation on relaunch.
+(defpart 3587
+  :init-specs
+  ((:birth-func 'birth-func-camera-orient)
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:rotvel-z 0.0)
+    (:fade-a -0.20)
+    (:flags (bit2 bit3))))
+
+;; Self-contained clone of intro launcher 2861/2862 for the bigpuff fade cycle.
+;; Keeping the entire continuation chain here prevents relaunch from jumping
+;; into an unloaded VI1.DGO launcher table entry.
+;;
+;; IMPORTANT: both continuation launchers are explicitly camera-facing so every
+;; stage of the bigpuff curtain remains billboarded to the camera.
+(defpart 3588
+  :init-specs
+  ((:birth-func 'birth-func-camera-orient)
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:rotvel-z 0.0)
+    (:fade-a 0.0)
+    (:flags (bit2 bit14))
+    (:next-time (seconds 1) (seconds 0.997))
+    (:next-launcher 3589)))
+
+(defpart 3589
+  :init-specs
+  ((:birth-func 'birth-func-camera-orient)
+    (:rot-x (degrees -90))
+    (:rot-y 0.0)
+    (:rot-z 0.0)
+    (:rotvel-z 0.0)
+    (:fade-a -0.21333334)
+    (:flags (bit2 bit14))))
