@@ -285,7 +285,8 @@
   (helix-voidfish 19)
   (dark-precursor-fangfish 20)
   (phantasm-shark 21)
-  (megaloviathan 22))
+  (megaloviathan 22)
+  (nuclear-bombfish 23))
 
 (defenum fisher-zone
   (sandover-dock 0)
@@ -298,7 +299,8 @@
   (swamp-sludge 7)
   (village3-lava 8)
   (snow-ice 9)
-  (maincave-dark-eco 10))
+  (maincave-dark-eco 10)
+  (finalboss-nuclear 11))
 
 (deftype fisher-species-info (basic)
   ((name                 string)
@@ -343,14 +345,14 @@
     (shark-chance           float)
     (fire-canyon-cellfish?  symbol)))
 
-(define *fisher-species-count* 23)
-(define *fisher-zone-count* 11)
+(define *fisher-species-count* 24)
+(define *fisher-zone-count* 12)
 
 (deftype fisher-species-table (basic)
-  ((entry fisher-species-info 23 :inline)))
+  ((entry fisher-species-info 24 :inline)))
 
 (deftype fisher-zone-table (basic)
-  ((entry fisher-zone-info 11 :inline)))
+  ((entry fisher-zone-info 12 :inline)))
 
 (define *fisher-species-table* (new 'global 'fisher-species-table))
 (define *fisher-zone-table* (new 'global 'fisher-zone-table))
@@ -388,6 +390,95 @@
 )
 
 (define *fisher-fish-runtime* (new 'global 'fisher-fish-runtime))
+
+
+;; --------------------------------------------------------------------------
+;; Final Boss Nuclear Bombfish intermission runtime.
+;; This is deliberately global instead of growing fisher-game again.  Only the
+;; finalboss-nuclear zone reads it, so ordinary fishing areas never inherit its
+;; phase/minigame state.
+;;
+;; progress:
+;;   0 = first bottom -> midpoint fishing intermission
+;;   1 = waiting for the second fishing intermission
+;;   2 = waiting for the automatic fourth boss phase
+;;   3 = final topwater -> catch intermission
+;;   4 = carrying/throwing the caught Nuclear Bombfish
+;;   5 = complete
+;; --------------------------------------------------------------------------
+(define *fisher-finalboss-water-depth* (meters 87.5508))
+(define *fisher-finalboss-bottom-depth* (meters 87.5508))
+(define *fisher-finalboss-middle-depth* (meters 43.7754))
+(define *fisher-finalboss-topwater-depth* (meters 21.8877))
+;; Authored horizontal hook/lure anchor for the narrow Final Boss shaft.
+;; Slightly beyond the geometric midpoint keeps the hook visually centered
+;; in the usable pool while giving the cast a little more reach from Jak.
+(define *fisher-finalboss-lure-distance* (meters 15.0))
+
+(deftype fisher-finalboss-runtime (basic)
+  ((progress             int32)
+   (stage                int32)
+   (difficulty           int32)
+   (state                symbol)
+   (area-enabled?        symbol)
+   (session-primed?      symbol)
+   (resume-delay         float)
+   (fail-count           int32)
+   (fight-kind           int32)
+   (mash-button          int32)
+   (mash-count           int32)
+   (mash-target          int32)
+   (wave-index           int32)
+   (wave-total           int32)
+   (wave-timer           float)
+   (wave-count           int32)
+   (wave-button          int32 6)
+   (wave-hit             symbol 6)
+   (guitar-total         int32)
+   (guitar-index         int32)
+   (guitar-button        int32)
+   (guitar-y             float)
+   (stick-last-zone      int32)
+   (stick-direction      int32)
+   (stick-quarter-count  int32)
+   (stick-rotations      int32)
+   (tick-time            float)
+   (bomb-time            float)
+   (landing-delay        float)
+   (bomb-fired?          symbol)
+   (saw-airborne?        symbol)
+   (carry-time           float)
+   (prompt-time          float)
+   (throw-time           float)
+   (carry-fish           (pointer manipy))
+   (throw-start          vector :inline)
+   (throw-target         vector :inline)))
+
+(define *fisher-finalboss-runtime* (new 'global 'fisher-finalboss-runtime))
+(define *fisher-finalboss-robot-head-target* (new 'global 'vector))
+(define *fisher-finalboss-runtime-level-active?* #f)
+(define *fisher-finalboss-danger-music-active?* #f)
+;; While a Nuclear Bombfish is armed, keep the ordinary boss score muted even
+;; after the fishing process exits.  The mute is released only when the bomb
+;; actually fires (or the encounter is aborted/cleaned up).
+(define *fisher-finalboss-hold-music-mute?* #f)
+
+;; Shared Final Boss/fishing bridge flags.
+;; These MUST live in the always-loaded mod layer: fisher-hooks.gc runs every
+;; frame even when the finalboss level object is not loaded.  Keeping these as
+;; define-externs would leave startup depending on level-local symbols that do
+;; not exist yet.  robotboss.gc may define/reset the same symbols when FIN loads.
+(define *boss-enter-2nd-phase* #f)
+(define *boss-waiting-for-2nd-phase* #f)
+(define *boss-enter-3rd-phase* #f)
+(define *boss-waiting-for-3rd-phase* #f)
+(define *boss-enter-4th-phase* #f)
+(define *boss-waiting-for-4th-phase* #f)
+(define *boss-enter-5th-phase* #f)
+(define *boss-waiting-for-5th-phase* #f)
+(define *boss-defeated* #f)
+(define *boss-activate-blue-eco* #f)
+(define *boss-trigger-blue-bomb-explosion* #f)
 
 
 (define *fisher-max-button-fight-slots* 20)
@@ -654,6 +745,42 @@
 (define-extern *fisher-power-cell-reward-active?* symbol)
 (define-extern *fisher-power-cell-camera-active?* symbol)
 (define-extern *fisher-session-active?* symbol)
+(defun-extern fisher-finalboss-zone? fisher-game symbol)
+(defun-extern fisher-finalboss-center-lure-horizontal! fisher-game none)
+(defun-extern fisher-finalboss-runtime-reset! none)
+(defun-extern fisher-finalboss-pressed-button int)
+(defun-extern fisher-finalboss-clear-button! int none)
+(defun-extern fisher-finalboss-fail! fisher-game none)
+(defun-extern fisher-finalboss-add-fail! fisher-game none)
+(defun-extern fisher-finalboss-reset-stick! none)
+(defun-extern fisher-finalboss-stick-zone int)
+(defun-extern fisher-finalboss-current-target-depth fisher-game float)
+(defun-extern fisher-finalboss-reel-distance-per-round float)
+(defun-extern fisher-finalboss-wave-window float)
+(defun-extern fisher-finalboss-set-red-pulse! fisher-game float none)
+(defun-extern fisher-finalboss-begin-wave! fisher-game none)
+(defun-extern fisher-finalboss-begin-fight! fisher-game none)
+(defun-extern fisher-finalboss-begin-reel! fisher-game none)
+(defun-extern fisher-finalboss-update-fight! fisher-game none)
+(defun-extern fisher-finalboss-start-ticking! fisher-game none)
+(defun-extern fisher-finalboss-finish-stage-threshold! fisher-game none)
+(defun-extern fisher-finalboss-update-reel! fisher-game none)
+(defun-extern fisher-finalboss-update-reeling! fisher-game none)
+(defun-extern fisher-finalboss-lane-x int int)
+(defun-extern fisher-finalboss-draw-ui! fisher-game none)
+(defun-extern fisher-finalboss-prime-resume-line! fisher-game none)
+(defun-extern fisher-finalboss-prepare-session! fisher-game none)
+(defun-extern fisher-finalboss-finish-catch-card! fisher-game none)
+(defun-extern fisher-button-label int string)
+(defun-extern fisher-configure-finalboss-table! fisher-game none)
+(defun-extern fisher-finalboss-target-on-ground? basic)
+(defun-extern fisher-finalboss-spawn-back-fish! none)
+(defun-extern fisher-finalboss-update-back-fish! none)
+(defun-extern fisher-finalboss-pulse-back-fish! float none)
+(defun-extern fisher-finalboss-begin-carry! none)
+(defun-extern fisher-finalboss-begin-throw! none)
+(defun-extern fisher-finalboss-update-throw! none)
+(defun-extern maintain-fisher-finalboss-intermission! none)
 
 
 
@@ -777,6 +904,7 @@
 (defun-extern fisher-start-button-fight! fisher-game none)
 (defun-extern fisher-update-button-fight! fisher-game symbol)
 (defun-extern fisher-draw-button-fight! fisher-game none)
+(defun-extern fisher-launch-button-hit-effects! fisher-game float float none)
 (defun-extern fisher-add-fire-canyon-cellfish-slot! fisher-game none)
 (defun-extern fisher-add-mountain-pass-cellfish-slots! fisher-game none)
 (defun-extern fisher-default-species-for-location fisher-game int)

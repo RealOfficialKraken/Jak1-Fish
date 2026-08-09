@@ -33,6 +33,8 @@
       (meters 70.6917))
     ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
       (meters 58.9957))
+    ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+      (meters 25.4736))
     (else (meters 55.5))))
 
 (defun fisher-playfield-max-depth ((self fisher-game))
@@ -43,6 +45,8 @@
       (meters 19.6246))
     ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
       (meters 34.5113))
+    ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+      *fisher-finalboss-water-depth*)
     (else (meters 36.0))))
 
 (defun fisher-set-zone-species-range!
@@ -327,6 +331,16 @@
     2000 4000 7.5 2.00 4.00 0.015 0.000 0.060
     (meters 16.0) (meters 18.5))
 
+  ;; Final Boss intermission fish.  Weight is stored in tenths of a pound.
+  ;; Its custom fight/reel state machine lives in fisher-game.gc, so the normal
+  ;; species fight chance is disabled after table defaults are initialized.
+  (fisher-set-species-info!
+    (fisher-species-info-for (fisher-species nuclear-bombfish))
+    "NUCLEAR BOMBFISH"
+    *sharkey-sgc*
+    90000 90000 0.0 0.74 0.44 0.0 0.0 0.0
+    *fisher-finalboss-topwater-depth* *fisher-finalboss-bottom-depth*)
+
   (dotimes (species *fisher-species-count*)
     (fisher-set-normal-fight-info!
       (fisher-species-info-for species)))
@@ -586,6 +600,12 @@
   (set! (-> (fisher-species-info-for (fisher-species phantasm-shark)) snap-on-bite?) #t)
   (set! (-> (fisher-species-info-for (fisher-species megaloviathan)) snap-on-bite?) #t)
 
+  (let ((nuclear (fisher-species-info-for (fisher-species nuclear-bombfish))))
+    (set! (-> nuclear fight-chance) 0.0)
+    (set! (-> nuclear fight-mode) 0)
+    (set! (-> nuclear fight-pull-speed) 0.0)
+    (set! (-> nuclear snap-on-bite?) #f))
+
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone sandover-dock))
     1 3 3 6 8 14 0.0)
@@ -668,6 +688,15 @@
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 1 (fisher-species dark-precursor-fangfish) 2 6 6 10)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 2 (fisher-species phantasm-shark) 1 2 2 4)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone maincave-dark-eco)) 3 (fisher-species megaloviathan) 1 1 1 1)
+
+  ;; Final Boss has exactly one authored resident; no random growth, rares,
+  ;; Scout Flies, or Power Cell carriers are ever injected into this zone.
+  (fisher-set-zone-info!
+    (fisher-zone-info-for (fisher-zone finalboss-nuclear))
+    20 20 1 1 1 1 0.0)
+  (fisher-set-zone-species-range!
+    (fisher-zone-info-for (fisher-zone finalboss-nuclear))
+    0 (fisher-species nuclear-bombfish) 1 1 1 1)
 
   (set! (-> (fisher-zone-info-for (fisher-zone sandover-dock)) fire-canyon-cellfish?) #t)
   (set! (-> (fisher-zone-info-for (fisher-zone jungle-pillar)) fire-canyon-cellfish?) #t)
@@ -1319,6 +1348,10 @@
         (rand-vu-int-range
           (-> info min-weight-tenths)
           (-> info max-weight-tenths))))
+
+    ;; Nuclear Bombfish is always exactly 9000.0 lb.
+    (when (= species (the-as int (fisher-species nuclear-bombfish)))
+      (return 90000))
 
     ;; Ordinary Village3 catches always stay inside their authored species
     ;; weight ranges. True rare-fish suffixes keep their own special weights.
@@ -2980,6 +3013,9 @@
 (defun fisher-table-species-for-new-slot
   ((self fisher-game) (golden? symbol))
 
+  (when (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+    (return (the-as int (fisher-species nuclear-bombfish))))
+
   ;; Sunken always maintains exactly one electric shark.  Replacement slots
   ;; preserve the area's grubfish/eelfish population weighting.
   (when
@@ -3130,8 +3166,24 @@
         ((< roll (+ w0 w1 w2)) (-> zone species 2))
         (else (-> zone species 3))))))
 
+
+(defun fisher-configure-finalboss-table! ((self fisher-game))
+  (set! (-> self fish-level-min) 20)
+  (set! (-> self fish-level-max) 20)
+  (set! (-> self fish-count) 1)
+  (fisher-clear-power-cell-tasks! self)
+
+  (fisher-set-fish-species! self 0 (the-as int (fisher-species nuclear-bombfish)))
+  (fisher-set-fish-suffix! self 0 2)
+  (fisher-set-fish-power-cell-task! self 0 0)
+  (fisher-set-fish-level! self 0 20)
+  (fisher-set-fish-weight-tenths! self 0 90000)
+  (none))
+
 (defun fisher-configure-location-table! ((self fisher-game))
   (cond
+    ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+      (fisher-configure-finalboss-table! self))
     ((= (-> self location-id) (the-as int (fisher-zone village2-electric)))
       (fisher-configure-village2-table! self))
     ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage)))
@@ -3150,6 +3202,9 @@
   ;; Village3 gets its own Scout Flies and its single local hidden-cell fish,
   ;; but does not inherit the Hub 2 Fire Canyon or Mountain Pass cell fish.
   (cond
+    ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+      (none))
+
     ;; Main Cave uses the cave-buzzer collection plus the five cave power-cell
     ;; tasks supplied with the level.  The conversion helpers explicitly skip
     ;; Megaloviathan, so the guaranteed giant can never carry a Power Cell.
@@ -4330,6 +4385,21 @@
             (set! y-scale 1.0)
             (set! z-scale 1.0)))))
 
+    ;; Nuclear Bombfish: black sharkey silhouette, deliberately long and slim
+    ;; without becoming a needle.  This override runs after the generic suffix
+    ;; system so the boss fish cannot inherit Mutant/Golden/rare colors.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+        (= species (the-as int (fisher-species nuclear-bombfish))))
+      (set! r 0.0)
+      (set! g 0.0)
+      (set! b 0.0)
+      (set! base-scale (if catch-display? 0.74 0.44))
+      (set! x-scale 0.62)
+      (set! y-scale 0.72)
+      (set! z-scale 1.55))
+
     ;; Catch/loot display fish are presentation models, not gameplay scale.
     ;; Keep them compact so the full fish and any rare attachment fit above
     ;; the loot window.
@@ -4365,6 +4435,12 @@
           (set! (-> fish-proc draw color-mult a) 8.00))
         ((= species (the-as int (fisher-species megaloviathan)))
           (set! (-> fish-proc draw color-mult a) 5.00))))
+
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+        (= species (the-as int (fisher-species nuclear-bombfish))))
+      (set! (-> fish-proc draw color-mult a) 8.00))
 
     (set! (-> fish-proc draw color-emissive r) 0.0)
     (set! (-> fish-proc draw color-emissive g) 0.0)
@@ -4566,7 +4642,34 @@
 (defun fisher-randomize-fish-slot!
   ((self fisher-game) (slot int))
 
-  (fisher-set-fish-distance!
+  ;; The Final Boss pool is an authored vertical encounter.  Do not let any
+  ;; generic randomizer move the Nuclear Bombfish away from its phase start.
+  ;; Do this as a normal cond branch instead of using return: GOAL's return macro
+  ;; has no named return target in this none-returning helper.
+  (cond
+    ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+      (when (= slot 0)
+        (fisher-set-fish-distance! self slot *fisher-finalboss-lure-distance*)
+        (fisher-set-fish-lane! self slot 0.0)
+        (fisher-set-fish-depth!
+          self slot
+          (cond
+            ((= (-> *fisher-finalboss-runtime* stage) 1) *fisher-finalboss-bottom-depth*)
+            ((= (-> *fisher-finalboss-runtime* stage) 2) *fisher-finalboss-middle-depth*)
+            (else *fisher-finalboss-topwater-depth*)))
+        (fisher-set-fish-direction! self slot 1.0)
+        (fisher-set-fish-speed! self slot (meters 0.035))
+        (fisher-set-fish-cooldown! self slot 0.0)
+        (fisher-set-fish-turn-time! self slot 0.0)
+        (fisher-set-fish-turn-old-direction! self slot 1.0)
+        (fisher-set-fish-turn-side! self slot 1.0)
+        (fisher-set-fish-suffix! self slot 2)
+        (fisher-set-fish-power-cell-task! self slot 0)
+        (fisher-set-fish-level! self slot 20)
+        (fisher-set-fish-weight-tenths! self slot 90000)))
+
+    (else
+      (fisher-set-fish-distance!
     self
     slot
     (rand-vu-float-range
@@ -4742,6 +4845,7 @@
                 (the float (fisher-fish-weight-tenths self slot))
                 1.70)
               0.5))))))
+    ))
 
   (none))
 
@@ -5533,6 +5637,19 @@
 
     (singlefish-vector-sub-safe! to-lure (-> self lure-pos) sense-origin)
     (set! distance (singlefish-vector-length-safe to-lure))
+
+    ;; The Final Boss shaft is intentionally only a minimum-cast-width column.
+    ;; Its one Nuclear Bombfish must be able to take the hook at the phase depth
+    ;; without depending on which way its idle swim happened to be facing.  Keep
+    ;; the ordinary facing cone everywhere else, but use a tight radial sense in
+    ;; this one authored encounter.
+    (when
+      (and
+        (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+        (= (fisher-fish-species self slot)
+           (the-as int (fisher-species nuclear-bombfish))))
+      (return (<= distance (meters 5.0))))
+
     (set! (-> to-lure y) 0.0)
     (set! (-> to-lure w) 0.0)
     (set! horizontal-distance (singlefish-vector-length-safe to-lure))
@@ -5852,10 +5969,12 @@
       (stop-sound-file "water-waves.wav")
       (fisher-remove-lure-snake! self)
 
-      ;; Inferno Sharks use the wide shark model and can become stranded at
-      ;; the top-right reel point during the physical return-to-Jak sequence.
-      ;; Move this species directly into the normal catch-card presentation.
-      (when (= species (the-as int (fisher-species inferno-shark)))
+      ;; Inferno Sharks and the vertical Nuclear Bombfish encounter skip the
+      ;; ordinary physical return-to-Jak path and go straight to the catch card.
+      (when
+        (or
+          (= species (the-as int (fisher-species inferno-shark)))
+          (= species (the-as int (fisher-species nuclear-bombfish))))
         (let ((caught-fish (fisher-fish-pointer self slot)))
           (when caught-fish
             (fisher-destroy-manipy! caught-fish)

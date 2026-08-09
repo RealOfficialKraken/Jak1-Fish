@@ -874,6 +874,15 @@
     (set! (-> self lure-reel-x-speed) (* (-> self lure-reel-x-speed) 0.70))
     (set! (-> self lure-reel-y-speed) (* (-> self lure-reel-y-speed) 0.70)))
 
+  ;; Final Boss: the pool is extremely deep.  Sink quickly enough to reach the
+  ;; single bottom resident, but keep ordinary reel speeds tiny as a safety net;
+  ;; the actual hooked fight uses the much slower right-stick reel mechanic.
+  (when
+    (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+    (set! (-> self lure-fall-speed) 5.0)
+    (set! (-> self lure-reel-x-speed) 0.35)
+    (set! (-> self lure-reel-y-speed) 0.28))
+
   ;; Snow's tight frozen pool deliberately has heavier, slower lure movement.
   ;; Fishing-level and skill multipliers still stack normally afterward.
   (when
@@ -1609,6 +1618,13 @@
   (none))
 
 (defun fisher-update-reel-hint! ((self fisher-game))
+  ;; Nuclear Bombfish owns the entire input HUD while hooked.  Do not display
+  ;; the normal X/L1/R1/Square fishing hints over its minigames.
+  (cond
+    ((fisher-finalboss-zone? self)
+      (set! (-> self reel-hint-time) 0.0))
+    (else
+
   (when
     (> (-> self reel-hint-time) 0.0)
 
@@ -1665,6 +1681,7 @@
       (set!
         (-> self reel-hint-time)
         0.0)))
+    ))
 
   (none))
 
@@ -2996,6 +3013,33 @@
         (projected-start
           (new 'stack 'vector4w-2))
 
+        (projected-end
+          (new 'stack 'vector4w-2))
+
+        ;; Final Boss can put Jak far enough above the lure that Jak is actually
+        ;; behind the follow camera.  Projecting a behind-camera endpoint flips
+        ;; screen X/Y and makes the line shoot left/down.  Keep local endpoints
+        ;; so that one deep-pool path can clip the line to the camera near plane
+        ;; before projection without changing any normal fishing area.
+        (draw-start
+          (new 'stack-no-clear 'vector))
+
+        (draw-end
+          (new 'stack-no-clear 'vector))
+
+        (camera-forward
+          (new 'stack-no-clear 'vector))
+
+        (camera-to-start
+          (new 'stack-no-clear 'vector))
+
+        (camera-to-end
+          (new 'stack-no-clear 'vector))
+
+        (start-depth 1.0)
+        (end-depth 1.0)
+        (clip-t 0.0)
+
         (start-x 32768)
         (start-y 35584)
         (start-z #x00ffffff)
@@ -3003,17 +3047,52 @@
         (end-y 32428)
         (end-z #x00ffffff))
 
-      (set! (-> world-start w) 1.0)
-      (set! (-> world-end w) 1.0)
+      (vector-copy! draw-start world-start)
+      (vector-copy! draw-end world-end)
+      (set! (-> draw-start w) 1.0)
+      (set! (-> draw-end w) 1.0)
 
-      ;; Jak is always the real start of the line.  Do not replace him with a
-      ;; fixed screen point during the reel-camera zoom.  transform-point-qword!
-      ;; still writes the projected coordinates when the point is outside the
-      ;; visible frustum, so ignore its visibility result and clamp only the
-      ;; resulting screen point to the drawable edge.
+      ;; In the deep Final Boss shaft the follow camera can descend below Jak.
+      ;; Once Jak is behind the camera, raw perspective projection mirrors his
+      ;; screen coordinates and the line appears to reverse direction.  Clip the
+      ;; Jak->hook segment to a small plane in front of the CURRENT camera first.
+      ;; The visible line then begins cleanly at the screen edge instead of ever
+      ;; projecting a behind-camera point.
+      (when
+        (and
+          (fisher-finalboss-zone? self)
+          *camera*
+          (> (-> *camera* num-slaves) 0))
+
+        (let ((cam-slave (-> *camera* slave 0 0)))
+          (vector-copy! camera-forward (-> cam-slave tracking inv-mat vector 2))
+          (set! (-> camera-forward w) 0.0)
+          (singlefish-vector-normalize-safe! camera-forward 1.0)
+
+          (vector-! camera-to-start draw-start (-> cam-slave trans))
+          (vector-! camera-to-end draw-end (-> cam-slave trans))
+          (set! start-depth (vector-dot camera-to-start camera-forward))
+          (set! end-depth (vector-dot camera-to-end camera-forward))
+
+          (when
+            (and
+              (< start-depth (meters 0.50))
+              (> end-depth (meters 0.50))
+              (> (- end-depth start-depth) (meters 0.001)))
+            (set!
+              clip-t
+              (/ (- (meters 0.50) start-depth)
+                 (- end-depth start-depth)))
+            (set! clip-t (fmax 0.0 (fmin 1.0 clip-t)))
+            (vector-lerp! camera-to-start draw-start draw-end clip-t)
+            (vector-copy! draw-start camera-to-start)
+            (set! (-> draw-start w) 1.0))))
+
+      ;; Project the clipped start.  Offscreen points that are still IN FRONT of
+      ;; the camera are safe to clamp to the drawable edge.
       (transform-point-qword!
         (-> projected-start vector 0)
-        world-start)
+        draw-start)
 
       (set! start-x (-> projected-start vector 0 x))
       (set! start-y (-> projected-start vector 0 y))
@@ -3021,6 +3100,29 @@
 
       (set! start-x (max 512 (min 65024 start-x)))
       (set! start-y (max 512 (min 65024 start-y)))
+
+      ;; The normal fishing line intentionally aims at the old fixed center
+      ;; anchor.  That shortcut breaks down in the Final Boss shaft because the
+      ;; hook can be tens of meters below Jak: the fake fixed Z produces severe
+      ;; perspective collapse and eventually makes the line look like a tiny
+      ;; vector/dot.  For this one deep pool, project the REAL hook-top anchor and
+      ;; use its real depth while keeping every other fishing area's line alone.
+      (when (fisher-finalboss-zone? self)
+        (transform-point-qword!
+          (-> projected-end vector 0)
+          draw-end)
+
+        (set! end-x (-> projected-end vector 0 x))
+        (set! end-y (-> projected-end vector 0 y))
+        (set! end-z (+ (-> projected-end vector 0 z) -8192))
+
+        (set! end-x (max 512 (min 65024 end-x)))
+        (set! end-y (max 512 (min 65024 end-y)))
+
+        ;; XYZF2 has a finite fixed-point Z range.  Clamp both projected depths
+        ;; for this extreme vertical scene instead of letting a deep hook wrap.
+        (set! start-z (max 1 (min #x00fffffe start-z)))
+        (set! end-z (max 1 (min #x00fffffe end-z))))
 
       (set! (-> line-colors vector 0 x) (the-as int (-> color r)))
       (set! (-> line-colors vector 0 y) (the-as int (-> color g)))
@@ -3542,6 +3644,23 @@
     (set! vertical-distance (fmax (-> to-lure y) (- (-> to-lure y))))
 
     (set! total-distance (singlefish-vector-length-safe to-lure))
+
+    ;; Final Boss hook acquisition is authored differently from ordinary fish.
+    ;; Once the lure has actually reached the bottom, the Nuclear Bombfish gets
+    ;; a WIDE WORLD-X-only bite range.  Ignore Y/Z/facing here: this narrow deep
+    ;; shaft should never fail the only hook because the shark happens to be
+    ;; offset vertically or across the lane after an 87m descent.
+    (when
+      (= (-> owner location-id) (the-as int (fisher-zone finalboss-nuclear)))
+      (let ((x-distance (fabs (-> to-lure x)))
+            (lure-depth (fmax 0.0 (- (-> owner water-level) (-> owner lure-pos y)))))
+        (return
+          (and
+            (= (-> owner cast-state) 'line-active)
+            (= (-> owner fish-state) 'free)
+            (not (-> owner hooked-fish))
+            (>= lure-depth (- *fisher-finalboss-bottom-depth* (meters 2.5)))
+            (<= x-distance (meters 18.0))))))
 
     (and
       (= (-> owner cast-state) 'line-active)
@@ -4339,6 +4458,11 @@
                   (the-as int (fisher-species megaloviathan)))
                 *fisher-junglefish-sg*)
 
+              ((=
+                  (-> self caught-fish-species)
+                  (the-as int (fisher-species nuclear-bombfish)))
+                *sharkey-sgc*)
+
               (else
                 *catch-fisha-sgc*))
             #f
@@ -4693,6 +4817,11 @@
             (cond
               ((and
                   (= (-> self fish-state) 'catch-exit)
+                  (= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish))))
+                (fisher-finalboss-finish-catch-card! self))
+
+              ((and
+                  (= (-> self fish-state) 'catch-exit)
                   (fisher-rare-fish? (-> self caught-fish-suffix)))
 
                 (set! (-> self fish-state) 'rare-enter)
@@ -4909,6 +5038,14 @@
     (singlefish-vector-normalize-safe! side-axis 1.0)
 
     (cond
+      ((and fighting? (fisher-finalboss-zone? self))
+        ;; Nuclear Bombfish fights vertically down the shaft.  Keep a small
+        ;; horizontal component so forward/down matrix construction never gets
+        ;; a degenerate pair of parallel vectors, but visually the fish points
+        ;; almost straight downward instead of turning sideways.
+        (singlefish-vector-scale-safe! target-facing (-> self playfield-axis) -0.16)
+        (set! (-> target-facing y) -1.0))
+
       (fighting?
         (set! turn-angle (fmin (degrees 180.0) (-> self fish-fight-phase)))
 
@@ -5378,6 +5515,7 @@
 
     (when
       (and
+        (not (fisher-finalboss-zone? self))
         (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-stop-lure-unlock-level*))
         (<= (-> self lure-stop-cooldown) 0.0)
         (!= (-> self fish-state) 'reeling)
@@ -5398,6 +5536,7 @@
 
     (when
       (and
+        (not (fisher-finalboss-zone? self))
         (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-sink-lure-unlock-level*))
         (<= (-> self lure-sink-cooldown) 0.0)
         (!= (-> self fish-state) 'reeling)
@@ -5679,6 +5818,747 @@
           (= species (the-as int (fisher-species black-lurker-shark))))
         (fmax 1.15 level-mult)
         level-mult))))
+
+(defun fisher-finalboss-zone? ((self fisher-game))
+  (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
+
+(defun fisher-finalboss-center-lure-horizontal! ((self fisher-game))
+  ;; The Final Boss pool is a narrow vertical shaft.  Keep the lure centered
+  ;; horizontally in that shaft at all times after it reaches the water; only
+  ;; its Y/depth is allowed to move during fights and reeling.
+  (let ((saved-y (-> self lure-pos y)))
+    (vector+float*!
+      (-> self lure-pos)
+      (-> self fishing-player-pos)
+      (-> self playfield-axis)
+      *fisher-finalboss-lure-distance*)
+    (set! (-> self lure-pos y) saved-y)
+    (set! (-> self lure-pos w) 1.0))
+  (none))
+
+(defun fisher-finalboss-runtime-reset! ()
+  (set! *fisher-finalboss-danger-music-active?* #f)
+  ;; This flag is outside the cold runtime struct, so it is safe to clean up
+  ;; before reinitializing the encounter after a reload/death.
+  (when *fisher-finalboss-hold-music-mute?*
+    (remove-setting! 'music-volume))
+  (set! *fisher-finalboss-hold-music-mute?* #f)
+  (let ((rt *fisher-finalboss-runtime*))
+    ;; COLD-SAFE INITIALIZATION.
+    ;; `new 'global 'fisher-finalboss-runtime` does not guarantee that pointer/
+    ;; symbol fields contain #f before our first visit to FIN.  Therefore this
+    ;; reset MUST NOT inspect state/carry-fish before writing them.  The previous
+    ;; version dereferenced garbage in carry-fish on the first Final Boss frame.
+    (set! (-> rt progress) 0)
+    (set! (-> rt stage) 0)
+    (set! (-> rt difficulty) 1)
+    (set! (-> rt state) 'idle)
+    (set! (-> rt area-enabled?) #f)
+    (set! (-> rt session-primed?) #f)
+    (set! (-> rt resume-delay) 0.0)
+    (set! (-> rt fail-count) 0)
+    (set! (-> rt fight-kind) 0)
+    (set! (-> rt mash-button) 0)
+    (set! (-> rt mash-count) 0)
+    (set! (-> rt mash-target) 0)
+    (set! (-> rt wave-index) 0)
+    (set! (-> rt wave-total) 0)
+    (set! (-> rt wave-timer) 0.0)
+    (set! (-> rt wave-count) 0)
+    (dotimes (i 6)
+      (set! (-> rt wave-button i) 0)
+      (set! (-> rt wave-hit i) #f))
+    (set! (-> rt guitar-total) 0)
+    (set! (-> rt guitar-index) 0)
+    (set! (-> rt guitar-button) 0)
+    (set! (-> rt guitar-y) 0.0)
+    (set! (-> rt stick-last-zone) -1)
+    (set! (-> rt stick-direction) 0)
+    (set! (-> rt stick-quarter-count) 0)
+    (set! (-> rt stick-rotations) 0)
+    (set! (-> rt tick-time) 0.0)
+    (set! (-> rt bomb-time) 0.0)
+    (set! (-> rt landing-delay) 0.0)
+    (set! (-> rt bomb-fired?) #f)
+    (set! (-> rt saw-airborne?) #f)
+    (set! (-> rt carry-time) 0.0)
+    (set! (-> rt prompt-time) 0.0)
+    (set! (-> rt throw-time) 0.0)
+    (set! (-> rt carry-fish) (the-as (pointer manipy) #f))
+    (vector-reset! (-> rt throw-start))
+    (vector-reset! (-> rt throw-target)))
+  (none))
+
+(defun fisher-finalboss-pressed-button ()
+  (cond
+    ((cpad-pressed? 0 triangle) 0)
+    ((cpad-pressed? 0 circle) 1)
+    ((cpad-pressed? 0 x) 2)
+    ((cpad-pressed? 0 square) 3)
+    (else -1)))
+
+(defun fisher-finalboss-clear-button! ((button int))
+  (cond
+    ((= button 0) (cpad-clear! 0 triangle))
+    ((= button 1) (cpad-clear! 0 circle))
+    ((= button 2) (cpad-clear! 0 x))
+    ((= button 3) (cpad-clear! 0 square)))
+  (none))
+
+(defun fisher-finalboss-fail! ((self fisher-game))
+  (let ((rt *fisher-finalboss-runtime*))
+    (set! (-> rt area-enabled?) #f)
+    (set! (-> rt state) 'failed)
+    (set! (-> self fish-fighting?) #f)
+    (fisher-clear-button-fight! self)
+    (stop-main-music)
+    (set-setting! 'music-volume 'abs 0.0 0)
+    (set! *fisher-finalboss-hold-music-mute?* #t)
+    (set! *boss-trigger-blue-bomb-explosion* #t)
+    (set! (-> self cast-state) 'buzzer-exit))
+  (none))
+
+(defun fisher-finalboss-add-fail! ((self fisher-game))
+  (+! (-> *fisher-finalboss-runtime* fail-count) 1)
+  (when (>= (-> *fisher-finalboss-runtime* fail-count) 6)
+    (fisher-finalboss-fail! self))
+  (none))
+
+(defun fisher-finalboss-reset-stick! ()
+  (set! (-> *fisher-finalboss-runtime* stick-last-zone) -1)
+  (set! (-> *fisher-finalboss-runtime* stick-direction) 0)
+  (set! (-> *fisher-finalboss-runtime* stick-quarter-count) 0)
+  (set! (-> *fisher-finalboss-runtime* stick-rotations) 0)
+  (none))
+
+(defun fisher-finalboss-stick-zone ()
+  ;; OpenGOAL's raw right-stick values are centered around 128.  Cardinal
+  ;; checkpoints are intentionally generous so a real circular motion does not
+  ;; demand a mathematically perfect circle.
+  (let ((x (the int (-> *cpad-list* cpads 0 rightx)))
+        (y (the int (-> *cpad-list* cpads 0 righty))))
+    (cond
+      ((and (>= x 190) (>= y 76) (<= y 180)) 0) ; right
+      ((and (>= y 190) (>= x 76) (<= x 180)) 1) ; down
+      ((and (<= x 66)  (>= y 76) (<= y 180)) 2) ; left
+      ((and (<= y 66)  (>= x 76) (<= x 180)) 3) ; up
+      (else -1))))
+
+(defun fisher-finalboss-current-target-depth ((self fisher-game))
+  (cond
+    ((= (-> *fisher-finalboss-runtime* stage) 1) *fisher-finalboss-middle-depth*)
+    ((= (-> *fisher-finalboss-runtime* stage) 2) *fisher-finalboss-topwater-depth*)
+    (else (meters 2.5))))
+
+(defun fisher-finalboss-reel-distance-per-round ()
+  ;; Ten full right-stick rotations are one reel round.  The fish deliberately
+  ;; advances only a modest amount per round, forcing several fight/reel cycles.
+  (cond
+    ((= (-> *fisher-finalboss-runtime* stage) 1) (meters 10.0))
+    ((= (-> *fisher-finalboss-runtime* stage) 2) (meters 7.0))
+    (else (meters 5.5))))
+
+(defun fisher-finalboss-set-red-pulse! ((self fisher-game) (elapsed float))
+  (when (>= (-> self hooked-fish-slot) 0)
+    (let ((fish (fisher-fish-pointer self (-> self hooked-fish-slot))))
+      (when (and fish (-> fish 0 self))
+        (let* ((fp (the-as manipy (-> fish 0 self)))
+               (pulse (+ 1.0 (* 0.12 (sin (* (degrees 720.0) elapsed)))))
+               (base 0.44))
+          (set! (-> fp draw color-mult r) 1.25)
+          (set! (-> fp draw color-mult g) 0.003)
+          (set! (-> fp draw color-mult b) 0.003)
+          (set! (-> fp draw color-mult a) 8.0)
+          (set-vector!
+            (-> fp root scale)
+            (* base 0.62 pulse)
+            (* base 0.72 pulse)
+            (* base 1.55 pulse)
+            1.0)))))
+  (none))
+
+(defun fisher-finalboss-wave-window ()
+  ;; Fixed simultaneous-button window by boss fishing visit.
+  (cond
+    ((= (-> *fisher-finalboss-runtime* difficulty) 1) 3.5)
+    ((= (-> *fisher-finalboss-runtime* difficulty) 2) 3.0)
+    (else 2.5)))
+
+(defun fisher-finalboss-begin-wave! ((self fisher-game))
+  ;; Use the SAME presentation/physics as the normal fish button fight, but
+  ;; launch the entire 4-6 prompt wave at once and keep it alive for the
+  ;; phase-specific fixed time window.
+  (let ((rt *fisher-finalboss-runtime*)
+        (data (-> self button-fight-data)))
+    (fisher-clear-button-fight! self)
+    (set! (-> rt wave-timer) 0.0)
+    (set! (-> rt wave-count) (rand-vu-int-range 4 6))
+    (set! (-> data active?) #t)
+    (set! (-> data total) (-> rt wave-count))
+    (set! (-> data remaining) (-> rt wave-count))
+    (set! (-> data elapsed) 0.0)
+    (set! (-> data wrong-mask) 0)
+    (set! (-> data hint-visible?) #f)
+
+    (dotimes (i 6)
+      (set! (-> rt wave-button i) (rand-vu-int-range 0 3))
+      (set! (-> rt wave-hit i) (>= i (-> rt wave-count)))
+      (set! (-> data slot i state) (if (< i (-> rt wave-count)) 1 0))
+      (set! (-> data slot i button) (-> rt wave-button i))
+      ;; Final-boss polish: spread the simultaneous prompts across a clean
+      ;; readable band instead of letting 4-6 glyphs spawn in one random clump.
+      ;; They still use the normal fish prompt physics/hit particles, just with
+      ;; a calmer arc so the player can read the whole spray at a glance.
+      (set! (-> data slot i x)
+        (+ 101.0 (* 62.0 (the float i)) (rand-vu-float-range -8.0 8.0)))
+      (set! (-> data slot i y) (rand-vu-float-range 118.0 132.0))
+      (set! (-> data slot i vel-x) (rand-vu-float-range -24.0 24.0))
+      (set! (-> data slot i vel-y)
+        (- (* 72.0 (rand-vu-float-range 0.90 1.10))))
+      (set! (-> data slot i launch-time) 0.0)))
+  (none))
+
+(defun fisher-finalboss-begin-fight! ((self fisher-game))
+  (let* ((rt *fisher-finalboss-runtime*)
+         (kind (rand-vu-int-range 0 2)))
+    (set! (-> rt state) 'fight)
+    (set! (-> rt fight-kind) kind)
+    (set! (-> self fish-fighting?) #t)
+    (fisher-clear-button-fight! self)
+    (set! (-> self fish-fight-base-y) (-> self lure-pos y))
+    (set! (-> self fish-fight-phase) 0.0)
+
+    (cond
+      ((= kind 0)
+        (set! (-> rt mash-button) (rand-vu-int-range 0 3))
+        (set! (-> rt mash-count) 0)
+        ;; Reuse wave-timer as a short visual press pulse for the mash glyph.
+        (set! (-> rt wave-timer) 0.0)
+        ;; Keep the existing 20-42 mash requirement; only the presentation is
+        ;; hidden/polished so the fight's established difficulty is unchanged.
+        (set! (-> rt mash-target)
+          (min 42
+            (+ (rand-vu-int-range 20 42)
+               (* (- (-> rt difficulty) 1) 2)))))
+
+      ((= kind 1)
+        (set! (-> rt wave-index) 0)
+        ;; Always exactly three simultaneous waves.  Difficulty changes only
+        ;; the amount of time allowed for each wave.
+        (set! (-> rt wave-total) 3)
+        (fisher-finalboss-begin-wave! self))
+
+      (else
+        (set! (-> rt guitar-index) 0)
+        (set! (-> rt guitar-total)
+          (min 12
+            (+ (rand-vu-int-range 5 12)
+               (- (-> rt difficulty) 1))))
+        (set! (-> rt guitar-button) (rand-vu-int-range 0 3))
+        (set! (-> rt guitar-y) 8.0))))
+  (none))
+
+(defun fisher-finalboss-begin-reel! ((self fisher-game))
+  (set! (-> *fisher-finalboss-runtime* state) 'reel)
+  (set! (-> self fish-fighting?) #f)
+  (fisher-clear-button-fight! self)
+  (fisher-finalboss-reset-stick!)
+  ;; One restrained success cue at the END of a minigame is much cleaner than
+  ;; sounding on every individual button press.
+  (play-sound-file "bwoop.wav" (the int (-> *setting-control* current sfx-volume)))
+  (none))
+
+(defun fisher-finalboss-update-fight! ((self fisher-game))
+  (let* ((rt *fisher-finalboss-runtime*)
+         (dt (-> *display* seconds-per-frame))
+         (button (fisher-finalboss-pressed-button))
+         (bottom-y (- (-> self water-level) *fisher-finalboss-bottom-depth*)))
+
+    ;; Nuclear Bombfish never runs away horizontally.  Every fight pushes the
+    ;; hooked lure/fish straight DOWN the deep Dark Eco shaft instead.
+    (-! (-> self lure-pos y)
+      (*
+        (cond
+          ((= (-> rt difficulty) 1) (meters 0.48))
+          ((= (-> rt difficulty) 2) (meters 0.58))
+          (else (meters 0.70)))
+        dt))
+    (when (< (-> self lure-pos y) bottom-y)
+      (set! (-> self lure-pos y) bottom-y))
+
+    (cond
+      ((= (-> rt fight-kind) 0)
+        ;; Each correct mash visibly depresses the button, then it springs back.
+        (when (> (-> rt wave-timer) 0.0)
+          (-! (-> rt wave-timer) dt)
+          (when (< (-> rt wave-timer) 0.0)
+            (set! (-> rt wave-timer) 0.0)))
+        (when (>= button 0)
+          (fisher-finalboss-clear-button! button)
+          (cond
+            ((= button (-> rt mash-button))
+              (+! (-> rt mash-count) 1)
+              (set! (-> rt wave-timer) 0.12)
+              ;; A periodic particle pop gives tactile progress without turning
+              ;; 20-42 rapid presses into a particle/sound flood.
+              (when (= (mod (-> rt mash-count) 4) 0)
+                (fisher-launch-button-hit-effects! self 256.0 111.0)))
+            (else
+              (fisher-finalboss-add-fail! self))))
+        (when (and (= (-> rt state) 'fight)
+                   (>= (-> rt mash-count) (-> rt mash-target)))
+          (fisher-finalboss-begin-reel! self)))
+
+      ((= (-> rt fight-kind) 1)
+        ;; Move the simultaneous wave with the same float-up / gravity motion
+        ;; used by the ordinary fish button minigame.
+        (let ((data (-> self button-fight-data)))
+          (+! (-> data elapsed) dt)
+          (dotimes (i (-> data total))
+            (when (= (-> data slot i state) 1)
+              (+! (-> data slot i vel-y) (* 92.0 dt))
+              (*! (-> data slot i vel-x) (fmax 0.0 (- 1.0 (* 2.25 dt))))
+              (+! (-> data slot i x) (* (-> data slot i vel-x) dt))
+              (+! (-> data slot i y) (* (-> data slot i vel-y) dt))
+              (when (< (-> data slot i x) 92.0)
+                (set! (-> data slot i x) 92.0)
+                (set! (-> data slot i vel-x) (fabs (-> data slot i vel-x))))
+              (when (> (-> data slot i x) 420.0)
+                (set! (-> data slot i x) 420.0)
+                (set! (-> data slot i vel-x) (- (fabs (-> data slot i vel-x)))))
+              ;; Keep these longer fixed-time waves visibly ABOVE the XP meter.
+              ;; They retain the ordinary arc/particle feel, but bounce inside
+              ;; this clean HUD band instead of falling behind the meter.
+              (when (< (-> data slot i y) 88.0)
+                (set! (-> data slot i y) 88.0)
+                (set! (-> data slot i vel-y) (fabs (-> data slot i vel-y))))
+              (when (> (-> data slot i y) 158.0)
+                (set! (-> data slot i y) 158.0)
+                (set! (-> data slot i vel-y) (- (fabs (-> data slot i vel-y)))))))
+
+          (when (>= button 0)
+            (fisher-finalboss-clear-button! button)
+            (let ((found -1))
+              (dotimes (i (-> data total))
+                (when (and (< found 0)
+                           (= (-> data slot i state) 1)
+                           (= button (-> data slot i button)))
+                  (set! found i)))
+              (cond
+                ((>= found 0)
+                  (fisher-launch-button-hit-effects!
+                    self
+                    (-> data slot found x)
+                    (-> data slot found y))
+                  (set! (-> data slot found state) 2)
+                  (set! (-> rt wave-hit found) #t)
+                  (-! (-> data remaining) 1))
+                (else
+                  (fisher-finalboss-add-fail! self)))))
+
+          (+! (-> rt wave-timer) dt)
+          ;; End this spray immediately once every prompt was cleared.  The
+          ;; timer is only the deadline for prompts the player has NOT finished.
+          (when
+            (and
+              (= (-> rt state) 'fight)
+              (or
+                (<= (-> data remaining) 0)
+                (>=
+                  (-> rt wave-timer)
+                  (fisher-finalboss-wave-window))))
+            ;; Only an expired timer turns still-live prompts into failures.
+            (when (> (-> data remaining) 0)
+              (dotimes (i (-> data total))
+                (when (= (-> data slot i state) 1)
+                  (fisher-finalboss-add-fail! self))))
+            (fisher-clear-button-fight! self)
+            (when (= (-> rt state) 'fight)
+              (+! (-> rt wave-index) 1)
+              (if (>= (-> rt wave-index) (-> rt wave-total))
+                (fisher-finalboss-begin-reel! self)
+                (fisher-finalboss-begin-wave! self))))))
+
+      (else
+        (let ((speed
+              (cond
+                ((= (-> rt difficulty) 1) 116.0)
+                ((= (-> rt difficulty) 2) 130.0)
+                (else 144.0))))
+          (+! (-> rt guitar-y) (* speed dt)))
+
+        (when (>= button 0)
+          (fisher-finalboss-clear-button! button)
+          (cond
+            ((and
+                (= button (-> rt guitar-button))
+                (>= (-> rt guitar-y) 108.0)
+                (<= (-> rt guitar-y) 164.0))
+              (fisher-launch-button-hit-effects!
+                self
+                (the float (fisher-finalboss-lane-x (-> rt guitar-button)))
+                140.0)
+              (+! (-> rt guitar-index) 1)
+              (when (< (-> rt guitar-index) (-> rt guitar-total))
+                (set! (-> rt guitar-button) (rand-vu-int-range 0 3))
+                (set! (-> rt guitar-y) 8.0)))
+            (else
+              (fisher-finalboss-add-fail! self))))
+
+        ;; Miss the note before it can overlap the persistent level/XP bar.
+        (when (and (= (-> rt state) 'fight) (> (-> rt guitar-y) 170.0))
+          (fisher-finalboss-add-fail! self)
+          (when (= (-> rt state) 'fight)
+            (+! (-> rt guitar-index) 1)
+            (when (< (-> rt guitar-index) (-> rt guitar-total))
+              (set! (-> rt guitar-button) (rand-vu-int-range 0 3))
+              (set! (-> rt guitar-y) 8.0))))
+
+        (when (and (= (-> rt state) 'fight)
+                   (>= (-> rt guitar-index) (-> rt guitar-total)))
+          (fisher-finalboss-begin-reel! self))))
+  (none)))
+
+(defun fisher-finalboss-start-ticking! ((self fisher-game))
+  (set! (-> *fisher-finalboss-runtime* state) 'ticking)
+  (set! (-> *fisher-finalboss-runtime* tick-time) 0.0)
+  (set! (-> self fish-fighting?) #f)
+
+  ;; Fight is over the instant the Nuclear Bombfish primes.  Kill the fishing
+  ;; main track here (not later on camera exit), and keep the ordinary boss score
+  ;; muted until the bomb itself actually fires.
+  (stop-main-music)
+  (set-setting! 'music-volume 'abs 0.0 0)
+  (set! *fisher-finalboss-hold-music-mute?* #t)
+
+  ;; Fire the danger cue as an SFX on this exact underwater prime frame.
+  (play-sound-file
+    "death-is-coming.mp3"
+    (the int (-> *setting-control* current sfx-volume)))
+  (none))
+
+(defun fisher-finalboss-finish-stage-threshold! ((self fisher-game))
+  (let ((rt *fisher-finalboss-runtime*))
+    (set! (-> rt area-enabled?) #f)
+    (set! (-> rt bomb-time) 8.0)
+    (set! (-> rt landing-delay) 0.0)
+    (set! (-> rt bomb-fired?) #f)
+    (set! (-> rt saw-airborne?) #f)
+    (set! (-> rt state) 'exit-wait)
+    (set! (-> self cast-state) 'buzzer-exit))
+  (none))
+
+(defun fisher-finalboss-update-reel! ((self fisher-game))
+  (let* ((rt *fisher-finalboss-runtime*)
+         (zone (fisher-finalboss-stick-zone)))
+    (when (>= zone 0)
+      (let ((last (-> rt stick-last-zone)))
+        (when (and (>= last 0) (!= zone last))
+          (let ((cw (mod (+ last 1) 4))
+                (ccw (mod (+ last 3) 4)))
+            (cond
+              ((= zone cw)
+                (when (or (= (-> rt stick-direction) 0)
+                          (= (-> rt stick-direction) 1))
+                  (set! (-> rt stick-direction) 1)
+                  (+! (-> rt stick-quarter-count) 1)))
+              ((= zone ccw)
+                (when (or (= (-> rt stick-direction) 0)
+                          (= (-> rt stick-direction) -1))
+                  (set! (-> rt stick-direction) -1)
+                  (+! (-> rt stick-quarter-count) 1)))
+              (else
+                ;; Crossing directly through the center/opposite cardinal does
+                ;; not count; force the player to establish a clean new circle.
+                (set! (-> rt stick-direction) 0)
+                (set! (-> rt stick-quarter-count) 0))))
+
+          (when (> (-> rt stick-quarter-count) 0)
+            ;; Move only on validated quarter-circle progress.  Forty quarters
+            ;; (ten rotations) equal one deliberately slow reel round.
+            (+! (-> self lure-pos y)
+              (/ (fisher-finalboss-reel-distance-per-round) 40.0))
+            (let ((max-y (- (-> self water-level) (fisher-finalboss-current-target-depth self))))
+              (when (> (-> self lure-pos y) max-y)
+                (set! (-> self lure-pos y) max-y))))
+
+          (when (>= (-> rt stick-quarter-count) 4)
+            (+! (-> rt stick-rotations) 1)
+            (set! (-> rt stick-quarter-count) 0)))
+        (set! (-> rt stick-last-zone) zone)))
+
+    ;; Reaching the authored phase depth wins the reel immediately, even if
+    ;; fewer than ten rotations were needed.  Ten rotations is only the maximum
+    ;; length of one reel opportunity before the fish fights again.
+    (let ((depth (- (-> self water-level) (-> self lure-pos y))))
+      (cond
+        ((<= depth (fisher-finalboss-current-target-depth self))
+          (cond
+            ((< (-> rt stage) 3)
+              (fisher-finalboss-start-ticking! self))
+            (else
+              (stop-main-music)
+              (set-setting! 'music-volume 'abs 0.0 0)
+              (set! *fisher-finalboss-hold-music-mute?* #t)
+              (fisher-finish-manipy-catch! self (-> self hooked-fish-slot)))))
+        ((>= (-> rt stick-rotations) 10)
+          (fisher-finalboss-begin-fight! self))))
+  (none)))
+
+(defun fisher-finalboss-update-reeling! ((self fisher-game))
+  (let ((rt *fisher-finalboss-runtime*))
+    ;; Never let normal current/reel math pull this encounter toward the front
+    ;; edge of the pool.  The Bombfish fight is vertical around the pool center.
+    (fisher-finalboss-center-lure-horizontal! self)
+    (cond
+      ((= (-> rt state) 'resume-delay)
+        (+! (-> rt resume-delay) (-> *display* seconds-per-frame))
+        (when (>= (-> rt resume-delay) 2.0)
+          (set! (-> rt resume-delay) 0.0)
+          (fisher-finalboss-begin-fight! self)))
+      ((= (-> rt state) 'fight)
+        (fisher-finalboss-update-fight! self))
+      ((= (-> rt state) 'reel)
+        (fisher-finalboss-update-reel! self))
+      ((= (-> rt state) 'ticking)
+        (+! (-> rt tick-time) (-> *display* seconds-per-frame))
+        (fisher-finalboss-set-red-pulse! self (-> rt tick-time))
+        (when (>= (-> rt tick-time) 3.0)
+          (fisher-finalboss-finish-stage-threshold! self)))
+      (else
+        (fisher-finalboss-begin-fight! self)))
+    ;; Fight/reel code only needs to change depth.  Reassert the center anchor
+    ;; afterward so future changes cannot introduce horizontal drift.
+    (when (or (= (-> rt state) 'resume-delay)
+              (= (-> rt state) 'fight)
+              (= (-> rt state) 'reel)
+              (= (-> rt state) 'ticking))
+      (fisher-finalboss-center-lure-horizontal! self)))
+  (none))
+
+(defun fisher-finalboss-lane-x ((button int))
+  ;; Left-to-right targets match the requested order: X, Circle, Square, Triangle.
+  (cond
+    ((= button 2) 142)
+    ((= button 1) 218)
+    ((= button 3) 294)
+    (else 370)))
+
+(defun fisher-finalboss-draw-ui! ((self fisher-game))
+  (let ((rt *fisher-finalboss-runtime*))
+    (when (and (fisher-finalboss-zone? self)
+               (= (-> self fish-state) 'reeling))
+      ;; Keep the whole boss minigame HUD above the persistent level/XP meter
+      ;; (level text begins around y=180; bar begins around y=204).
+      ;; Keep persistent information compact so the actual input target owns the
+      ;; center of the screen.  Mistakes remain visible because six ends the run.
+      (clear *fish-ui-str*)
+      (format *fish-ui-str* "FAILS: ~D/5" (-> rt fail-count))
+      (draw-fisher-large-font-scaled *fish-ui-str* 256 25 0.32)
+
+      (cond
+        ((= (-> rt state) 'fight)
+          (cond
+            ((= (-> rt fight-kind) 0)
+              ;; No numeric mash target.  Progress is communicated by a slowly
+              ;; growing glyph plus the quick depress/spring animation per press.
+              (let* ((progress
+                       (/
+                         (the float (-> rt mash-count))
+                         (the float (if (> (-> rt mash-target) 0) (-> rt mash-target) 1))))
+                     (mash-scale (+ 0.82 (* 0.12 (fmin 1.0 progress)))))
+                (when (> (-> rt wave-timer) 0.0)
+                  (set! mash-scale
+                    (- mash-scale
+                       (* 0.18
+                          (fmin 1.0 (/ (-> rt wave-timer) 0.12))))))
+                (draw-fisher-large-font-scaled "MASH!" 256 50 0.48)
+                (draw-fisher-large-font-scaled
+                  (fisher-button-label (-> rt mash-button))
+                  256
+                  111
+                  mash-scale)
+                (draw-fisher-large-font-scaled
+                  (if (>= progress 0.75) "ALMOST!" "KEEP PRESSING!")
+                  256
+                  154
+                  0.30)))
+
+            ((= (-> rt fight-kind) 1)
+              (draw-fisher-large-font-scaled "CLEAR THE BUTTONS!" 256 44 0.38)
+              ;; The timer is a deadline, not forced downtime: clearing every
+              ;; prompt immediately advances to the next of the three waves.
+              (let* ((remaining
+                       (fmax 0.0
+                         (- (fisher-finalboss-wave-window) (-> rt wave-timer))))
+                     (tenths (the int (+ 0.999 (* remaining 10.0)))))
+                (clear *fish-ui-str*)
+                (format *fish-ui-str* "TIME: ~D.~D" (the int (/ tenths 10)) (mod tenths 10))
+                (draw-fisher-large-font-scaled *fish-ui-str* 256 67 0.34))
+              (fisher-draw-button-fight! self))
+
+            (else
+              (draw-fisher-large-font-scaled "HIT THE TARGET!" 256 42 0.38)
+              ;; Four fixed lanes give the eye a stable target.  The falling
+              ;; glyph grows slightly as it approaches the hit row, while a
+              ;; successful strike bursts the normal fish hit particles there.
+              (dotimes (b 4)
+                (let ((x (fisher-finalboss-lane-x b)))
+                  (draw-fisher-large-font-scaled "O" x 140 0.86)
+                  (draw-fisher-large-font-scaled (fisher-button-label b) x 140 0.32)))
+              (draw-fisher-large-font-scaled
+                (fisher-button-label (-> rt guitar-button))
+                (fisher-finalboss-lane-x (-> rt guitar-button))
+                (the int (-> rt guitar-y))
+                (+ 0.46 (* 0.0010 (fmin 168.0 (-> rt guitar-y))))))))
+
+        ((= (-> rt state) 'reel)
+          (draw-fisher-large-font-scaled "ROTATE THE RIGHT STICK!" 256 82 0.46))
+
+        ((= (-> rt state) 'ticking)
+          (draw-fisher-large-font-scaled "!!! NUCLEAR BOMBFISH ARMED !!!" 256 86 0.46)))))
+  (none))
+
+(defun fisher-finalboss-prime-resume-line! ((self fisher-game))
+  (let ((rt *fisher-finalboss-runtime*)
+        (slot 0)
+        (hook-pos (new 'stack-no-clear 'vector)))
+    (set! (-> self hooked-fish-slot) slot)
+    (set! (-> self hooked-fish) (ppointer->process (fisher-fish-pointer self slot)))
+    (set! (-> self fish-state) 'reeling)
+    (set! (-> self casted?) #t)
+    (set! (-> self cast-state) 'line-active)
+    (set! (-> self cast-charge) 1.0)
+    (set! *fisher-line-hp-max* 100.0)
+    (fisher-reset-line-hp!)
+    (vector-copy! (-> self lure-cast-axis) (-> self playfield-axis))
+    (vector+float*!
+      hook-pos
+      (-> self fishing-player-pos)
+      (-> self playfield-axis)
+      *fisher-finalboss-lure-distance*)
+    (set! (-> hook-pos y)
+      (- (-> self water-level)
+        (if (= (-> rt stage) 2)
+          *fisher-finalboss-middle-depth*
+          *fisher-finalboss-topwater-depth*)))
+    (set! (-> hook-pos w) 1.0)
+    (vector-copy! (-> self lure-pos) hook-pos)
+    (vector-copy! (-> self lure-cast-start) hook-pos)
+    (vector-copy! (-> self lure-cast-end) hook-pos)
+
+    ;; Return visits are ALREADY HOOKED.  The persistent Bombfish may still be
+    ;; hidden/cooling down for one frame from the previous fishing teardown; if
+    ;; the ordinary resident AI sees that, it treats the selected fish as invalid
+    ;; and scares it off.  Force the authored fish live and onto the hook now so
+    ;; there is no investigate/hook/scare window on stage 2 or 3.
+    (let ((resume-fish (fisher-fish-pointer self slot)))
+      (when resume-fish
+        (let ((resume-proc (the-as manipy (-> resume-fish 0 self))))
+          (when resume-proc
+            (logclear! (-> resume-proc draw status) (draw-status hidden))
+            (vector-copy! (-> resume-proc root trans) hook-pos)))))
+    (fisher-set-fish-cooldown! self slot 0.0)
+    (set! (-> self fish-scare-on-arrival?) #f)
+
+    (set! (-> self camera-state) 'follow-lure)
+    (set! (-> self camera-blend) 0.0)
+    (set! (-> self reel-camera-blend) 0.0)
+    (set! (-> self fish-hook-time) 0.0)
+    (set! (-> self fish-fight-time) 0.0)
+    (set! (-> self fish-fight-base-y) (-> hook-pos y))
+    (set! (-> self fish-fight-phase) 0.0)
+    (set! (-> self hooked-fish-poison-dps) 0.0)
+
+    ;; A normal cast initializes these camera vectors in fisher-start-cast!.
+    ;; Resume sessions skip casting entirely, so leaving them zeroed makes
+    ;; follow-lure compute desired-camera == lure-pos on its first frame.  That
+    ;; is the broken second-entry view where the camera sits on the hook.
+    (vector-copy! (-> self fisher-look) (-> self pos))
+    (+! (-> self fisher-look y) (meters 1.0))
+    (set! (-> self fisher-look w) 1.0)
+
+    (vector-float*! (-> self lure-camera-offset)
+      (-> self camera-axis)
+      (- (-> self camera-radius)))
+    (set! (-> self lure-camera-offset y) 0.0)
+    (set! (-> self lure-camera-offset w) 0.0)
+
+    (vector-copy! (-> self lure-camera-pos) (-> self fisher-cam))
+    (vector-copy! (-> self lure-camera-look) (-> self fisher-look))
+
+    ;; Seed the hooked orientation too.  New fisher-game instances have these
+    ;; vectors cleared because the normal bite/hook transition never ran.
+    (singlefish-vector-scale-safe!
+      (-> self hooked-fish-facing)
+      (-> self playfield-axis)
+      -1.0)
+    (set! (-> self hooked-fish-facing y) 0.72)
+    (set! (-> self hooked-fish-facing w) 0.0)
+    (singlefish-vector-normalize-safe! (-> self hooked-fish-facing) 1.0)
+    (vector-copy! (-> self hooked-fish-last-hook-pos) hook-pos)
+
+    ;; The previous Final Boss fishing owner can be destroyed while its lure
+    ;; manipy remains in *default-pool*.  Remove any named leftover before
+    ;; creating the ONE resumed hook, otherwise the second visit shows a
+    ;; duplicate hook at the same anchor.
+    (fisher-remove-lure-snake! self)
+    (kill-by-name "fisher-lure-snake" *default-pool*)
+    (let ((snake-anchor (new 'stack-no-clear 'vector))
+          (snake-root (new 'stack-no-clear 'vector)))
+      (vector-copy! snake-anchor hook-pos)
+      (set! (-> snake-anchor w) 1.0)
+      (vector-copy! snake-root snake-anchor)
+      (-! (-> snake-root y) (meters 1.0666667))
+      (set! (-> snake-root w) 1.0)
+      (vector-copy! (-> self lure-snake-last-anchor) snake-anchor)
+      (vector-reset! (-> self lure-snake-angle))
+      (vector-reset! (-> self lure-snake-angular-speed))
+      (set! (-> self lure-snake-flow-time) 0.0)
+      (set! (-> self lure-snake) (spawn-fisher-lure-snake snake-root)))
+
+    ;; Return visits are already hooked, but give the player/camera two seconds
+    ;; to settle before the first fight minigame appears.
+    (set! (-> rt state) 'resume-delay)
+    (set! (-> rt resume-delay) 0.0)
+    (set! (-> self fish-fighting?) #f))
+  (none))
+
+(defun fisher-finalboss-prepare-session! ((self fisher-game))
+  (when (fisher-finalboss-zone? self)
+    (let ((rt *fisher-finalboss-runtime*))
+      (set! (-> rt fail-count) 0)
+      (set! (-> rt session-primed?) #t)
+      (cond
+        ((= (-> rt stage) 1)
+          ;; First visit starts as a normal cast/hook.  The cast itself is
+          ;; converted to full line HP and lands at the pool midpoint.
+          (set! (-> rt state) 'available))
+        (else
+          ;; Later visits begin with the line already holding the same fish at
+          ;; the authored middle/topwater checkpoint.
+          (fisher-finalboss-prime-resume-line! self)))))
+  (none))
+
+(defun fisher-finalboss-finish-catch-card! ((self fisher-game))
+  ;; Keep the catch instead of selling it for orbs/XP.  The persistent hooks
+  ;; manager spawns the sharkey model on Jak's back after fishing releases him.
+  ;; Destroy the tracked catch-display pointer before clearing the slot; do not
+  ;; kill-by-name first and then dereference a process that may already be dead.
+  (when (>= (-> self hooked-fish-slot) 0)
+    (let ((fish (fisher-fish-pointer self (-> self hooked-fish-slot))))
+      (when fish (fisher-destroy-manipy! fish))
+      (fisher-set-fish-pointer! self (-> self hooked-fish-slot) (the-as (pointer manipy) #f))))
+  (set! (-> *fisher-finalboss-runtime* progress) 4)
+  (set! (-> *fisher-finalboss-runtime* state) 'carry-pending)
+  (set! (-> *fisher-finalboss-runtime* area-enabled?) #f)
+  (set! (-> self hooked-fish-slot) -1)
+  (set! (-> self hooked-fish) #f)
+  (set! (-> self fish-state) 'free)
+  (set! (-> self caught-orb-value) 0)
+  (set! (-> self caught-fish-xp) 0)
+  (set! (-> self cast-state) 'buzzer-exit)
+  (none))
 
 (defun fisher-clear-button-fight! ((self fisher-game))
   (let ((data (-> self button-fight-data)))
@@ -6033,6 +6913,17 @@
       (top-y
         (- (-> self water-level)
           (meters 3.0))))
+
+    (cond
+      ((and
+          (fisher-finalboss-zone? self)
+          (>= (-> self hooked-fish-slot) 0)
+          (=
+            (fisher-fish-species self (-> self hooked-fish-slot))
+            (the-as int (fisher-species nuclear-bombfish))))
+        (fisher-finalboss-update-reeling! self))
+      (else
+
     (when
       (and
         (>= (-> self hooked-fish-slot) 0)
@@ -6125,6 +7016,7 @@
           (fisher-finish-manipy-catch!
             self
             (-> self hooked-fish-slot))))))
+    ))
 
   (none))
 
@@ -6307,9 +7199,21 @@
               ;; happens, cancel the encounter before it can reach the lure
               ;; or expire a snap-on-bite hook window invisibly.
               (if
-                (logtest?
-                  (-> fish-proc draw status)
-                  (draw-status hidden))
+                (and
+                  (logtest?
+                    (-> fish-proc draw status)
+                    (draw-status hidden))
+                  ;; On stage 2/3 the Nuclear Bombfish is intentionally restored
+                  ;; already hooked.  Do not let the generic hidden-resident guard
+                  ;; convert that authored resume into SCARED OFF.
+                  (not
+                    (and
+                      (= (-> self location-id)
+                         (the-as int (fisher-zone finalboss-nuclear)))
+                      (= (fisher-fish-species self slot)
+                         (the-as int (fisher-species nuclear-bombfish)))
+                      (> (-> *fisher-finalboss-runtime* stage) 1)
+                      (= (-> self fish-state) 'reeling))))
 
                 (fisher-fish-scared-off! self slot)
 
@@ -6400,60 +7304,71 @@
 
                   (let* ((species (fisher-fish-species self slot))
                       (info (fisher-species-info-for species))
-                      (button-fight? (= (-> info fight-mode) 1)))
+                      (button-fight? (= (-> info fight-mode) 1))
+                      (finalboss-nuclear?
+                        (and
+                          (= (-> self location-id)
+                             (the-as int (fisher-zone finalboss-nuclear)))
+                          (= species
+                             (the-as int (fisher-species nuclear-bombfish))))))
 
-                    (when
-                      (and
-                        (not button-fight?)
-                        (> (-> self fish-fight-time) 0.0))
-
-                      (-! (-> self fish-fight-time) dt)
-                      (set! (-> self fish-fighting?) #t)
-
+                    ;; Nuclear Bombfish fights are owned entirely by the custom
+                    ;; Final Boss state machine.  Never let ordinary resident AI
+                    ;; start a second fight underneath its 2-second resume delay
+                    ;; or custom button/reel phases.
+                    (unless finalboss-nuclear?
                       (when
-                        (<= (-> self fish-fight-time) 0.0)
+                        (and
+                          (not button-fight?)
+                          (> (-> self fish-fight-time) 0.0))
 
-                        (set! (-> self fish-fight-time) 0.0)
-                        (set! (-> self fish-fighting?) #f)
-                        (set! (-> self fish-hook-time)
-                          (rand-vu-float-range
-                            (fmax 0.85 (-> info fight-recover-min))
-                            (fmax 0.85 (-> info fight-recover-max))))
-                        (set! (-> self fish-fight-phase) (degrees 180.0))))
+                        (-! (-> self fish-fight-time) dt)
+                        (set! (-> self fish-fighting?) #t)
 
-                    (when
-                      (and
-                        (<= (-> self fish-hook-time) 0.0)
-                        (<= (-> self fish-fight-time) 0.0)
-                        (not (-> self fish-fighting?)))
+                        (when
+                          (<= (-> self fish-fight-time) 0.0)
 
-                      (cond
-                        ((rand-vu-percent? (-> info fight-chance))
-                          (fisher-play-random-fight-sound!)
-                          (set! (-> self lure-stop-active?) #f)
-                          (set! (-> self lure-stop-time) 0.0)
-                          (set! (-> self lure-sink-active?) #f)
-                          (set! (-> self lure-sink-time) 0.0)
-                          (set! (-> self tug-line-active?) #f)
-                          (set! (-> self tug-line-time) 0.0)
-                          (set! (-> self fish-fighting?) #t)
-                          (set! (-> self fish-fight-phase) 0.0)
-                          (set! (-> self fish-fight-base-y) (-> self lure-pos y))
-
-                          (cond
-                            (button-fight?
-                              (set! (-> self fish-fight-time) 0.0)
-                              (fisher-start-button-fight! self))
-
-                            (else
-                              (set! (-> self fish-fight-time)
-                                (rand-vu-float-range 1.0 2.1)))))
-
-                        (else
+                          (set! (-> self fish-fight-time) 0.0)
+                          (set! (-> self fish-fighting?) #f)
                           (set! (-> self fish-hook-time)
                             (rand-vu-float-range
                               (fmax 0.85 (-> info fight-recover-min))
-                              (fmax 0.85 (-> info fight-recover-max)))))))))
+                              (fmax 0.85 (-> info fight-recover-max))))
+                          (set! (-> self fish-fight-phase) (degrees 180.0))))
+
+                      (when
+                        (and
+                          (<= (-> self fish-hook-time) 0.0)
+                          (<= (-> self fish-fight-time) 0.0)
+                          (not (-> self fish-fighting?)))
+
+                        (cond
+                          ((rand-vu-percent? (-> info fight-chance))
+                            (fisher-play-random-fight-sound!)
+                            (set! (-> self lure-stop-active?) #f)
+                            (set! (-> self lure-stop-time) 0.0)
+                            (set! (-> self lure-sink-active?) #f)
+                            (set! (-> self lure-sink-time) 0.0)
+                            (set! (-> self tug-line-active?) #f)
+                            (set! (-> self tug-line-time) 0.0)
+                            (set! (-> self fish-fighting?) #t)
+                            (set! (-> self fish-fight-phase) 0.0)
+                            (set! (-> self fish-fight-base-y) (-> self lure-pos y))
+
+                            (cond
+                              (button-fight?
+                                (set! (-> self fish-fight-time) 0.0)
+                                (fisher-start-button-fight! self))
+
+                              (else
+                                (set! (-> self fish-fight-time)
+                                  (rand-vu-float-range 1.0 2.1)))))
+
+                          (else
+                            (set! (-> self fish-hook-time)
+                              (rand-vu-float-range
+                                (fmax 0.85 (-> info fight-recover-min))
+                                (fmax 0.85 (-> info fight-recover-max))))))))))
 
                 ((or
                     (= (-> self fish-state) 'catch-enter)
@@ -6831,10 +7746,15 @@
   (fisher-reset-electric-cycle! self)
 
   (let ((cast-distance
-        (+
-          (meters 3.5)
-          (* (meters 52.0)
-            (-> self cast-charge)))))
+        (if
+          (fisher-finalboss-zone? self)
+          ;; Keep the Final Boss hook at the authored center anchor, a little
+          ;; farther from Jak than the old geometric midpoint placement.
+          *fisher-finalboss-lure-distance*
+          (+
+            (meters 3.5)
+            (* (meters 52.0)
+              (-> self cast-charge))))))
 
     (vector-copy! (-> self lure-cast-start) (target-pos 0))
 
@@ -7097,7 +8017,9 @@
 (defun fisher-submit-dark-eco-background! ((self fisher-game))
   (when
     (and
-      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (or
+        (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+        (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
       *fisher-background-cloud-session-active?*
       (-> self casted?)
       (-> self camera-underwater?))
@@ -7370,7 +8292,10 @@
               (the-as int (fisher-zone village3-lava)))
             (=
               (-> self location-id)
-              (the-as int (fisher-zone maincave-dark-eco))))
+              (the-as int (fisher-zone maincave-dark-eco)))
+            (=
+              (-> self location-id)
+              (the-as int (fisher-zone finalboss-nuclear))))
           ;; Swamp/Village3 use the existing close curtain.  Main Cave uses a
           ;; curtain just behind its particle wall so the particles remain the
           ;; frontmost background layer.
@@ -7379,9 +8304,9 @@
             (-> self fisher-cam)
             curtain-forward
             (if
-              (=
-                (-> self location-id)
-                (the-as int (fisher-zone maincave-dark-eco)))
+              (or
+                (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
               (meters 30.0)
               (meters 32.0)))
 
@@ -7420,9 +8345,9 @@
             (-> curtain-center y)
             (+ (-> self water-level) (meters 12.0))))
 
-        ((=
-            (-> self location-id)
-            (the-as int (fisher-zone maincave-dark-eco)))
+        ((or
+            (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+            (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
           (set!
             (-> curtain-center y)
             (+ (-> self water-level) (meters 16.0))))
@@ -7455,10 +8380,10 @@
               (the-as int (fisher-zone village3-lava)))
             (fisher-village3-curtain-color! self active-curtain-color))
 
-          ((=
-              (-> self location-id)
-              (the-as int (fisher-zone maincave-dark-eco)))
-            ;; Nearly black with the faintest purple bias.
+          ((or
+              (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+              (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
+            ;; Final Boss uses the exact Main Cave Dark Eco curtain color.
             (set-vector! active-curtain-color 3.0 0.0 5.0 255.0))
 
           (else
@@ -7596,9 +8521,9 @@
             (the-as int (fisher-zone village3-lava)))
           (fisher-force-lava-underwater-background! self))
 
-        ((=
-            (-> self location-id)
-            (the-as int (fisher-zone maincave-dark-eco)))
+        ((or
+            (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+            (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
           (fisher-force-dark-eco-underwater-background!))
 
         (else
@@ -7615,11 +8540,14 @@
         (when
           (and
             (!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
-            (!= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))))
+            (!= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+            (!= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
           (fisher-submit-background-mist! self))
 
         (when
-          (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+          (or
+            (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+            (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
           (fisher-submit-dark-eco-background! self))
 
         ;; Black sludge, lava, Snow, and the dark-eco particle wall have no
@@ -7629,7 +8557,8 @@
             (!= (-> self location-id) (the-as int (fisher-zone swamp-sludge)))
             (!= (-> self location-id) (the-as int (fisher-zone village3-lava)))
             (!= (-> self location-id) (the-as int (fisher-zone snow-ice)))
-            (!= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))))
+            (!= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+            (!= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
           (fisher-submit-god-rays! self))))
 
     (else
@@ -7676,6 +8605,9 @@
     (vector+float*! (-> self lure-pos) (-> self lure-pos) (-> self lure-cast-axis) (* (meters 1.0) (-> self lure-x-velocity) dt))
 
     (+! (-> self lure-pos y) (* (meters 1.0) (-> self lure-y-velocity) dt))
+
+    (when (fisher-finalboss-zone? self)
+      (fisher-finalboss-center-lure-horizontal! self))
 
     (when
       (<= (-> self lure-pos y) entry-bottom)
@@ -7732,9 +8664,15 @@
 
       (set!
         reel-distance
-        (fmin
-          (-> self camera-radius)
-          (fisher-hooked-fish-camera-distance self)))
+        (if
+          (fisher-finalboss-zone? self)
+          ;; The supplied arena camera is only ~6.13m from the net, which is
+          ;; too tight once the line is hooked.  Let this fight pull back
+          ;; farther without changing the authored pre-cast camera.
+          (meters 9.5)
+          (fmin
+            (-> self camera-radius)
+            (fisher-hooked-fish-camera-distance self))))
 
       (vector-copy! camera-offset (-> self lure-camera-offset))
 
@@ -7943,10 +8881,17 @@
         (-> line-start y)
         (meters 3.25))
 
-      ;; Draw to the visible hook/snake transform.  lure-pos is the
-      ;; simulation target and may advance before the rendered hook catches
-      ;; up, which made the line appear detached during casts and reels.
-      (fisher-hook-target! self line-end)
+      ;; The line attaches to the TOP of the hook, not to the hook model's
+      ;; rotated root/pivot.  In fisher-update-lure-snake! the model root is
+      ;; deliberately offset from lure-pos by the rotated 1.0667m pivot, so
+      ;; using that root makes a vertically fighting Bombfish drag the line
+      ;; sideways/down as the hook rotates.  lure-pos is the stable top anchor.
+      (cond
+        ((fisher-finalboss-zone? self)
+          (vector-copy! line-end (-> self lure-pos))
+          (set! (-> line-end w) 1.0))
+        (else
+          (fisher-hook-target! self line-end)))
 
       (fisher-draw-retail-line!
         self
@@ -8018,7 +8963,16 @@
       (set! (-> self lure-sink-time) 0.0)
       (set! (-> self tug-line-active?) #f)
       (set! (-> self tug-line-time) 0.0)
-      (fisher-clear-button-fight! self))
+      (fisher-clear-button-fight! self)
+
+      (when
+        (and
+          (fisher-finalboss-zone? self)
+          (>= (-> self hooked-fish-slot) 0)
+          (=
+            (fisher-fish-species self (-> self hooked-fish-slot))
+            (the-as int (fisher-species nuclear-bombfish))))
+        (fisher-finalboss-begin-fight! self)))
 
     ((and
         (= (-> self fish-state) 'catch-display)
@@ -8137,6 +9091,16 @@
   (none))
 
 (defun fisher-draw-fish-status! ((self fisher-game))
+  ;; Keep the ordinary PRESS X TO HOOK prompt for the first Nuclear Bombfish
+  ;; bite.  Once hooked, its custom minigame HUD replaces every normal reel/skill
+  ;; hint so those controls cannot conflict with the encounter.
+  (cond
+    ((and
+        (fisher-finalboss-zone? self)
+        (= (-> self fish-state) 'reeling))
+      (fisher-finalboss-draw-ui! self))
+    (else
+
   (when
     (and
       (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-rip-line-unlock-level*))
@@ -8213,6 +9177,7 @@
             #f
             #t
             #f)))))
+    ))
 
   (none))
 
@@ -8220,6 +9185,9 @@
   (clear *fish-ui-str*)
 
   (cond
+    ((= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish)))
+      (format *fish-ui-str* "NUCLEAR BOMBFISH"))
+
     ((= (-> self caught-fish-suffix) 7)
       (format *fish-ui-str* "PRECURSOR FISH"))
 
@@ -8298,7 +9266,40 @@
 
   *fish-ui-str*)
 
+(defun fisher-draw-finalboss-catch-ui! ((self fisher-game))
+  (when
+    (or (= (-> self fish-state) 'catch-enter)
+        (= (-> self fish-state) 'catch-display)
+        (= (-> self fish-state) 'catch-exit))
+    (let ((menu-offset (- (the int (-> self catch-menu-offset)) 20)))
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+        (draw-sprite2d-xy buf 54 (+ 54 menu-offset) 404 174
+          (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
+        (draw-sprite2d-xy buf 58 (+ 58 menu-offset) 396 166
+          (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
+      (draw-fisher-large-font-scaled "NUCLEAR BOMBFISH" 256 (+ 72 menu-offset) 0.58)
+      (draw-fisher-large-font-scaled "9000.0 LBS" 256 (+ 100 menu-offset) 0.50)
+      (draw-fisher-large-font-scaled
+        "THIS HERE FISH IS ONE OF A KIND!"
+        256 (+ 128 menu-offset) 0.34)
+      (draw-fisher-large-font-scaled
+        "BE CAREFUL THOUGH, IT CAN START TICKING"
+        256 (+ 146 menu-offset) 0.34)
+      (draw-fisher-large-font-scaled
+        "AT ANY MOMENT!"
+        256 (+ 164 menu-offset) 0.34)
+      (draw-fisher-large-font-scaled
+        "PRESS <PAD_X> TO CONTINUE"
+        256 (+ 198 menu-offset) 0.46)))
+  (none))
+
 (defun fisher-draw-catch-ui! ((self fisher-game))
+  (cond
+    ((= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish)))
+      (fisher-draw-finalboss-catch-ui! self))
+    (else
+
   (when
     (or (= (-> self fish-state) 'catch-enter) (= (-> self fish-state) 'catch-display) (= (-> self fish-state) 'catch-exit))
 
@@ -8413,6 +9414,7 @@
         256
         (+ (if carrier? 191 167) menu-offset)
         0.52)))
+    ))
 
   (none))
 
@@ -10457,7 +11459,10 @@
   (none))
 
 (defun fisher-update-casting! ((self fisher-game))
-  (fisher-update-ability-cooldowns! self)
+  ;; Circle/Square are Nuclear Bombfish minigame inputs.  The normal Tug Line
+  ;; and other fishing abilities must not consume them in this boss encounter.
+  (when (not (fisher-finalboss-zone? self))
+    (fisher-update-ability-cooldowns! self))
   (fisher-update-dark-eco-teleport! self)
   (fisher-update-voltage-surge! self)
   (fisher-update-electric-system! self)
@@ -10502,9 +11507,16 @@
       (when (cpad-pressed? 0 x)
         (cpad-clear! 0 x)
         (when (> *fisher-lure-count* 0)
-          (set! (-> self cast-state) 'charging)
-          (set! (-> self cast-charge) 0.0)
-          (set! (-> self cast-charge-direction) 1.0))))
+          (cond
+            ((fisher-finalboss-zone? self)
+              ;; Full-strength line (100 HP) with the boss-specific short 5m throw.
+              (set! (-> self cast-charge) 1.0)
+              (set! (-> self cast-charge-direction) 0.0)
+              (fisher-start-cast! self))
+            (else
+              (set! (-> self cast-state) 'charging)
+              (set! (-> self cast-charge) 0.0)
+              (set! (-> self cast-charge-direction) 1.0))))))
 
     ((= (-> self cast-state) 'charging)
       (fisher-restore-normal-background!)
@@ -10548,6 +11560,11 @@
 
         ((= (-> self fish-state) 'reeling)
           (fisher-update-manipy-reeling! self)))
+
+      ;; Once the lure is in the Final Boss pool, keep its horizontal anchor at
+      ;; the field midpoint in EVERY gameplay state.  Depth remains untouched.
+      (when (fisher-finalboss-zone? self)
+        (fisher-finalboss-center-lure-horizontal! self))
 
       (cond
         ((= (-> self fish-state) 'reeling) (fisher-camera-follow-lure! self))
@@ -10600,7 +11617,9 @@
     ;; Cooldown bars share the lower foreground space with catch, power-cell,
     ;; lore, and level-up cards.  Hide them until those cards are gone.
     (when
-      (not (fisher-modal-ui-active? self))
+      (and
+        (not (fisher-finalboss-zone? self))
+        (not (fisher-modal-ui-active? self)))
       (fisher-draw-skill-cooldowns! self)))
 
   (fisher-draw-fish-status! self)
@@ -11017,7 +12036,11 @@
 
     (play-main-music
       (cond
-        ;; Main Cave / Spider Cave Dark Eco pool gets its own fishing theme.
+        ;; Final Boss intermission has its own dedicated fishing track.
+        ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+          "final-boss-fishing.mp3")
+
+        ;; Main Cave / Spider Cave Dark Eco pool keeps the regular Dark Eco theme.
         ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
           "dark-eco-pool-theme.mp3")
 
@@ -11045,6 +12068,7 @@
 
     (fisher-reset-cast! self)
     (singlefish-start-session! self)
+    (fisher-finalboss-prepare-session! self)
 
     (set! *fisher-background-cloud-session-active?* #t)
     (set! *fisher-background-cloud-visible?* #f)
@@ -11092,7 +12116,13 @@
   (behavior ()
     (set! *camera-read-analog* (-> self saved-camera-read-analog))
     (set! *external-cam-mode* (-> self saved-external-cam-mode))
-    (remove-setting! 'music-volume)
+    ;; The Final Boss fight deliberately stays musically silent after the fish
+    ;; primes.  Do not restore the ordinary boss score until the bomb fires.
+    (unless
+      (and
+        (fisher-finalboss-zone? self)
+        *fisher-finalboss-hold-music-mute?*)
+      (remove-setting! 'music-volume))
     (stop-main-music)
     (send-event *camera* 'change-state *camera-base-mode* (seconds 0.5))
 

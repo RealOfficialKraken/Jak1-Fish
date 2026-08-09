@@ -256,6 +256,13 @@
 (define *fisher-pool-center-snow* (new 'static 'vector :x (meters 750.9037) :y (meters 220.2108) :z (meters -3346.3452) :w 1.0))
 (define *fisher-pool-center-maincave* (new 'static 'vector :x (meters 1023.0690) :y (meters 37.7192) :z (meters -3027.2181) :w 1.0))
 
+(define *fisher-pool-center-finalboss*
+  (new 'static 'vector
+    :x (meters 3003.9516)
+    :y (meters 481.0058)
+    :z (meters -4852.6972)
+    :w 1.0))
+
 (defun fisher-pool-center-for-location ((location-id int))
   (cond
     ((= location-id 0) *fisher-pool-center-village1*)
@@ -269,6 +276,7 @@
     ((= location-id 8) *fisher-pool-center-village3*)
     ((= location-id 9) *fisher-pool-center-snow*)
     ((= location-id 10) *fisher-pool-center-maincave*)
+    ((= location-id 11) *fisher-pool-center-finalboss*)
     (else (the-as vector #f))))
 
 (defun fisher-player-near-location? ((location-id int) (max-distance meters))
@@ -312,6 +320,13 @@
     ;; All resident fish/manipys use this exact process name and live in the
     ;; default pool.  Killing by name avoids dereferencing the logical table.
     (kill-by-name "fisher-gameplay-fish" *default-pool*)
+
+    ;; The decorative net and lure/hook are separate manipys in the default
+    ;; pool, so killing fisher-game alone does not remove them.  In particular,
+    ;; a Final Boss phase transition destroys the owner before the next fishing
+    ;; visit; leaving the old lure behind creates a duplicate hook on resume.
+    (kill-by-name "test-fisher-net" *default-pool*)
+    (kill-by-name "fisher-lure-snake" *default-pool*)
 
     ;; Killing the owner discards the logical fish table without traversing it.
     (kill-by-name "fisher-game" *active-pool*)
@@ -592,8 +607,318 @@
         (degrees -149.6867)
         (degrees -59.9186))
 
-      (set! *fisher-active-location-id* 10)))
+      (set! *fisher-active-location-id* 10))
 
+    ((= level-name 'finalboss)
+      (when (-> *fisher-finalboss-runtime* area-enabled?)
+        (spawn-fisher-game
+          11
+          (new 'static 'vector
+            :x (meters 3006.8920)
+            :y (meters 480.9093)
+            :z (meters -4855.8081)
+            :w 1.0)
+          (new 'static 'vector
+            :x (meters 3003.9516)
+            :y (meters 481.0058)
+            :z (meters -4852.6972)
+            :w 1.0)
+          (new 'static 'vector
+            :x (meters 3007.7324)
+            :y (meters 485.6502)
+            :z (meters -4861.8813)
+            :w 1.0)
+          (meters 472.7894)
+          (degrees -22.3754)
+          (degrees 85.7372))
+        (set! *fisher-active-location-id* 11))))
+
+  (none))
+
+(defun fisher-finalboss-target-on-ground? ()
+  (and
+    *target*
+    (logtest?
+      (-> *target* control status)
+      (cshape-moving-flags onsurf onground tsurf))))
+
+(defun fisher-finalboss-spawn-back-fish! ()
+  (let ((rt *fisher-finalboss-runtime*))
+    (when (not (-> rt carry-fish))
+      (let ((fish
+            (manipy-spawn
+              (target-pos 0)
+              #f
+              *sharkey-sgc*
+              #f
+              :from *default-dead-pool*
+              :to *default-pool*
+              :name "fisher-finalboss-bombfish-back")))
+        (set! (-> rt carry-fish) fish)
+        (when fish
+          (let ((fp (the-as manipy (ppointer->process fish))))
+            (when fp
+              (send-event fp 'anim-mode 'loop)
+              (send-event fp 'max-vis-dist (meters 999999.0))
+              (set-vector! (-> fp root scale) 0.279 0.324 0.698 1.0)
+              (set-vector! (-> fp draw color-mult) 0.0 0.0 0.0 8.0)
+              (set-vector! (-> fp draw color-emissive) 0.0 0.0 0.0 1.0)))))))
+  (none))
+
+(defun fisher-finalboss-update-back-fish! ()
+  (let ((rt *fisher-finalboss-runtime*))
+    (when (and *target* (-> rt carry-fish))
+      (let ((fp (the-as manipy (ppointer->process (-> rt carry-fish)))))
+        (when fp
+          (let ((back (new 'stack-no-clear 'vector))
+                (down (new 'stack-no-clear 'vector))
+                (rot (new 'stack-no-clear 'matrix))
+                (yaw (y-angle (-> *target* control))))
+            (set-vector! back (- (sin yaw)) 0.0 (- (cos yaw)) 0.0)
+            (vector-normalize! back 1.0)
+            (vector-copy! (-> fp root trans) (-> *target* control trans))
+            (vector+float*! (-> fp root trans) (-> fp root trans) back (meters 0.28))
+            (+! (-> fp root trans y) (meters 1.35))
+            (set! (-> fp root trans w) 1.0)
+            (set-vector! down 0.0 -1.0 0.0 0.0)
+            (forward-down->inv-matrix rot back down)
+            (matrix->quaternion (-> fp root quat) rot))))))
+  (none))
+
+(defun fisher-finalboss-pulse-back-fish! ((elapsed float))
+  (let ((fish (-> *fisher-finalboss-runtime* carry-fish)))
+    (when fish
+      (let ((fp (the-as manipy (ppointer->process fish))))
+        (when fp
+          (let ((p (+ 1.0 (* 0.12 (sin (* (degrees 720.0) elapsed))))))
+            (set-vector! (-> fp root scale) (* 0.279 p) (* 0.324 p) (* 0.698 p) 1.0)
+            (set-vector! (-> fp draw color-mult) 1.25 0.003 0.003 8.0))))))
+  (none))
+
+(defun fisher-finalboss-begin-carry! ()
+  (let ((rt *fisher-finalboss-runtime*))
+    (fisher-finalboss-spawn-back-fish!)
+    (when *target* (process-grab? *target*))
+    (set! (-> rt state) 'carry)
+    (set! (-> rt carry-time) 0.0)
+    (set! (-> rt prompt-time) 0.0))
+  (none))
+
+(defun fisher-finalboss-begin-throw! ()
+  (let ((rt *fisher-finalboss-runtime*))
+    (when (and (-> rt carry-fish) (ppointer->process (-> rt carry-fish)))
+      (vector-copy!
+        (-> rt throw-start)
+        (-> (the-as manipy (ppointer->process (-> rt carry-fish))) root trans)))
+    (vector-copy! (-> rt throw-target) *fisher-finalboss-robot-head-target*)
+    (set! (-> rt throw-time) 0.0)
+    (set! (-> rt state) 'throwing)
+    (when *target* (process-release? *target*)))
+  (none))
+
+(defun fisher-finalboss-update-throw! ()
+  (let* ((rt *fisher-finalboss-runtime*)
+         (dt (-> *display* seconds-per-frame)))
+    (+! (-> rt throw-time) dt)
+    (let ((t (fmin 1.0 (/ (-> rt throw-time) 1.20))))
+      (when (and (-> rt carry-fish) (ppointer->process (-> rt carry-fish)))
+        (let ((fp (the-as manipy (ppointer->process (-> rt carry-fish)))))
+          (vector-lerp! (-> fp root trans) (-> rt throw-start) (-> rt throw-target) t)
+          (+! (-> fp root trans y) (* (meters 5.0) 4.0 t (- 1.0 t)))
+          (set! (-> fp root trans w) 1.0)))
+      (when (>= t 1.0)
+        (when (-> rt carry-fish)
+          (let ((p (ppointer->process (-> rt carry-fish))))
+            (if p (deactivate p))))
+        (set! (-> rt carry-fish) (the-as (pointer manipy) #f))
+        (when *fisher-finalboss-hold-music-mute?*
+          (remove-setting! 'music-volume)
+          (set! *fisher-finalboss-hold-music-mute?* #f))
+        (when *fisher-finalboss-danger-music-active?*
+          (stop-main-music)
+          (set! *fisher-finalboss-danger-music-active?* #f))
+        (set! (-> rt state) 'done)
+        (set! (-> rt progress) 5)
+        (set! *boss-defeated* #t))))
+  (none))
+
+(defun maintain-fisher-finalboss-intermission! ()
+  (let* ((inside (when *level* (level-get-target-inside *level*)))
+         (in-finalboss? (and inside (= (-> inside name) 'finalboss))))
+    (cond
+      ((not in-finalboss?)
+        ;; IMPORTANT: do not touch the Final Boss runtime object at all outside
+        ;; FIN.  This hook runs during Village 1 startup and every other level.
+        ;; Mark it cold so the next actual Final Boss frame performs a safe reset.
+        (when *fisher-finalboss-danger-music-active?*
+          (stop-main-music)
+          (set! *fisher-finalboss-danger-music-active?* #f))
+        (when *fisher-finalboss-hold-music-mute?*
+          (remove-setting! 'music-volume)
+          (set! *fisher-finalboss-hold-music-mute?* #f))
+        (set! *fisher-finalboss-runtime-level-active?* #f))
+
+      (else
+        (let ((rt *fisher-finalboss-runtime*)
+              (dt (-> *display* seconds-per-frame)))
+          ;; First safe frame inside FIN owns initialization.  Never do this from
+          ;; Jak spawn/death callbacks while the level loader is still settling.
+          (when (not *fisher-finalboss-runtime-level-active?*)
+            (fisher-finalboss-runtime-reset!)
+            (set! *fisher-finalboss-runtime-level-active?* #t))
+        ;; First freeze: spawn the deep pool encounter.
+        (when (and (= (-> rt progress) 0)
+                   (= (-> rt state) 'idle)
+                   *boss-waiting-for-2nd-phase*)
+          (set! *boss-activate-blue-eco* #f)
+          (set! (-> rt stage) 1)
+          (set! (-> rt difficulty) 1)
+          (set! (-> rt area-enabled?) #t)
+          (set! (-> rt session-primed?) #f)
+          (set! (-> rt state) 'available))
+
+        ;; Second freeze: respawn with the fish already held at midpoint.
+        (when (and (= (-> rt progress) 1)
+                   (= (-> rt state) 'idle)
+                   *boss-waiting-for-3rd-phase*)
+          (set! *boss-activate-blue-eco* #f)
+          (set! (-> rt stage) 2)
+          (set! (-> rt difficulty) 2)
+          (set! (-> rt area-enabled?) #t)
+          (set! (-> rt session-primed?) #f)
+          (set! (-> rt state) 'available))
+
+        ;; There is intentionally no fishing during the next freeze.  Release
+        ;; Red -> Yellow immediately and remember that the final fishing visit
+        ;; belongs after Yellow is destroyed.
+        (when (and (= (-> rt progress) 2) *boss-waiting-for-4th-phase*)
+          (set! *boss-activate-blue-eco* #f)
+          (set! (-> rt area-enabled?) #f)
+          (set! *boss-enter-4th-phase* #t)
+          (set! (-> rt progress) 3)
+          (set! (-> rt state) 'idle))
+
+        ;; Final fishing visit after the Yellow gun phase.
+        (when (and (= (-> rt progress) 3)
+                   (= (-> rt state) 'idle)
+                   *boss-waiting-for-5th-phase*)
+          (set! *boss-activate-blue-eco* #f)
+          (set! (-> rt stage) 3)
+          (set! (-> rt difficulty) 3)
+          (set! (-> rt area-enabled?) #t)
+          (set! (-> rt session-primed?) #f)
+          (set! (-> rt state) 'available))
+
+        ;; Stage 1/2 ticking exits fishing and enables Blue Eco.  The eight-second
+        ;; bomb clock begins only after the fishing session has actually released
+        ;; Jak.  The bomb MUST fire; then we wait for the blast to put Jak in the
+        ;; air and only advance the boss after he lands again.
+        (when (= (-> rt state) 'exit-wait)
+          (when (not *fisher-session-active?*)
+            ;; Blue Eco and its eight-second survival window begin only after Jak
+            ;; is fully back out of the fishing process.
+            (set! *boss-activate-blue-eco* #t)
+            (cond
+              ((not (-> rt bomb-fired?))
+                (-! (-> rt bomb-time) dt)
+                (when (< (-> rt bomb-time) 0.0)
+                  (set! (-> rt bomb-time) 0.0))
+
+                ;; Visible survival clock while Jak has Blue Eco.  Use tenths so
+                ;; the player can read the real remaining fuse instead of only
+                ;; guessing from the pulsing fish sequence that just ended.
+                (let ((tenths
+                        (the int
+                          (+ 0.999 (* (fmax 0.0 (-> rt bomb-time)) 10.0)))))
+                  (clear *fish-ui-str*)
+                  (format *fish-ui-str* "EXPLOSION IN ~D.~D"
+                    (the int (/ tenths 10))
+                    (mod tenths 10))
+                  (draw-fisher-large-font-scaled *fish-ui-str* 256 64 0.48))
+
+                (when (<= (-> rt bomb-time) 0.0)
+                  (set! (-> rt bomb-time) 0.0)
+                  (set! (-> rt bomb-fired?) #t)
+                  (set! *boss-trigger-blue-bomb-explosion* #t)
+                  ;; The silence lasts THROUGH the countdown.  The bomb firing
+                  ;; is the exact handoff point where normal boss music may return.
+                  (when *fisher-finalboss-hold-music-mute?*
+                    (remove-setting! 'music-volume)
+                    (set! *fisher-finalboss-hold-music-mute?* #f))))
+
+              (else
+                ;; Do not mistake the grounded frame immediately before the blast
+                ;; for the requested post-explosion landing.  We must first see
+                ;; Jak leave the ground at least once.
+                (cond
+                  ((not (fisher-finalboss-target-on-ground?))
+                    (set! (-> rt saw-airborne?) #t))
+
+                  ((and
+                      (-> rt saw-airborne?)
+                      (fisher-finalboss-target-on-ground?))
+                    (set! *boss-activate-blue-eco* #f)
+                    (set! (-> rt area-enabled?) #f)
+                    (when *fisher-finalboss-danger-music-active?*
+                      (stop-main-music)
+                      (set! *fisher-finalboss-danger-music-active?* #f))
+                    (cond
+                      ((= (-> rt stage) 1)
+                        (set! *boss-enter-2nd-phase* #t)
+                        (set! (-> rt progress) 1))
+                      (else
+                        (set! *boss-enter-3rd-phase* #t)
+                        (set! (-> rt progress) 2)))
+                    (set! (-> rt state) 'idle)))))))
+
+        ;; The catch card has closed and fishing has released Jak: attach the
+        ;; actual black sharkey body to his back and grab his process.
+        (when (= (-> rt state) 'carry-pending)
+          (when (not *fisher-session-active?*)
+            (fisher-finalboss-begin-carry!)))
+
+        (when (= (-> rt state) 'carry)
+          (fisher-finalboss-update-back-fish!)
+          (+! (-> rt carry-time) dt)
+          (when (>= (-> rt carry-time) 2.0)
+            ;; The fish becomes primed on Jak's back at this exact moment too.
+            ;; Fire the same cue as an SFX immediately, rather than waiting for
+            ;; any later camera/state transition.
+            (play-sound-file
+              "death-is-coming.mp3"
+              (the int (-> *setting-control* current sfx-volume)))
+            (set! *boss-enter-5th-phase* #t)
+            (set! (-> rt state) 'carry-ticking)
+            (set! (-> rt carry-time) 0.0)
+            (set! (-> rt prompt-time) 0.0)))
+
+        (when (= (-> rt state) 'carry-ticking)
+          (fisher-finalboss-update-back-fish!)
+          (+! (-> rt carry-time) dt)
+          (fisher-finalboss-pulse-back-fish! (-> rt carry-time))
+          (when (>= (-> rt carry-time) 3.0)
+            (draw-mod-menu-text-custom
+              "PRESS <PAD_SQUARE> TO HURL THE FISH!"
+              256 150 #f #t #f)
+            (+! (-> rt prompt-time) dt)
+            (cond
+              ((cpad-pressed? 0 square)
+                (cpad-clear! 0 square)
+                (fisher-finalboss-begin-throw!))
+              ((>= (-> rt prompt-time) 5.0)
+                (set! *boss-trigger-blue-bomb-explosion* #t)
+                (when *fisher-finalboss-hold-music-mute?*
+                  (remove-setting! 'music-volume)
+                  (set! *fisher-finalboss-hold-music-mute?* #f))
+                (when *fisher-finalboss-danger-music-active?*
+                  (stop-main-music)
+                  (set! *fisher-finalboss-danger-music-active?* #f))
+                (when *target* (process-release? *target*))
+                (set! (-> rt state) 'failed)))))
+
+        (when (= (-> rt state) 'throwing)
+          (fisher-finalboss-update-throw!)))))
+        )
   (none))
 
 (defun maintain-fisher-game! ()
@@ -612,7 +937,11 @@
         ((= (-> inside name) 'swamp) (set! wanted-location-id 7))
         ((= (-> inside name) 'village3) (set! wanted-location-id 8))
         ((= (-> inside name) 'snow) (set! wanted-location-id 9))
-        ((= (-> inside name) 'maincave) (set! wanted-location-id 10))))
+        ((= (-> inside name) 'maincave) (set! wanted-location-id 10))
+        ((and
+            (= (-> inside name) 'finalboss)
+            (-> *fisher-finalboss-runtime* area-enabled?))
+          (set! wanted-location-id 11))))
 
     ;; Hysteresis prevents repeated spawning right on the boundary.
     (when
@@ -674,6 +1003,7 @@
     (maintain-training-pontoon!)
     (maintain-sentinel-pontoon!)
     (maintain-misty-pontoon!)
+    (maintain-fisher-finalboss-intermission!)
     (maintain-fisher-game!)
 
     (when
@@ -866,6 +1196,8 @@
 
 (defun runs-on-jak-spawn ()
   (fisher-refill-lures!)
+  ;; Never touch Final Boss runtime during spawn/load callbacks.
+  (set! *fisher-finalboss-runtime-level-active?* #f)
   ;; The level loader may have killed the runtime Snow-water process while
   ;; leaving our raw pointer value behind.  Reset it on the first safe frame.
   (when *fisher-snow-water*
@@ -878,13 +1210,23 @@
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
+  ;; The net is not owned by fisher-game, so remove it immediately on death.
+  (kill-by-name "test-fisher-net" *default-pool*)
+  (when *fisher-finalboss-danger-music-active?*
+    (stop-main-music)
+    (set! *fisher-finalboss-danger-music-active?* #f))
+  (when *fisher-finalboss-hold-music-mute?*
+    (remove-setting! 'music-volume)
+    (set! *fisher-finalboss-hold-music-mute?* #f))
   (case death-event
     (('dying)
       (fisher-refill-lures!)
+      (set! *fisher-finalboss-runtime-level-active?* #f)
       (when *fisher-snow-water*
         (set! *fisher-snow-water-reset-pending?* #t)))
     (('blackout)
       (fisher-refill-lures!)
+      (set! *fisher-finalboss-runtime-level-active?* #f)
       (when *fisher-snow-water*
         (set! *fisher-snow-water-reset-pending?* #t))))
   ;; Do not walk or kill the fish/manipy process tree from a death or blackout
@@ -927,6 +1269,7 @@
                 (set! *singlefish-session-active?* #f)
                 (+! *singlefish-session-id* 1)
                 (kill-by-name "fisher-gameplay-fish" *default-pool*)
+                (kill-by-name "test-fisher-net" *default-pool*)
                 (kill-by-name "fisher-game" *active-pool*)
                 (set!
                   *fisher-game*

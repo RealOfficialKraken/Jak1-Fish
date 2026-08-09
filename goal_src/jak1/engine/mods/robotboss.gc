@@ -45,7 +45,7 @@
 (define *boss-movie-skip-frame* -1.0)
 
 ;; One-shot guard for the replacement ending-cutscene WAV.
-;; The retail STR audio is stopped separately once the movie becomes active.
+;; The retail ending STR is suppressed at str-play-async; only the custom WAV is audible.
 (define *boss-ending-custom-audio-started?* #f)
 
 (defun current-str-pos ((str sound-id))
@@ -57,6 +57,27 @@
     (if (= str (-> *sound-iop-info* str-id))
       (set! ret (-> *sound-iop-info* strpos)))
     ret))
+
+;; Final Boss custom ending: suppress the retail STR AUDIO at the source.
+;; The movie player calls str-play-async when spool-part 0 becomes active.
+;; During our scrubbed ending, current-str-pos is already driven by
+;; *boss-movie-skip-frame*, so the visual movie does not need the IOP audio
+;; stream to advance.  All other STR playback remains retail.
+(defun str-play-async ((name string) (id sound-id))
+  (cond
+    ((and
+        (>= *boss-movie-skip-frame* 0.0)
+        (string= name "green-sagecage-outro-beat-boss-a"))
+      ;; Intentionally do not queue the vanilla ending STR.
+      (none))
+    (else
+      ;; Retail Jak 1 implementation.
+      (set! *que-str-lock* #t)
+      (let ((cmd (the-as load-chunk-msg (add-element *play-str-rpc*))))
+        (charp<-string (-> cmd basename) name)
+        (set! (-> cmd address) (the-as pointer id))
+        (set! (-> cmd result) (load-msg-result done)))
+      (none))))
 
 ;; Internal one-shots.  They tell the next retail return state that we arrived
 ;; from one of the custom frozen transitions, so it must NOT finish the frozen
@@ -817,11 +838,9 @@
             play-ending)))
 
       ;; CUSTOM ENDING AUDIO ONLY.
-      ;; play-anim starts the retail movie actor, which normally also starts its
-      ;; STR audio.  Stop that stream immediately so it never becomes the audible
-      ;; soundtrack for our scrubbed victory sequence.  A second stop is issued
-      ;; once movie? confirms ownership below, covering either RPC ordering.
-      (str-play-stop "green-sagecage-outro-beat-boss-a"))
+      ;; str-play-async is intercepted above while the scrub override is active,
+      ;; so the vanilla ending STR is never queued in the first place.
+      (none))
 
   :exit
     (behavior ()
@@ -861,10 +880,8 @@
       (until (movie?)
         (suspend))
 
-      ;; Confirm the vanilla STR is silent after the movie actor has actually
-      ;; taken ownership.  From here onward the ONLY ending soundtrack we start
-      ;; is end-cutscene-sound.wav at authored frame 269.
-      (str-play-stop "green-sagecage-outro-beat-boss-a")
+      ;; No vanilla STR exists here: str-play-async suppresses it at spool-part 0.
+      ;; The ONLY ending soundtrack started by this path is the custom WAV.
 
       (while (movie?)
         (suspend))
