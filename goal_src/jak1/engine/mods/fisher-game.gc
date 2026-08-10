@@ -5941,8 +5941,13 @@
   (none))
 
 (defun fisher-finalboss-add-fail! ((self fisher-game))
-  (+! (-> *fisher-finalboss-runtime* fail-count) 1)
-  (when (>= (-> *fisher-finalboss-runtime* fail-count) 6)
+  ;; Final Boss mistakes are represented directly by the normal line HP bar.
+  ;; Five mistakes consume a full line: 100 -> 80 -> 60 -> 40 -> 20 -> 0.
+  ;; Do not use fisher-damage-line! here because that sets the ordinary global
+  ;; line-broken flag; this encounter owns its failure transition explicitly.
+  (-! *fisher-line-hp* (/ *fisher-line-hp-max* 5.0))
+  (when (<= *fisher-line-hp* 0.0)
+    (set! *fisher-line-hp* 0.0)
     (fisher-finalboss-fail! self))
   (none))
 
@@ -6120,9 +6125,16 @@
       (else
         (set! (-> rt guitar-index) 0)
         (set! (-> rt guitar-total)
-          (min 12
-            (+ (rand-vu-int-range 5 12)
-               (- (-> rt difficulty) 1))))
+          (cond
+            ;; Phase 1 intentionally runs the Guitar-Hero notes slowly.  Keep
+            ;; that readable tutorial speed, but shorten the set so rolling
+            ;; this minigame is not a pacing penalty versus mash/spray.
+            ((= (-> rt difficulty) 1)
+              (rand-vu-int-range 3 6))
+            (else
+              (min 12
+                (+ (rand-vu-int-range 5 12)
+                   (- (-> rt difficulty) 1))))))
         (set! (-> rt guitar-hit-button) -1)
         (set! (-> rt guitar-hit-flash) 0.0)
         (set! (-> rt guitar-miss-mask) 0)
@@ -6396,13 +6408,14 @@
         (set! (-> rt stick-last-zone) zone)))
 
     ;; Smooth pursuit is deliberately quick enough to stay connected to the
-    ;; player's hand but slow enough that the shark/camera never snap between
+    ;; player's hand; the Final Boss reel is nudged slightly faster while still
+    ;; staying smooth enough that the shark/camera never snap between
     ;; cardinal checkpoints.
     (set! (-> self lure-pos y)
       (seek
         (-> self lure-pos y)
         (-> rt reel-target-y)
-        (* (meters 2.8) dt)))
+        (* (meters 3.2) dt)))
 
     ;; Reaching the authored phase depth wins the reel immediately, even if
     ;; fewer than ten rotations were needed.  Ten rotations is only the maximum
@@ -6415,6 +6428,11 @@
               (fisher-finalboss-start-ticking! self))
             (else
               (stop-main-music)
+              ;; Final-boss catch victory sting: play it exactly when the last
+              ;; reel succeeds and the Bombfish becomes a completed catch.
+              (play-sound-file
+                "victory.mp3"
+                (the int (-> *setting-control* current sfx-volume)))
               (set-setting! 'music-volume 'abs 0.0 0)
               (set! *fisher-finalboss-hold-music-mute?* #t)
               (fisher-finish-manipy-catch! self (-> self hooked-fish-slot)))))
@@ -6469,11 +6487,8 @@
   (let ((rt *fisher-finalboss-runtime*))
     (when (and (fisher-finalboss-zone? self)
                (= (-> self fish-state) 'reeling))
-      ;; Keep the whole boss minigame HUD above the persistent level/XP meter.
-      (clear *fish-ui-str*)
-      (format *fish-ui-str* "FAILS: ~D/5" (-> rt fail-count))
-      (draw-fisher-large-font-scaled *fish-ui-str* 256 25 0.32)
-
+      ;; The normal line HP bar is the Final Boss mistake meter, so there is no
+      ;; separate FAILS counter competing with the minigame HUD.
       (cond
         ((= (-> rt state) 'fight)
          (cond
@@ -7916,7 +7931,11 @@
 (defun fisher-start-cast! ((self fisher-game))
   ;; Missing residents are reconciled by fisher-maintain-pool-rendering! while
   ;; the pool is invisible.  Never create fish as the cast begins.
-  (set! *fisher-line-hp-max* (+ 15.0 (* 85.0 (-> self cast-charge))))
+  (set! *fisher-line-hp-max*
+    (if
+      (fisher-finalboss-zone? self)
+      100.0
+      (+ 15.0 (* 85.0 (-> self cast-charge)))))
 
   (fisher-reset-line-hp!)
   (set! (-> self electric-slot) -1)
@@ -11809,7 +11828,9 @@
   ;; The lure inventory occupies the same compact HUD layer as the XP meter
   ;; and cooldown bars, so it must disappear during every modal fishing card.
   (when
-    (not (fisher-modal-ui-active? self))
+    (and
+      (not (fisher-finalboss-zone? self))
+      (not (fisher-modal-ui-active? self)))
     (fisher-draw-lure-count))
 
   (fisher-draw-fishing-clock!)
@@ -12216,9 +12237,15 @@
 
     (play-main-music
       (cond
-        ;; Final Boss intermission has its own dedicated fishing track.
+        ;; Final Boss fishing uses a different track for each Bombfish phase.
         ((= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
-          "final-boss-fishing.mp3")
+          (cond
+            ((= (-> *fisher-finalboss-runtime* stage) 2)
+              "second-phase-final.mp3")
+            ((= (-> *fisher-finalboss-runtime* stage) 3)
+              "third-phase-final.mp3")
+            (else
+              "final-boss-fishing.mp3")))
 
         ;; Main Cave / Spider Cave Dark Eco pool keeps the regular Dark Eco theme.
         ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))

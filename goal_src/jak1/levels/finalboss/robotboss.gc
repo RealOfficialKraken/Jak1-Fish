@@ -36,6 +36,7 @@
 ;; Fishing intermission throw target.  The existing authored `interesting`
 ;; joint is refreshed every boss frame and gives the lob a stable upper-body/head target.
 (define-extern *fisher-finalboss-robot-head-target* vector)
+(define-extern *catch-fisha-sgc* skeleton-group)
 
 
 ;; Custom cutscene scrub override.
@@ -45,7 +46,7 @@
 (define *boss-movie-skip-frame* -1.0)
 
 ;; One-shot guard for the replacement ending-cutscene WAV.
-;; The retail STR audio is stopped separately once the movie becomes active.
+;; The retail ending STR is suppressed at str-play-async; only the custom WAV is audible.
 (define *boss-ending-custom-audio-started?* #f)
 
 (defun current-str-pos ((str sound-id))
@@ -57,6 +58,28 @@
     (if (= str (-> *sound-iop-info* str-id))
       (set! ret (-> *sound-iop-info* strpos)))
     ret))
+
+;; Final Boss custom ending: suppress the retail STR AUDIO at the source.
+;; The movie player calls str-play-async when spool-part 0 becomes active.
+;; During our scrubbed ending, current-str-pos is already driven by
+;; *boss-movie-skip-frame*, so the visual movie does not need the IOP audio
+;; stream to advance.  All other STR playback remains retail.
+(defun str-play-async ((name string) (id sound-id))
+  (cond
+    ((string= name "green-sagecage-outro-beat-boss-a")
+      ;; This exact first victory STR is permanently silent in the fishing-mod
+      ;; ending.  Do not key this off the scrub frame: the audio request can be
+      ;; queued during spool ownership before/around the visual scrub handoff.
+      ;; Boss-B is intentionally NOT matched here and falls through to retail.
+      (none))
+    (else
+      ;; Retail Jak 1 implementation.
+      (set! *que-str-lock* #t)
+      (let ((cmd (the-as load-chunk-msg (add-element *play-str-rpc*))))
+        (charp<-string (-> cmd basename) name)
+        (set! (-> cmd address) (the-as pointer id))
+        (set! (-> cmd result) (load-msg-result done)))
+      (none))))
 
 ;; Internal one-shots.  They tell the next retail return state that we arrived
 ;; from one of the custom frozen transitions, so it must NOT finish the frozen
@@ -786,7 +809,35 @@
   :enter
     (behavior ()
       (set! *boss-defeated* #f)
-      (set! *boss-ending-custom-audio-started?* #f)
+
+      ;; STRICT DEFEAT AUDIO HANDOFF.
+      ;; 1) kill the armed-fish danger cue and any gameplay music,
+      ;; 2) start the replacement ending WAV at the player's real SFX volume,
+      ;; 3) only THEN mute the normal dialogue/SFX/music mix for the chopped
+      ;;    robot-explosion movie.  This leaves our already-started replacement
+      ;;    WAV as the only authored soundtrack for this section.
+      ;; Hard reset every currently-playing gameplay/custom sound first.
+      ;; This guarantees death-is-coming.mp3 cannot survive into the movie.
+      (stop-main-music)
+      (stop-all-sounds)
+
+      ;; Start our replacement BEFORE installing the temporary mute requests.
+      (set! *boss-ending-custom-audio-started?* #t)
+      (play-sound-file
+        "end-cutscene-sound.wav"
+        (the int (-> *setting-control* current sfx-volume)))
+
+      ;; Silence every game/movie mix used by Boss-A.  The custom WAV above was
+      ;; launched with an explicit volume and is the only sound we want here.
+      (set-setting! 'dialog-volume 'abs 0.0 0)
+      (set-setting! 'sfx-volume 'abs 0.0 0)
+      (set-setting! 'music-volume 'abs 0.0 0)
+      (set-setting! 'ambient-volume 'abs 0.0 0)
+      (set-setting! 'sfx-volume-movie 'abs 0.0 0)
+      (set-setting! 'music-volume-movie 'abs 0.0 0)
+      (set-setting! 'ambient-volume-movie 'abs 0.0 0)
+      (apply-settings *setting-control*)
+
       (set-time! (-> self state-time))
       (logior! (-> self draw status) (draw-status hidden))
 
@@ -817,14 +868,23 @@
             play-ending)))
 
       ;; CUSTOM ENDING AUDIO ONLY.
-      ;; play-anim starts the retail movie actor, which normally also starts its
-      ;; STR audio.  Stop that stream immediately so it never becomes the audible
-      ;; soundtrack for our scrubbed victory sequence.  A second stop is issued
-      ;; once movie? confirms ownership below, covering either RPC ordering.
-      (str-play-stop "green-sagecage-outro-beat-boss-a"))
+      ;; str-play-async is intercepted above while the scrub override is active,
+      ;; so the vanilla ending STR is never queued in the first place.
+      (none))
 
   :exit
     (behavior ()
+      ;; Safety cleanup: if this state is interrupted for any reason, never
+      ;; leave the replacement WAV running or the player's normal mix muted.
+      (stop-sound-file "end-cutscene-sound.wav")
+      (remove-setting! 'dialog-volume)
+      (remove-setting! 'sfx-volume)
+      (remove-setting! 'music-volume)
+      (remove-setting! 'ambient-volume)
+      (remove-setting! 'sfx-volume-movie)
+      (remove-setting! 'music-volume-movie)
+      (remove-setting! 'ambient-volume-movie)
+      (apply-settings *setting-control*)
       (set! *boss-movie-skip-frame* -1.0)
       (set! *boss-ending-custom-audio-started?* #f)
       (set-blackout-frames 0))
@@ -841,14 +901,24 @@
            (set! *boss-movie-skip-frame* 269.0)
            (set-blackout-frames 0)
 
-           ;; The custom WAV is authored to begin at this exact cutscene beat.
-           ;; Use the user's live SFX-volume setting, just like the fishing mod's
-           ;; other play-sound-file calls.
+           ;; The replacement WAV/mute were already established in :enter so
+           ;; death-is-coming cannot bleed through even during this hidden scrub.
+           ;; Keep this fallback only for an unusual direct state entry.
            (when (not *boss-ending-custom-audio-started?*)
+             (stop-main-music)
+             (stop-all-sounds)
              (set! *boss-ending-custom-audio-started?* #t)
              (play-sound-file
                "end-cutscene-sound.wav"
-               (the int (-> *setting-control* current sfx-volume)))))
+               (the int (-> *setting-control* current sfx-volume)))
+             (set-setting! 'dialog-volume 'abs 0.0 0)
+             (set-setting! 'sfx-volume 'abs 0.0 0)
+             (set-setting! 'music-volume 'abs 0.0 0)
+             (set-setting! 'ambient-volume 'abs 0.0 0)
+             (set-setting! 'sfx-volume-movie 'abs 0.0 0)
+             (set-setting! 'music-volume-movie 'abs 0.0 0)
+             (set-setting! 'ambient-volume-movie 'abs 0.0 0)
+             (apply-settings *setting-control*)))
          (when (movie?)
            (+! *boss-movie-skip-frame*
                (* 30.0 (-> *display* seconds-per-frame)))))))
@@ -861,13 +931,26 @@
       (until (movie?)
         (suspend))
 
-      ;; Confirm the vanilla STR is silent after the movie actor has actually
-      ;; taken ownership.  From here onward the ONLY ending soundtrack we start
-      ;; is end-cutscene-sound.wav at authored frame 269.
-      (str-play-stop "green-sagecage-outro-beat-boss-a")
+      ;; No vanilla STR exists here: str-play-async suppresses it at spool-part 0.
+      ;; The ONLY ending soundtrack started by this path is the custom WAV.
 
       (while (movie?)
         (suspend))
+
+      ;; The robot-explosion movie is over.  End our replacement sound and
+      ;; restore the player's original dialogue/SFX/music mix BEFORE the next
+      ;; Samos/Keira movie is cued, so that follow-up scene uses normal audio.
+      (stop-sound-file "end-cutscene-sound.wav")
+      (remove-setting! 'dialog-volume)
+      (remove-setting! 'sfx-volume)
+      (remove-setting! 'music-volume)
+      (remove-setting! 'ambient-volume)
+      (remove-setting! 'sfx-volume-movie)
+      (remove-setting! 'music-volume-movie)
+      (remove-setting! 'ambient-volume-movie)
+      (apply-settings *setting-control*)
+
+      ;; Re-enable normal STR playback for every subsequent movie.
       (set! *boss-movie-skip-frame* -1.0)
       (set-blackout-frames 0)
       (cleanup-for-death self)
@@ -982,14 +1065,19 @@
 
         (robotboss-custom-freeze-camera)
 
+        ;; Yellow is gone at the final freeze.  Let the damaged robot hover
+        ;; naturally in-place instead of pinning the reveal pose to one frame.
+        (ja-channel-push! 1 (seconds 0.2))
+        (ja :group! robotboss-idle-hover-no-yellow-ja)
+
         (while (not *boss-enter-5th-phase*)
           (when *boss-trigger-blue-bomb-explosion*
             (set! *boss-trigger-blue-bomb-explosion* #f)
             (robotboss-custom-blue-bomb-explode-now))
-          (ja
-            :group! robotboss-dark-reveal-no-yellow-ja
-            :num-func num-func-identity
-            :frame-num hold-frame)
+          (when (not (ja-group? robotboss-idle-hover-no-yellow-ja))
+            (ja-channel-push! 1 (seconds 0.2))
+            (ja :group! robotboss-idle-hover-no-yellow-ja))
+          (ja :num! (loop!))
           (suspend))
 
         ;; Phase 5 does NOT launch the retail light-eco setup.  Start the robot's
@@ -1003,6 +1091,17 @@
         (go robotboss-custom-final-idle)))
 
   :post transform-post)
+
+;; Giant fish visual for the Yellow Eco BFG shot.  Use the same proven
+;; manipy ownership pattern as the Ogre Boss fish replacement: the retail
+;; yellowshot remains the gameplay projectile, while a child fisha copies
+;; its transform every frame.
+(defbehavior robotboss-yellowshot-fisha-trans manipy ()
+  (let ((parent-proc (ppointer->process (-> self parent))))
+    (when (and parent-proc (type-type? (-> parent-proc type) process-drawable))
+      (let ((shot (the-as process-drawable parent-proc)))
+        (set! (-> self root trans quad) (-> shot root trans quad)))))
+  (none))
 
 ;; After Phase 5 is released, the real gameplay robot rises back to its normal
 ;; airborne height and then remains in the authored no-yellow idle forever.
@@ -1018,7 +1117,39 @@
       (vector-! s5-0 s5-0 gp-0)
       (vector-normalize! s5-0 (the-as float 819200.0))
       (vector+! s5-0 s5-0 gp-0)
-      (process-spawn yellowshot gp-0 s5-0 0.0 750 :to self))
+      (let ((shot (process-spawn yellowshot gp-0 s5-0 0.0 750 :to self)))
+        (when shot
+          (let ((shot-proc (ppointer->process shot)))
+            (when (and shot-proc (type-type? (-> shot-proc type) process-drawable))
+              (let ((fish
+                      (manipy-spawn
+                        gp-0
+                        (-> self entity)
+                        *catch-fisha-sgc*
+                        #f
+                        :to shot-proc)))
+                (when fish
+                  (let ((fish-proc (the-as manipy (ppointer->process fish))))
+                    (when fish-proc
+                      (send-event fish-proc 'anim-mode 'loop)
+                      (send-event fish-proc 'max-vis-dist (meters 999999.0))
+                      (set! (-> fish-proc draw force-lod) 0)
+                      (set-vector! (-> fish-proc root scale) 4.5 4.5 4.5 1.0)
+
+                      ;; Point the fish down the shot vector once.  The Yellow Eco
+                      ;; shot itself flies straight, and the trans-hook keeps this
+                      ;; fish centered on it for the rest of its lifetime.
+                      (let ((fish-forward (new 'stack-no-clear 'vector))
+                            (fish-down (new 'stack-no-clear 'vector))
+                            (fish-rot (new 'stack-no-clear 'matrix)))
+                        (vector-! fish-forward s5-0 gp-0)
+                        (set! (-> fish-forward w) 0.0)
+                        (vector-normalize! fish-forward 1.0)
+                        (set-vector! fish-down 0.0 -1.0 0.0 0.0)
+                        (forward-down->inv-matrix fish-rot fish-forward fish-down)
+                        (matrix->quaternion (-> fish-proc root quat) fish-rot))
+
+                      (send-event fish-proc 'trans-hook robotboss-yellowshot-fisha-trans))))))))))
     (send-event self 'flash 255.0)
     (process-spawn part-tracker
                    :init
@@ -1340,14 +1471,19 @@
 
         (robotboss-custom-freeze-camera)
 
+        ;; Red is gone at this freeze, so use the authored no-red hover idle.
+        ;; Only the skeleton animates; loc-t remains frozen by :trans above.
+        (ja-channel-push! 1 (seconds 0.2))
+        (ja :group! robotboss-idle-hover-no-red-ja)
+
         (while (not *boss-enter-4th-phase*)
           (when *boss-trigger-blue-bomb-explosion*
             (set! *boss-trigger-blue-bomb-explosion* #f)
             (robotboss-custom-blue-bomb-explode-now))
-          (ja
-            :group! robotboss-dark-reveal-no-red-ja
-            :num-func num-func-identity
-            :frame-num hold-frame)
+          (when (not (ja-group? robotboss-idle-hover-no-red-ja))
+            (ja-channel-push! 1 (seconds 0.2))
+            (ja :group! robotboss-idle-hover-no-red-ja))
+          (ja :num! (loop!))
           (suspend))
 
         ;; Skip Red's bomb state and begin Yellow's authored return.
@@ -1749,14 +1885,19 @@
         ;; Give control back to the gameplay camera during the custom intermission.
         (robotboss-custom-freeze-camera)
 
+        ;; Green's destroyed-state still uses the no-blue hover set in the
+        ;; retail Red transition.  Keep that idle moving while the root is frozen.
+        (ja-channel-push! 1 (seconds 0.2))
+        (ja :group! robotboss-idle-hover-no-blue-ja)
+
         (while (not *boss-enter-3rd-phase*)
           (when *boss-trigger-blue-bomb-explosion*
             (set! *boss-trigger-blue-bomb-explosion* #f)
             (robotboss-custom-blue-bomb-explode-now))
-          (ja
-            :group! robotboss-dark-reveal-green-ja
-            :num-func num-func-identity
-            :frame-num hold-frame)
+          (when (not (ja-group? robotboss-idle-hover-no-blue-ja))
+            (ja-channel-push! 1 (seconds 0.2))
+            (ja :group! robotboss-idle-hover-no-blue-ja))
+          (ja :num! (loop!))
           (suspend))
 
         ;; Skip Green's bomb state and begin Red's authored return from the exact
@@ -2120,6 +2261,12 @@
         ;; Hold until the phase-release command arrives.  Blue eco is a persistent
         ;; state controlled directly by *boss-activate-blue-eco*.  The bomb remains
         ;; an independent one-shot command.  Neither is tied to the waiting flag.
+        ;; The robot's ROOT stays frozen at held-loc, but don't freeze the
+        ;; skeleton like a statue.  Blue has already been destroyed here, so use
+        ;; the authored no-blue hover idle throughout the fishing intermission.
+        (ja-channel-push! 1 (seconds 0.2))
+        (ja :group! robotboss-idle-hover-no-blue-ja)
+
         (while (not *boss-enter-2nd-phase*)
           ;; Blue eco is a STATE, not a one-shot command:
           ;;   #f = it must remain off
@@ -2136,10 +2283,11 @@
             (set! *boss-trigger-blue-bomb-explosion* #f)
             (robotboss-custom-blue-bomb-explode-now))
 
-          (ja
-            :group! robotboss-dark-reveal-ja
-            :num-func num-func-identity
-            :frame-num hold-frame)
+          ;; Keep the hover animation alive without advancing the frozen root.
+          (when (not (ja-group? robotboss-idle-hover-no-blue-ja))
+            (ja-channel-push! 1 (seconds 0.2))
+            (ja :group! robotboss-idle-hover-no-blue-ja))
+          (ja :num! (loop!))
           (suspend))
 
         ;; Honor flags that change on the exact frame the phase is released.

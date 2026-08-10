@@ -752,7 +752,10 @@
         ;; though begin-throw already requested the stop: the defeat transition
         ;; must never inherit a still-playing danger cue.
         (stop-main-music)
-        (stop-sound-file "death-is-coming.mp3")
+        ;; The robot hit is the absolute audio boundary.  Kill every active
+        ;; sound here; robotboss-custom-defeat-movie will immediately start the
+        ;; replacement ending WAV after it observes *boss-defeated*.
+        (stop-all-sounds)
         (set! *boss-defeated* #t))))
   (none))
 
