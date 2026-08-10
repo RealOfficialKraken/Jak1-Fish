@@ -5871,7 +5871,17 @@
     (set! (-> rt guitar-total) 0)
     (set! (-> rt guitar-index) 0)
     (set! (-> rt guitar-button) 0)
+    (set! (-> rt guitar-button2) -1)
+    (set! (-> rt guitar-button3) -1)
+    (set! (-> rt guitar-count) 1)
+    (set! (-> rt guitar-hit-mask) 0)
     (set! (-> rt guitar-y) 0.0)
+    (set! (-> rt guitar-hit-button) -1)
+    (set! (-> rt guitar-hit-flash) 0.0)
+    (set! (-> rt guitar-miss-mask) 0)
+    (set! (-> rt guitar-miss-flash) 0.0)
+    (set! (-> rt guitar-last-hit-count) 0)
+    (set! (-> rt reel-target-y) 0.0)
     (set! (-> rt stick-last-zone) -1)
     (set! (-> rt stick-direction) 0)
     (set! (-> rt stick-quarter-count) 0)
@@ -5897,6 +5907,17 @@
     ((cpad-pressed? 0 square) 3)
     (else -1)))
 
+(defun fisher-finalboss-button-pressed? ((button int))
+  ;; Dynamic version used by Guitar Hero chords so two/three buttons pressed on
+  ;; the same frame can all be consumed instead of the old priority-based helper
+  ;; returning only one of them.
+  (cond
+    ((= button 0) (cpad-pressed? 0 triangle))
+    ((= button 1) (cpad-pressed? 0 circle))
+    ((= button 2) (cpad-pressed? 0 x))
+    ((= button 3) (cpad-pressed? 0 square))
+    (else #f)))
+
 (defun fisher-finalboss-clear-button! ((button int))
   (cond
     ((= button 0) (cpad-clear! 0 triangle))
@@ -5914,6 +5935,7 @@
     (stop-main-music)
     (set-setting! 'music-volume 'abs 0.0 0)
     (set! *fisher-finalboss-hold-music-mute?* #t)
+    (set! *boss-activate-blue-eco* #f)
     (set! *boss-trigger-blue-bomb-explosion* #t)
     (set! (-> self cast-state) 'buzzer-exit))
   (none))
@@ -5951,10 +5973,11 @@
     (else (meters 2.5))))
 
 (defun fisher-finalboss-reel-distance-per-round ()
-  ;; Ten full right-stick rotations are one reel round.  The fish deliberately
-  ;; advances only a modest amount per round, forcing several fight/reel cycles.
+  ;; Ten full right-stick rotations are one reel round.  Phase 1 deliberately
+  ;; reels only half as far as before so the long bottom-to-middle climb gets
+  ;; several proper fight/minigame cycles instead of rushing through the opener.
   (cond
-    ((= (-> *fisher-finalboss-runtime* stage) 1) (meters 10.0))
+    ((= (-> *fisher-finalboss-runtime* stage) 1) (meters 5.0))
     ((= (-> *fisher-finalboss-runtime* stage) 2) (meters 7.0))
     (else (meters 5.5))))
 
@@ -6018,6 +6041,52 @@
       (set! (-> data slot i launch-time) 0.0)))
   (none))
 
+(defun fisher-finalboss-next-guitar-note! ()
+  (let* ((rt *fisher-finalboss-runtime*)
+         (difficulty (-> rt difficulty)))
+    (cond
+      ;; Continue an existing streak.  The next repeated note starts exactly
+      ;; where the preview note was drawn, so the lane feels like a real run of
+      ;; notes instead of unrelated singles being spawned faster.
+      ((> (-> rt guitar-count) 1)
+        (-! (-> rt guitar-count) 1)
+        (set! (-> rt guitar-y) (fmax 8.0 (- (-> rt guitar-y) 34.0))))
+
+      (else
+        (let* ((roll (rand-vu-int-range 0 100))
+               (remaining (- (-> rt guitar-total) (-> rt guitar-index)))
+               (wanted
+                 (cond
+                   ;; Phase 1 is the tutorial: every note is a normal single.
+                   ((= difficulty 1) 1)
+                   ;; Phase 2 introduces readable three-hit same-button streaks.
+                   ((= difficulty 2) (if (< roll 45) 3 1))
+                   ;; Phase 3 leans heavily into streaks, with occasional
+                   ;; four-hit runs for the final-boss rhythm escalation.
+                   (else
+                     (cond
+                       ((< roll 18) 1)
+                       ((< roll 72) 3)
+                       (else 4)))))
+               (run (min wanted (if (< remaining 1) 1 remaining)))
+               (old-button (-> rt guitar-button))
+               (button (rand-vu-int-range 0 3)))
+          ;; When starting a new streak in later phases, prefer a new lane so a
+          ;; TRIANGLE x3 -> X x3 pattern is visually obvious to the player.
+          (when (and (> difficulty 1) (> (-> rt guitar-index) 0))
+            (while (= button old-button)
+              (set! button (rand-vu-int-range 0 3))))
+          (set! (-> rt guitar-button) button)
+          (set! (-> rt guitar-button2) -1)
+          (set! (-> rt guitar-button3) -1)
+          ;; guitar-count is the number of notes still remaining in THIS run,
+          ;; including the currently falling note.
+          (set! (-> rt guitar-count) run)
+          (set! (-> rt guitar-last-hit-count) run)
+          (set! (-> rt guitar-y) 8.0))))
+    (set! (-> rt guitar-hit-mask) 0))
+  (none))
+
 (defun fisher-finalboss-begin-fight! ((self fisher-game))
   (let* ((rt *fisher-finalboss-runtime*)
          (kind (rand-vu-int-range 0 2)))
@@ -6054,12 +6123,20 @@
           (min 12
             (+ (rand-vu-int-range 5 12)
                (- (-> rt difficulty) 1))))
-        (set! (-> rt guitar-button) (rand-vu-int-range 0 3))
-        (set! (-> rt guitar-y) 8.0))))
+        (set! (-> rt guitar-hit-button) -1)
+        (set! (-> rt guitar-hit-flash) 0.0)
+        (set! (-> rt guitar-miss-mask) 0)
+        (set! (-> rt guitar-miss-flash) 0.0)
+        (set! (-> rt guitar-last-hit-count) 0)
+        (fisher-finalboss-next-guitar-note!))))
   (none))
 
 (defun fisher-finalboss-begin-reel! ((self fisher-game))
   (set! (-> *fisher-finalboss-runtime* state) 'reel)
+  ;; Reel input advances a hidden target depth.  The visible lure/fish eases
+  ;; toward this target every frame so quarter-turn validation no longer makes
+  ;; the shark jump upward four times per stick rotation.
+  (set! (-> *fisher-finalboss-runtime* reel-target-y) (-> self lure-pos y))
   (set! (-> self fish-fighting?) #f)
   (fisher-clear-button-fight! self)
   (fisher-finalboss-reset-stick!)
@@ -6180,44 +6257,73 @@
                 (fisher-finalboss-begin-wave! self))))))
 
       (else
+        ;; Receptor feedback is independent from note state so a successful hit
+        ;; or miss remains visible for a beat while the next streak note falls.
+        (when (> (-> rt guitar-hit-flash) 0.0)
+          (-! (-> rt guitar-hit-flash) dt)
+          (when (< (-> rt guitar-hit-flash) 0.0)
+            (set! (-> rt guitar-hit-flash) 0.0)))
+        (when (> (-> rt guitar-miss-flash) 0.0)
+          (-! (-> rt guitar-miss-flash) dt)
+          (when (< (-> rt guitar-miss-flash) 0.0)
+            (set! (-> rt guitar-miss-flash) 0.0)
+            (set! (-> rt guitar-miss-mask) 0)))
+
         (let ((speed
               (cond
                 ((= (-> rt difficulty) 1) 116.0)
-                ((= (-> rt difficulty) 2) 130.0)
-                (else 144.0))))
+                ((= (-> rt difficulty) 2) 124.0)
+                (else 132.0))))
           (+! (-> rt guitar-y) (* speed dt)))
 
-        (when (>= button 0)
+        ;; Guitar Hero uses ONE required button at a time.  Later phases get
+        ;; difficulty from same-button streak patterns, never simultaneous
+        ;; chords, so every required input is comfortable on one thumb.
+        (when (and (= (-> rt state) 'fight) (>= button 0))
           (fisher-finalboss-clear-button! button)
           (cond
             ((and
                 (= button (-> rt guitar-button))
-                (>= (-> rt guitar-y) 108.0)
+                (>= (-> rt guitar-y) 104.0)
                 (<= (-> rt guitar-y) 164.0))
+              (set! (-> rt guitar-hit-mask) 1)
               (fisher-launch-button-hit-effects!
                 self
-                (the float (fisher-finalboss-lane-x (-> rt guitar-button)))
+                (the float (fisher-finalboss-lane-x button))
                 140.0)
+              (set! (-> rt guitar-hit-button) button)
+              (set! (-> rt guitar-hit-flash) 0.20)
+              (play-sound-file
+                "bwoop.wav"
+                (the int (-> *setting-control* current sfx-volume)))
               (+! (-> rt guitar-index) 1)
               (when (< (-> rt guitar-index) (-> rt guitar-total))
-                (set! (-> rt guitar-button) (rand-vu-int-range 0 3))
-                (set! (-> rt guitar-y) 8.0)))
+                (fisher-finalboss-next-guitar-note!)))
             (else
+              ;; Wrong/off-beat inputs immediately flash THAT receptor red.
+              (set! (-> rt guitar-miss-mask) (ash 1 button))
+              (set! (-> rt guitar-miss-flash) 0.28)
               (fisher-finalboss-add-fail! self))))
 
-        ;; Miss the note before it can overlap the persistent level/XP bar.
-        (when (and (= (-> rt state) 'fight) (> (-> rt guitar-y) 170.0))
+        ;; A note that passes the receptor unresolved is one failure.  The next
+        ;; member of an active streak then enters from its preview position.
+        (when
+          (and
+            (= (-> rt state) 'fight)
+            (> (-> rt guitar-y) 168.0)
+            (zero? (-> rt guitar-hit-mask)))
+          (set! (-> rt guitar-miss-mask) (ash 1 (-> rt guitar-button)))
+          (set! (-> rt guitar-miss-flash) 0.34)
           (fisher-finalboss-add-fail! self)
           (when (= (-> rt state) 'fight)
             (+! (-> rt guitar-index) 1)
             (when (< (-> rt guitar-index) (-> rt guitar-total))
-              (set! (-> rt guitar-button) (rand-vu-int-range 0 3))
-              (set! (-> rt guitar-y) 8.0))))
+              (fisher-finalboss-next-guitar-note!))))
 
         (when (and (= (-> rt state) 'fight)
                    (>= (-> rt guitar-index) (-> rt guitar-total)))
           (fisher-finalboss-begin-reel! self))))
-  (none)))
+    (none)))
 
 (defun fisher-finalboss-start-ticking! ((self fisher-game))
   (set! (-> *fisher-finalboss-runtime* state) 'ticking)
@@ -6250,6 +6356,7 @@
 
 (defun fisher-finalboss-update-reel! ((self fisher-game))
   (let* ((rt *fisher-finalboss-runtime*)
+         (dt (-> *display* seconds-per-frame))
          (zone (fisher-finalboss-stick-zone)))
     (when (>= zone 0)
       (let ((last (-> rt stick-last-zone)))
@@ -6274,18 +6381,28 @@
                 (set! (-> rt stick-quarter-count) 0))))
 
           (when (> (-> rt stick-quarter-count) 0)
-            ;; Move only on validated quarter-circle progress.  Forty quarters
-            ;; (ten rotations) equal one deliberately slow reel round.
-            (+! (-> self lure-pos y)
+            ;; INPUT advances a target rather than teleporting the visible hook.
+            ;; The visual position eases toward it below, turning the old four
+            ;; quarter-turn pops into one continuous upward pull.
+            (+! (-> rt reel-target-y)
               (/ (fisher-finalboss-reel-distance-per-round) 40.0))
             (let ((max-y (- (-> self water-level) (fisher-finalboss-current-target-depth self))))
-              (when (> (-> self lure-pos y) max-y)
-                (set! (-> self lure-pos y) max-y))))
+              (when (> (-> rt reel-target-y) max-y)
+                (set! (-> rt reel-target-y) max-y))))
 
           (when (>= (-> rt stick-quarter-count) 4)
             (+! (-> rt stick-rotations) 1)
             (set! (-> rt stick-quarter-count) 0)))
         (set! (-> rt stick-last-zone) zone)))
+
+    ;; Smooth pursuit is deliberately quick enough to stay connected to the
+    ;; player's hand but slow enough that the shark/camera never snap between
+    ;; cardinal checkpoints.
+    (set! (-> self lure-pos y)
+      (seek
+        (-> self lure-pos y)
+        (-> rt reel-target-y)
+        (* (meters 2.8) dt)))
 
     ;; Reaching the authored phase depth wins the reel immediately, even if
     ;; fewer than ten rotations were needed.  Ten rotations is only the maximum
@@ -6301,7 +6418,11 @@
               (set-setting! 'music-volume 'abs 0.0 0)
               (set! *fisher-finalboss-hold-music-mute?* #t)
               (fisher-finish-manipy-catch! self (-> self hooked-fish-slot)))))
-        ((>= (-> rt stick-rotations) 10)
+        ;; Do not snap back into a fight while the smoothed visual is still
+        ;; catching up to the final reel input.
+        ((and
+            (>= (-> rt stick-rotations) 10)
+            (>= (-> self lure-pos y) (- (-> rt reel-target-y) (meters 0.05))))
           (fisher-finalboss-begin-fight! self))))
   (none)))
 
@@ -6348,75 +6469,131 @@
   (let ((rt *fisher-finalboss-runtime*))
     (when (and (fisher-finalboss-zone? self)
                (= (-> self fish-state) 'reeling))
-      ;; Keep the whole boss minigame HUD above the persistent level/XP meter
-      ;; (level text begins around y=180; bar begins around y=204).
-      ;; Keep persistent information compact so the actual input target owns the
-      ;; center of the screen.  Mistakes remain visible because six ends the run.
+      ;; Keep the whole boss minigame HUD above the persistent level/XP meter.
       (clear *fish-ui-str*)
       (format *fish-ui-str* "FAILS: ~D/5" (-> rt fail-count))
       (draw-fisher-large-font-scaled *fish-ui-str* 256 25 0.32)
 
       (cond
         ((= (-> rt state) 'fight)
-          (cond
-            ((= (-> rt fight-kind) 0)
-              ;; No numeric mash target.  Progress is communicated by a slowly
-              ;; growing glyph plus the quick depress/spring animation per press.
-              (let* ((progress
-                       (/
-                         (the float (-> rt mash-count))
-                         (the float (if (> (-> rt mash-target) 0) (-> rt mash-target) 1))))
-                     (mash-scale (+ 0.82 (* 0.12 (fmin 1.0 progress)))))
-                (when (> (-> rt wave-timer) 0.0)
-                  (set! mash-scale
-                    (- mash-scale
-                       (* 0.18
-                          (fmin 1.0 (/ (-> rt wave-timer) 0.12))))))
-                (draw-fisher-large-font-scaled "MASH!" 256 50 0.48)
-                (draw-fisher-large-font-scaled
-                  (fisher-button-label (-> rt mash-button))
-                  256
-                  111
-                  mash-scale)
-                (draw-fisher-large-font-scaled
-                  (if (>= progress 0.75) "ALMOST!" "KEEP PRESSING!")
-                  256
-                  154
-                  0.30)))
-
-            ((= (-> rt fight-kind) 1)
-              (draw-fisher-large-font-scaled "CLEAR THE BUTTONS!" 256 44 0.38)
-              ;; The timer is a deadline, not forced downtime: clearing every
-              ;; prompt immediately advances to the next of the three waves.
-              (let* ((remaining
-                       (fmax 0.0
-                         (- (fisher-finalboss-wave-window) (-> rt wave-timer))))
-                     (tenths (the int (+ 0.999 (* remaining 10.0)))))
-                (clear *fish-ui-str*)
-                (format *fish-ui-str* "TIME: ~D.~D" (the int (/ tenths 10)) (mod tenths 10))
-                (draw-fisher-large-font-scaled *fish-ui-str* 256 67 0.34))
-              (fisher-draw-button-fight! self))
-
-            (else
-              (draw-fisher-large-font-scaled "HIT THE TARGET!" 256 42 0.38)
-              ;; Four fixed lanes give the eye a stable target.  The falling
-              ;; glyph grows slightly as it approaches the hit row, while a
-              ;; successful strike bursts the normal fish hit particles there.
-              (dotimes (b 4)
-                (let ((x (fisher-finalboss-lane-x b)))
-                  (draw-fisher-large-font-scaled "O" x 140 0.86)
-                  (draw-fisher-large-font-scaled (fisher-button-label b) x 140 0.32)))
+         (cond
+           ((= (-> rt fight-kind) 0)
+            ;; No numeric mash target.  Progress is communicated by a slowly
+            ;; growing glyph plus the quick depress/spring animation per press.
+            (let* ((progress
+                    (/
+                     (the float (-> rt mash-count))
+                     (the float (if (> (-> rt mash-target) 0) (-> rt mash-target) 1))))
+                   (mash-scale (+ 0.82 (* 0.12 (fmin 1.0 progress)))))
+              (when (> (-> rt wave-timer) 0.0)
+                (set! mash-scale
+                      (- mash-scale
+                         (* 0.18
+                            (fmin 1.0 (/ (-> rt wave-timer) 0.12))))))
+              (draw-fisher-large-font-scaled "MASH!" 256 50 0.48)
               (draw-fisher-large-font-scaled
-                (fisher-button-label (-> rt guitar-button))
-                (fisher-finalboss-lane-x (-> rt guitar-button))
-                (the int (-> rt guitar-y))
-                (+ 0.46 (* 0.0010 (fmin 168.0 (-> rt guitar-y))))))))
+               (fisher-button-label (-> rt mash-button))
+               256
+               111
+               mash-scale)
+              (draw-fisher-large-font-scaled
+               (if (>= progress 0.75) "ALMOST!" "KEEP PRESSING!")
+               256
+               154
+               0.30)))
+
+           ((= (-> rt fight-kind) 1)
+            (draw-fisher-large-font-scaled "CLEAR THE BUTTONS!" 256 44 0.38)
+            ;; The timer is a deadline, not forced downtime: clearing every
+            ;; prompt immediately advances to the next of the three waves.
+            (let* ((remaining
+                    (fmax 0.0
+                          (- (fisher-finalboss-wave-window) (-> rt wave-timer))))
+                   (tenths (the int (+ 0.999 (* remaining 10.0)))))
+              (clear *fish-ui-str*)
+              (format *fish-ui-str* "TIME: ~D.~D" (the int (/ tenths 10)) (mod tenths 10))
+              (draw-fisher-large-font-scaled *fish-ui-str* 256 67 0.34))
+            (fisher-draw-button-fight! self))
+
+           (else
+            (draw-fisher-large-font-scaled
+             (if (> (-> rt guitar-last-hit-count) 1) "KEEP THE STREAK!" "HIT THE TARGET!")
+             256
+             38
+             0.34)
+
+            ;; Compact four-lane highway.  Missed lanes flash red and correct
+            ;; lanes pop bright white.
+            (with-dma-buffer-add-bucket
+             ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+             (dotimes (b 4)
+               (let* ((x (fisher-finalboss-lane-x b))
+                      (left (- x 16))
+                      (hit?
+                       (and
+                        (= b (-> rt guitar-hit-button))
+                        (> (-> rt guitar-hit-flash) 0.0)))
+                      (miss?
+                       (and
+                        (> (-> rt guitar-miss-flash) 0.0)
+                        (nonzero? (logand (-> rt guitar-miss-mask) (ash 1 b)))))
+                      (edge
+                       (cond
+                         (miss?
+                          (new 'static 'rgba :r #xff :g #x18 :b #x18 :a #xff))
+                         (hit?
+                          (new 'static 'rgba :r #xff :g #xff :b #xff :a #xff))
+                         (else
+                          (new 'static 'rgba :r #x92 :g #xa0 :b #xb0 :a #xb8))))
+                      (lane
+                       (new 'static 'rgba :r #x08 :g #x0c :b #x12 :a #x42))
+                      (pop (if (or hit? miss?) 2 0)))
+                 (draw-sprite2d-xy buf (- x 1) 64 2 62 lane)
+                 (draw-sprite2d-xy buf (- left pop) (- 128 pop) (+ 32 (* pop 2)) 2 edge)
+                 (draw-sprite2d-xy buf (- left pop) (+ 150 pop) (+ 32 (* pop 2)) 2 edge)
+                 (draw-sprite2d-xy buf (- left pop) (- 128 pop) 2 (+ 24 (* pop 2)) edge)
+                 (draw-sprite2d-xy buf (+ left 30 pop) (- 128 pop) 2 (+ 24 (* pop 2)) edge))))
+
+            ;; Current note plus previews of the remaining SAME-BUTTON streak.
+            ;; The previews are vertically spaced, never simultaneous inputs.
+            (draw-fisher-large-font-scaled
+             (fisher-button-label (-> rt guitar-button))
+             (fisher-finalboss-lane-x (-> rt guitar-button))
+             (the int (-> rt guitar-y))
+             (+ 0.46 (* 0.0010 (fmin 168.0 (-> rt guitar-y)))))
+            (when (and (> (-> rt guitar-count) 1) (> (- (-> rt guitar-y) 34.0) 2.0))
+              (draw-fisher-large-font-scaled
+               (fisher-button-label (-> rt guitar-button))
+               (fisher-finalboss-lane-x (-> rt guitar-button))
+               (the int (- (-> rt guitar-y) 34.0))
+               0.40))
+            (when (and (> (-> rt guitar-count) 2) (> (- (-> rt guitar-y) 68.0) 2.0))
+              (draw-fisher-large-font-scaled
+               (fisher-button-label (-> rt guitar-button))
+               (fisher-finalboss-lane-x (-> rt guitar-button))
+               (the int (- (-> rt guitar-y) 68.0))
+               0.36))
+            (when (and (> (-> rt guitar-count) 3) (> (- (-> rt guitar-y) 102.0) 2.0))
+              (draw-fisher-large-font-scaled
+               (fisher-button-label (-> rt guitar-button))
+               (fisher-finalboss-lane-x (-> rt guitar-button))
+               (the int (- (-> rt guitar-y) 102.0))
+               0.32))
+
+            (when (> (-> rt guitar-hit-flash) 0.0)
+              (draw-fisher-large-font-scaled
+               (if (> (-> rt guitar-last-hit-count) 1) "STREAK!" "GOOD!")
+               256
+               166
+               0.27))
+            (when (> (-> rt guitar-miss-flash) 0.0)
+              (draw-fisher-large-font-scaled "MISS!" 256 166 0.27)))))
 
         ((= (-> rt state) 'reel)
-          (draw-fisher-large-font-scaled "ROTATE THE RIGHT STICK!" 256 82 0.46))
+         (draw-fisher-large-font-scaled "ROTATE THE RIGHT STICK!" 256 82 0.46))
 
         ((= (-> rt state) 'ticking)
-          (draw-fisher-large-font-scaled "!!! NUCLEAR BOMBFISH ARMED !!!" 256 86 0.46)))))
+         (draw-fisher-large-font-scaled "!!! NUCLEAR BOMBFISH ARMED !!!" 256 86 0.46)))))
   (none))
 
 (defun fisher-finalboss-prime-resume-line! ((self fisher-game))
@@ -8051,7 +8228,10 @@
           center
           (-> self fisher-cam)
           forward
-          (meters 27.0))
+          (if
+            (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+            (meters 25.5)
+            (meters 27.0)))
         (singlefish-vector-add-scaled-safe!
           center
           center

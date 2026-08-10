@@ -36,6 +36,7 @@
 ;; Fishing intermission throw target.  The existing authored `interesting`
 ;; joint is refreshed every boss frame and gives the lob a stable upper-body/head target.
 (define-extern *fisher-finalboss-robot-head-target* vector)
+(define-extern *catch-fisha-sgc* skeleton-group)
 
 
 ;; Custom cutscene scrub override.
@@ -807,7 +808,24 @@
   :enter
     (behavior ()
       (set! *boss-defeated* #f)
-      (set! *boss-ending-custom-audio-started?* #f)
+
+      ;; STRICT DEFEAT AUDIO HANDOFF.
+      ;; 1) kill the armed-fish danger cue and any gameplay music,
+      ;; 2) start the replacement ending WAV at the player's real SFX volume,
+      ;; 3) only THEN mute the normal dialogue/SFX/music mix for the chopped
+      ;;    robot-explosion movie.  This leaves our already-started replacement
+      ;;    WAV as the only authored soundtrack for this section.
+      (stop-main-music)
+      (stop-sound-file "death-is-coming.mp3")
+      (set! *boss-ending-custom-audio-started?* #t)
+      (play-sound-file
+        "end-cutscene-sound.wav"
+        (the int (-> *setting-control* current sfx-volume)))
+      (set-setting! 'dialog-volume 'abs 0.0 0)
+      (set-setting! 'sfx-volume 'abs 0.0 0)
+      (set-setting! 'music-volume 'abs 0.0 0)
+      (apply-settings *setting-control*)
+
       (set-time! (-> self state-time))
       (logior! (-> self draw status) (draw-status hidden))
 
@@ -844,6 +862,13 @@
 
   :exit
     (behavior ()
+      ;; Safety cleanup: if this state is interrupted for any reason, never
+      ;; leave the replacement WAV running or the player's normal mix muted.
+      (stop-sound-file "end-cutscene-sound.wav")
+      (remove-setting! 'dialog-volume)
+      (remove-setting! 'sfx-volume)
+      (remove-setting! 'music-volume)
+      (apply-settings *setting-control*)
       (set! *boss-movie-skip-frame* -1.0)
       (set! *boss-ending-custom-audio-started?* #f)
       (set-blackout-frames 0))
@@ -860,14 +885,20 @@
            (set! *boss-movie-skip-frame* 269.0)
            (set-blackout-frames 0)
 
-           ;; The custom WAV is authored to begin at this exact cutscene beat.
-           ;; Use the user's live SFX-volume setting, just like the fishing mod's
-           ;; other play-sound-file calls.
+           ;; The replacement WAV/mute were already established in :enter so
+           ;; death-is-coming cannot bleed through even during this hidden scrub.
+           ;; Keep this fallback only for an unusual direct state entry.
            (when (not *boss-ending-custom-audio-started?*)
+             (stop-main-music)
+             (stop-sound-file "death-is-coming.mp3")
              (set! *boss-ending-custom-audio-started?* #t)
              (play-sound-file
                "end-cutscene-sound.wav"
-               (the int (-> *setting-control* current sfx-volume)))))
+               (the int (-> *setting-control* current sfx-volume)))
+             (set-setting! 'dialog-volume 'abs 0.0 0)
+             (set-setting! 'sfx-volume 'abs 0.0 0)
+             (set-setting! 'music-volume 'abs 0.0 0)
+             (apply-settings *setting-control*)))
          (when (movie?)
            (+! *boss-movie-skip-frame*
                (* 30.0 (-> *display* seconds-per-frame)))))))
@@ -885,6 +916,17 @@
 
       (while (movie?)
         (suspend))
+
+      ;; The robot-explosion movie is over.  End our replacement sound and
+      ;; restore the player's original dialogue/SFX/music mix BEFORE the next
+      ;; Samos/Keira movie is cued, so that follow-up scene uses normal audio.
+      (stop-sound-file "end-cutscene-sound.wav")
+      (remove-setting! 'dialog-volume)
+      (remove-setting! 'sfx-volume)
+      (remove-setting! 'music-volume)
+      (apply-settings *setting-control*)
+
+      ;; Re-enable normal STR playback for every subsequent movie.
       (set! *boss-movie-skip-frame* -1.0)
       (set-blackout-frames 0)
       (cleanup-for-death self)
@@ -1021,6 +1063,19 @@
 
   :post transform-post)
 
+;; Visual child for the Yellow Eco BFG shot.  Keep the original yellowshot
+;; projectile/particles/collision completely intact; this manipy is only a giant
+;; fisha model that rides dead-center inside the blast.
+(defbehavior robotboss-yellowshot-fisha-trans manipy ()
+  (let ((parent-proc (ppointer->process (-> self parent))))
+    (when (and parent-proc (type-type? (-> parent-proc type) process-drawable))
+      (let ((shot (the-as process-drawable parent-proc)))
+        ;; The yellowshot travels as the real gameplay projectile.  Only copy
+        ;; its center position here; the fish keeps the launch-direction
+        ;; quaternion assigned when it is spawned.
+        (set! (-> self root trans quad) (-> shot root trans quad)))))
+  (none))
+
 ;; After Phase 5 is released, the real gameplay robot rises back to its normal
 ;; airborne height and then remains in the authored no-yellow idle forever.
 ;; Nothing in this state can create light eco or enter the retail white-eco movie.
@@ -1035,7 +1090,44 @@
       (vector-! s5-0 s5-0 gp-0)
       (vector-normalize! s5-0 (the-as float 819200.0))
       (vector+! s5-0 s5-0 gp-0)
-      (process-spawn yellowshot gp-0 s5-0 0.0 750 :to self))
+      (let ((shot (process-spawn yellowshot gp-0 s5-0 0.0 750 :to self)))
+        (when shot
+          (let ((shot-proc (ppointer->process shot)))
+            (when (and shot-proc (type-type? (-> shot-proc type) process-drawable))
+              (let ((fish
+                      (manipy-spawn
+                        gp-0
+                        #f
+                        *catch-fisha-sgc*
+                        #f
+                        :from *default-dead-pool*
+                        :to shot-proc
+                        :name "robotboss-yellowshot-giant-fisha")))
+                (when fish
+                  (let ((fish-proc (the-as manipy (ppointer->process fish))))
+                    (when fish-proc
+                      (send-event fish-proc 'anim-mode 'loop)
+                      (send-event fish-proc 'max-vis-dist (meters 999999.0))
+                      ;; Large enough to read as the core of the BFG blast, but
+                      ;; still leave the authored Yellow Eco shell visible around it.
+                      (set-vector! (-> fish-proc root scale) 3.5 3.5 3.5 1.0)
+
+                      ;; Point the fish lengthwise down the exact Yellow Eco
+                      ;; firing vector.  Do this once; the shot itself is
+                      ;; straight-line, while the trans-hook keeps the fish
+                      ;; centered inside it every frame.
+                      (let ((fish-forward (new 'stack-no-clear 'vector))
+                            (fish-down (new 'stack-no-clear 'vector))
+                            (fish-rot (new 'stack-no-clear 'matrix)))
+                        (vector-! fish-forward s5-0 gp-0)
+                        (set! (-> fish-forward w) 0.0)
+                        (vector-normalize! fish-forward 1.0)
+                        (set-vector! fish-down 0.0 -1.0 0.0 0.0)
+                        (forward-down->inv-matrix fish-rot fish-forward fish-down)
+                        (matrix->quaternion (-> fish-proc root quat) fish-rot))
+
+                      (send-event fish-proc 'trans-hook robotboss-yellowshot-fisha-trans)
+                      (robotboss-yellowshot-fisha-trans fish-proc))))))))))
     (send-event self 'flash 255.0)
     (process-spawn part-tracker
                    :init

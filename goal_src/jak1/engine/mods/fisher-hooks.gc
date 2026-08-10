@@ -706,6 +706,15 @@
 
 (defun fisher-finalboss-begin-throw! ()
   (let ((rt *fisher-finalboss-runtime*))
+    ;; The throw is the hard cutoff for the armed-fish danger cue.  Stop any
+    ;; gameplay music, kill the ticking/death cue immediately, then give the
+    ;; actual throw its own one-shot whoosh at the player's current SFX volume.
+    (stop-main-music)
+    (stop-sound-file "death-is-coming.mp3")
+    (play-sound-file
+      "whoosh.mp3"
+      (the int (-> *setting-control* current sfx-volume)))
+
     (when (and (-> rt carry-fish) (ppointer->process (-> rt carry-fish)))
       (vector-copy!
         (-> rt throw-start)
@@ -739,6 +748,11 @@
           (set! *fisher-finalboss-danger-music-active?* #f))
         (set! (-> rt state) 'done)
         (set! (-> rt progress) 5)
+        ;; Hard audio boundary at the exact robot hit.  Do this again even
+        ;; though begin-throw already requested the stop: the defeat transition
+        ;; must never inherit a still-playing danger cue.
+        (stop-main-music)
+        (stop-sound-file "death-is-coming.mp3")
         (set! *boss-defeated* #t))))
   (none))
 
@@ -839,6 +853,7 @@
                 (when (<= (-> rt bomb-time) 0.0)
                   (set! (-> rt bomb-time) 0.0)
                   (set! (-> rt bomb-fired?) #t)
+                  (set! *boss-activate-blue-eco* #f)
                   (set! *boss-trigger-blue-bomb-explosion* #t)
                   ;; The silence lasts THROUGH the countdown.  The bomb firing
                   ;; is the exact handoff point where normal boss music may return.
@@ -906,6 +921,7 @@
                 (cpad-clear! 0 square)
                 (fisher-finalboss-begin-throw!))
               ((>= (-> rt prompt-time) 5.0)
+                (set! *boss-activate-blue-eco* #f)
                 (set! *boss-trigger-blue-bomb-explosion* #t)
                 (when *fisher-finalboss-hold-music-mute?*
                   (remove-setting! 'music-volume)
