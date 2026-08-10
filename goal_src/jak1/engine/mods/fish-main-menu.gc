@@ -21,8 +21,6 @@
 
   (none))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun turn-to-scene-camera ((tpos vector) (cam-vec vector))
   (process-grab? *target*)
@@ -65,10 +63,6 @@
   (none))
 
 (defun main-menu-clear-fish! ()
-  ;; The agents live in *active-pool*, while their parent fish and rare child
-  ;; manipys live under *default-pool*.  Clear both ownership trees so a menu
-  ;; transition cannot leave a Precursor tower, Oracle statue, or orb child
-  ;; behind after its display fish is gone.
   (kill-by-name "main-menu-precursor-towertop" *default-pool*)
   (kill-by-name "main-menu-oracle-statue" *default-pool*)
   (kill-by-name "main-menu-orb-a" *default-pool*)
@@ -144,7 +138,6 @@
           *main-menu-camera-prepare-time*
           (-> *display* seconds-per-frame))
 
-        ;; Retail reaches this hook sooner than debug. Give the initial
         (when
           (>= *main-menu-camera-prepare-time* 1.0)
 
@@ -425,8 +418,6 @@
   (none))
 
 (defun main-menu-fish-agent-remove! ((self main-menu-fish-agent))
-  ;; Rare display fish own independent attachment manipys.  Remove those
-  ;; children first so nothing remains in the menu after the parent exits.
   (when (-> self attachment-a)
     (let ((proc (ppointer->process (-> self attachment-a))))
       (when proc (deactivate proc)))
@@ -836,7 +827,6 @@
           bubble-pos
           bubble-offset)
 
-        ;; Keep menu bubbles in world space too. Part 3574 uses
         (launch-particles
           :system *sp-particle-system-3d*
           (-> *part-id-table* 3574)
@@ -874,7 +864,6 @@
         (set! *main-menu-progress-was-paused?* #f)
         (set! *main-menu-music-resumed?* #t)
 
-        ;; Progress/title menu was closed. Return to the visible
         (set! *main-menu-start-accepted?* #f)
 
         (cpad-clear! 0 start)

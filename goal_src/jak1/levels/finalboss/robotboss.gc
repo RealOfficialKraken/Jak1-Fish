@@ -809,26 +809,13 @@
   :enter
     (behavior ()
       (set! *boss-defeated* #f)
-
-      ;; STRICT DEFEAT AUDIO HANDOFF.
-      ;; 1) kill the armed-fish danger cue and any gameplay music,
-      ;; 2) start the replacement ending WAV at the player's real SFX volume,
-      ;; 3) only THEN mute the normal dialogue/SFX/music mix for the chopped
-      ;;    robot-explosion movie.  This leaves our already-started replacement
-      ;;    WAV as the only authored soundtrack for this section.
-      ;; Hard reset every currently-playing gameplay/custom sound first.
-      ;; This guarantees death-is-coming.mp3 cannot survive into the movie.
       (stop-main-music)
       (stop-all-sounds)
 
-      ;; Start our replacement BEFORE installing the temporary mute requests.
       (set! *boss-ending-custom-audio-started?* #t)
       (play-sound-file
-        "end-cutscene-sound.wav"
+        "end-cutscene-sound.mp3"
         (the int (-> *setting-control* current sfx-volume)))
-
-      ;; Silence every game/movie mix used by Boss-A.  The custom WAV above was
-      ;; launched with an explicit volume and is the only sound we want here.
       (set-setting! 'dialog-volume 'abs 0.0 0)
       (set-setting! 'sfx-volume 'abs 0.0 0)
       (set-setting! 'music-volume 'abs 0.0 0)
@@ -837,25 +824,11 @@
       (set-setting! 'music-volume-movie 'abs 0.0 0)
       (set-setting! 'ambient-volume-movie 'abs 0.0 0)
       (apply-settings *setting-control*)
-
       (set-time! (-> self state-time))
       (logior! (-> self draw status) (draw-status hidden))
-
-      ;; Pre-position the movie immediately before the explosion.  Holding at
-      ;; 268 for a few frames lets the spooled movie rapidly discard earlier art
-      ;; parts without repeatedly spawning the explosion particle.
       (set! *boss-movie-skip-frame* 268.0)
       (set-blackout-frames (seconds 0.25))
-
-      ;; Retail advances finalboss-movies from `unknown` before playing the actual
-      ;; victory movie.  Without this, sage-finalboss selects
-      ;; green-sagecage-daxter-sacrifice (the WRONG cutscene).  Advancing the
-      ;; task here selects need-introduction -> green-sagecage-outro-beat-boss-a:
-      ;; Jak's light-eco blast, robot explosion, spinning head, and silo close.
       (close-specific-task! (game-task finalboss-movies) (task-status unknown))
-
-      ;; Birth the same sage-finalboss actor retail uses for that victory movie.
-      ;; We still intentionally skip robotboss-white-eco-movie/light-eco pickup.
       (entity-birth-no-kill (-> self alts 5))
       (let ((play-ending (new 'stack-no-clear 'event-message-block)))
         (set! (-> play-ending from) self)
@@ -876,7 +849,7 @@
     (behavior ()
       ;; Safety cleanup: if this state is interrupted for any reason, never
       ;; leave the replacement WAV running or the player's normal mix muted.
-      (stop-sound-file "end-cutscene-sound.wav")
+      (stop-sound-file "end-cutscene-sound.mp3")
       (remove-setting! 'dialog-volume)
       (remove-setting! 'sfx-volume)
       (remove-setting! 'music-volume)
@@ -891,8 +864,6 @@
 
   :trans
     (behavior ()
-      ;; Give the movie a short hidden preload at frame 268, then reveal it at
-      ;; frame 269 and advance the authored timeline at 30 movie frames/sec.
       (cond
         ((not (time-elapsed? (-> self state-time) (seconds 0.20)))
          (set-blackout-frames (seconds 0.05)))
@@ -900,16 +871,12 @@
          (when (< *boss-movie-skip-frame* 269.0)
            (set! *boss-movie-skip-frame* 269.0)
            (set-blackout-frames 0)
-
-           ;; The replacement WAV/mute were already established in :enter so
-           ;; death-is-coming cannot bleed through even during this hidden scrub.
-           ;; Keep this fallback only for an unusual direct state entry.
            (when (not *boss-ending-custom-audio-started?*)
              (stop-main-music)
              (stop-all-sounds)
              (set! *boss-ending-custom-audio-started?* #t)
              (play-sound-file
-               "end-cutscene-sound.wav"
+               "end-cutscene-sound.mp3"
                (the int (-> *setting-control* current sfx-volume)))
              (set-setting! 'dialog-volume 'abs 0.0 0)
              (set-setting! 'sfx-volume 'abs 0.0 0)
@@ -925,22 +892,12 @@
 
   :code
     (behavior ()
-      ;; Wait for the ending movie to take ownership, then let it run from the
-      ;; explosion onward.  Once it ends, clean up the real gameplay robot just
-      ;; like retail does after the white-eco pickup handoff.
       (until (movie?)
         (suspend))
 
-      ;; No vanilla STR exists here: str-play-async suppresses it at spool-part 0.
-      ;; The ONLY ending soundtrack started by this path is the custom WAV.
-
       (while (movie?)
         (suspend))
-
-      ;; The robot-explosion movie is over.  End our replacement sound and
-      ;; restore the player's original dialogue/SFX/music mix BEFORE the next
-      ;; Samos/Keira movie is cued, so that follow-up scene uses normal audio.
-      (stop-sound-file "end-cutscene-sound.wav")
+      (stop-sound-file "end-cutscene-sound.mp3")
       (remove-setting! 'dialog-volume)
       (remove-setting! 'sfx-volume)
       (remove-setting! 'music-volume)
@@ -949,8 +906,6 @@
       (remove-setting! 'music-volume-movie)
       (remove-setting! 'ambient-volume-movie)
       (apply-settings *setting-control*)
-
-      ;; Re-enable normal STR playback for every subsequent movie.
       (set! *boss-movie-skip-frame* -1.0)
       (set-blackout-frames 0)
       (cleanup-for-death self)
@@ -985,8 +940,6 @@
 
   :code
     (behavior ()
-      ;; Continue only the UPWARD remainder of the no-yellow reveal that was
-      ;; frozen at 25 percent, while the root moves back to the aerial position.
       (ja-no-eval :num! (seek!))
       (while (not (ja-done? 0))
         (suspend)
@@ -1003,14 +956,6 @@
           (ja :num! (seek!)))))
 
   :post transform-post)
-
-;; Custom defeat handoff.  The retail light-eco acquisition sequence is bypassed.
-;; *boss-movie-skip-frame* is a mod-local movie scrub value consumed by the
-;; current-str-pos hook above; driving it forward makes the existing ending animation begin
-;; at the authored robot-explosion beat instead of showing frames 0..268.
-;;
-;; The attached ending cutscene's command list activates group-robotboss-explode
-;; at authored frame 269, so that is the exact starting point used here.
 
 (defstate robotboss-yellow-dark-bomb (robotboss)
   :enter

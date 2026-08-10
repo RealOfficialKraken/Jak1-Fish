@@ -36,8 +36,6 @@
 (define *fisher-xp-bar-flash-time* 0.0)
 (define *fisher-xp-level-bounce-time* 0.0)
 
-;; Slides the persistent level/XP meter down while a foreground window needs
-;; the same screen space.  It returns automatically when the window closes.
 (define *fisher-xp-meter-drop-offset* 0.0)
 
 (define *fisher-level-up-window-pending?* #f)
@@ -173,8 +171,6 @@
   ((suffix int))
 
   (cond
-    ;; The four named legendary fish ignore the normal XP cap and receive a
-    ;; flat 50% legendary bonus.
     ((fisher-rare-fish? suffix) 1.50)
     ((= suffix 5) 2.0)
     ((= suffix 6) 4.0)
@@ -363,7 +359,6 @@
             (-> screen-points vector 0)
             world-pos)
 
-          ;; centered around 32768. Convert them into the 512x448 UI space.
           (set!
             *fisher-xp-fly-start-x*
             (+
@@ -616,8 +611,6 @@
       (when (< *fisher-xp-level-bounce-time* 0.0)
         (set! *fisher-xp-level-bounce-time* 0.0)))
 
-    ;; Do not start moving XP until the persistent level bar has completed
-    ;; its return transition after the loot/lore card closes.
     (when
       (and
         *fisher-xp-fly-active?*

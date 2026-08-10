@@ -5,14 +5,11 @@
 
 ;name: fisher-game-h.gc
 
-;; Runtime Snow water patch.  The concrete type is defined in fisher-hooks.gc.
 (declare-type fisher-snow-water water-anim)
 (define-extern *fisher-snow-water* (pointer fisher-snow-water))
 
 
-;;this file is used for everything pertaining to defining everything externally
 
-;;self-explanatory (kinda)
 (define *fisher-level-cap* 20)
 (define *fisher-stop-lure-unlock-level* 2)
 (define *fisher-stop-lure-active-seconds* 3.0)
@@ -61,8 +58,6 @@
 (define *fisher-line-hp* 100.0)
 (define *fisher-line-broken?* #f)
 
-;; Persistent lure inventory for the current life.  A blackout/death or the
-;; fisherman shop refills this to the capacity unlocked by fishing level.
 (define *fisher-lure-count* 5)
 (define *fisher-lure-base-capacity* 5)
 (define *fisher-lure-level-12-capacity* 10)
@@ -75,7 +70,6 @@
 (define *fisher-spawn-player-pos* (new 'global 'vector))
 (define *singlefish-dead-pool* (new 'global 'dead-pool 30 (* 128 1024) '*singlefish-dead-pool*))
 
-;;main menu hacks
 (define in-main-menu? #f)
 
 (define *main-menu-extra-blackout-set?* #f)
@@ -138,7 +132,6 @@
 
 (define *main-menu-saved-music-volume* 0.0)
 
-;;pontoon spawnings for areas that need them
 (define *training-pontoon-spawned?* #f)
 (define *sentinel-pontoon-spawned?* #f)
 (define *misty-pontoon-spawned?* #f)
@@ -188,7 +181,6 @@
 (define *main-menu-warp-in-end*
   (new 'global 'vector))
 
-;;main menu fishing area type
 (deftype main-menu-fish-agent (process)
   ((visual       (pointer manipy))
     (attachment-a (pointer manipy))
@@ -207,7 +199,6 @@
   )
 )
 
-;;fisher man skeleton and custom taskable
 (defskelgroup *fisher-sgc*
   fisher
   fisher-lod0-jg
@@ -383,36 +374,18 @@
   )
 )
 
-;; My first Boxed external storage. Surprising I made 3 mode before doing stuff this way.
 (deftype fisher-fish-runtime (basic)
-  ((slot fisher-fish-slot 30 :inline) ;; Hub 3 lava pools can reach 27 residents
+  ((slot fisher-fish-slot 30 :inline)
   )
 )
 
 (define *fisher-fish-runtime* (new 'global 'fisher-fish-runtime))
 
 
-;; --------------------------------------------------------------------------
-;; Final Boss Nuclear Bombfish intermission runtime.
-;; This is deliberately global instead of growing fisher-game again.  Only the
-;; finalboss-nuclear zone reads it, so ordinary fishing areas never inherit its
-;; phase/minigame state.
-;;
-;; progress:
-;;   0 = first bottom -> midpoint fishing intermission
-;;   1 = waiting for the second fishing intermission
-;;   2 = waiting for the automatic fourth boss phase
-;;   3 = final topwater -> catch intermission
-;;   4 = carrying/throwing the caught Nuclear Bombfish
-;;   5 = complete
-;; --------------------------------------------------------------------------
 (define *fisher-finalboss-water-depth* (meters 87.5508))
 (define *fisher-finalboss-bottom-depth* (meters 87.5508))
 (define *fisher-finalboss-middle-depth* (meters 43.7754))
 (define *fisher-finalboss-topwater-depth* (meters 21.8877))
-;; Authored horizontal hook/lure anchor for the narrow Final Boss shaft.
-;; Slightly beyond the geometric midpoint keeps the hook visually centered
-;; in the usable pool while giving the cast a little more reach from Jak.
 (define *fisher-finalboss-lure-distance* (meters 15.0))
 
 (deftype fisher-finalboss-runtime (basic)
@@ -468,16 +441,8 @@
 (define *fisher-finalboss-robot-head-target* (new 'global 'vector))
 (define *fisher-finalboss-runtime-level-active?* #f)
 (define *fisher-finalboss-danger-music-active?* #f)
-;; While a Nuclear Bombfish is armed, keep the ordinary boss score muted even
-;; after the fishing process exits.  The mute is released only when the bomb
-;; actually fires (or the encounter is aborted/cleaned up).
 (define *fisher-finalboss-hold-music-mute?* #f)
 
-;; Shared Final Boss/fishing bridge flags.
-;; These MUST live in the always-loaded mod layer: fisher-hooks.gc runs every
-;; frame even when the finalboss level object is not loaded.  Keeping these as
-;; define-externs would leave startup depending on level-local symbols that do
-;; not exist yet.  robotboss.gc may define/reset the same symbols when FIN loads.
 (define *boss-enter-2nd-phase* #f)
 (define *boss-waiting-for-2nd-phase* #f)
 (define *boss-enter-3rd-phase* #f)
@@ -537,7 +502,6 @@
 (define *fisher-yellow-runtime*
   (new 'global 'fisher-yellow-runtime))
 
-;;the master type for the minigame
 
 (deftype fisher-game (process)
   ((location-id                   int)
@@ -674,7 +638,6 @@
   (:state-methods idle fishing exit dead)
 )
 
-;; This type is in charge of labeling the fish with stats and mechanics for all species
 (deftype singlefish-base (process-drawable)
   ((owner                       (pointer fisher-game))
     (species-name                string)
@@ -747,10 +710,7 @@
 
 (define log-sec 0)
 
-;; These are external definitions for literally every function in case I move stuff around
-;; and plus compiler errors suck ofc and I don't want to deal with those.
 
-;; Cross-file fishing state.
 (define-extern *fisher-background-cloud-session-active?* symbol)
 (define-extern *fisher-power-cell-reward-active?* symbol)
 (define-extern *fisher-power-cell-camera-active?* symbol)
@@ -796,7 +756,6 @@
 
 
 
-;; Vanilla fuel-cell clone behavior used by the fishing reward presentation.
 (define-extern fuel-cell type)
 
 (define-extern fuel-cell-init-as-clone

@@ -2,13 +2,6 @@
 (in-package goal)
 (bundles "JUN.DGO" "GAME.CGO")
 
-;; Main Cave adds custom particle launchers 3584/3585.  Jak 1's existing
-;; launcher table ends immediately before those IDs, so writing them into the
-;; stock table corrupts the adjacent particle-group table and later crashes
-;; level unload in unlink-part-group-by-heap.
-;;
-;; Grow the launcher table once, preserve every existing launcher pointer,
-;; then let the custom defpart forms below register normally.
 (when (< (-> *part-id-table* length) 4096)
   (let ((old-part-id-table *part-id-table*)
       (old-part-count (-> *part-id-table* length))
@@ -25,15 +18,6 @@
 ;; name: fisher-assets.gc
 
 
-;; --------------------------------------------------------------------------
-;; Hub 3 / Village3 lava-pool billboard effect.
-;;
-;; Keep the entire lifetime on this launcher.  Chaining this particle through
-;; native launcher 1813 reset the 3D quaternion during relaunch, which made a
-;; camera-facing puff abruptly become a world-up sheet while it was rising.
-;; Village3 code recolors, resizes, and chooses the fade/lifetime before each
-;; direct launch.
-;; --------------------------------------------------------------------------
 (defpart 3573
   :init-specs
   ((:texture (bigpuff effects))
@@ -131,9 +115,6 @@
 
 
 
-;; Soft underwater light shafts.  These are deliberately true 3D sprites so
-;; they depth-test in front of the fishing curtain instead of disappearing
-;; behind the custom underwater background.
 (defpart 3580
   :init-specs
   ((:texture (bigpuff-half effects))
@@ -157,8 +138,6 @@
     (:scalevel-x 0.0)
     (:scalevel-y 0.0)
 
-    ;; Re-submit once per frame.  This makes the rays disappear immediately
-    ;; when the camera leaves the water and prevents stale sheets lingering.
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
 
@@ -227,9 +206,6 @@
     (:timer (seconds 0.02))
     (:flags (bit2 bit3))))
 
-;; Camera-facing clone of Village3's small yellow lava mote (native part 1852).
-;; This replaces the white underwater steam in the custom lava fishing view.
-;; The separate 3568 hotdot launch supplies the short glowing trail.
 (defpart 3578
   :init-specs
   ((:texture (middot effects))
@@ -300,10 +276,6 @@
     (:flags (bit2 bit3))))
 
 
-;; Camera-facing blue eco used by the Village2 electric-fish mechanic.  These
-;; copy the original blue-eco glow/lightning palette, but remain compact and
-;; billboard toward the active camera instead of using the stretched vent
-;; particle orientation.
 (defpart 3581
   :init-specs
   ((:texture (middot effects))
@@ -358,9 +330,6 @@
     (:timer (seconds 0.075))
     (:flags (bit2 bit3 bit14))))
 
-;; Camera-facing yellow eco used by the Boggy Swamp sludge pool.  The compact
-;; glow/flash/arc trio mirrors the blue-eco projectile without introducing a
-;; world-oriented vent sheet.
 (defpart 3564
   :init-specs
   ((:texture (flare effects))
@@ -402,8 +371,6 @@
     (:timer (seconds 0.24))
     (:flags (bit2 bit3 bit14))))
 
-;; Native yellow-eco collect clone.  This is based on the flare burst used by
-;; group-yellow-collect, adapted for direct world-space launches on a fish.
 (defpart 3566
   :init-specs
   ((:texture (flare effects))
@@ -425,7 +392,6 @@
     (:timer (seconds 0.36))
     (:flags (bit2 bit3 bit14))))
 
-;; Native eco-yellow body clone, based on parts 192/193 from group-eco-yellow.
 (defpart 3567
   :init-specs
   ((:texture (bigpuff effects))
@@ -446,7 +412,6 @@
     (:timer (seconds 0.28))
     (:flags (bit2 bit3 bit14))))
 
-;; Native eco-yellow streak clone, based on parts 194/195.
 (defpart 3568
   :init-specs
   ((:texture (hotdot effects))
@@ -470,9 +435,6 @@
     (:flags (bit2 bit3 bit14))))
 
 
-;; Platformius uses its own compact hover sparks rather than borrowing the
-;; world platform launch group.  Each decorative halo platform launches this
-;; particle from its current animated position.
 (defpart 3569
   :init-specs
   ((:texture (hotdot effects))
@@ -500,8 +462,6 @@
   ((sharkey-lod0-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 99))
 
-;; Snow fishing ice shell.  This is the Main Cave cavecrystal art cloned as a
-;; manipy-friendly SGC so it can be parented directly to resident/catch fish.
 (defskelgroup *fisher-ice-crystal-sgc*
   cavecrystal
   cavecrystal-lod0-jg
@@ -511,9 +471,6 @@
   :bounds (static-spherem 0 4.7 0 99))
 
 
-;; Snow fishing obstacle.  Clone the native Snow Mountain snowball art into
-;; the fishing asset bundle so the runtime obstacle can use it without the
-;; stock path-following snow-ball process.
 (defskelgroup *fisher-snow-ball-sgc*
   snow-ball
   snow-ball-lod0-jg
@@ -587,9 +544,6 @@
   :texture-level 2)
 
 
-;; Decorative, non-colliding platform used by the Platformius rare fish.
-;; This is a manipy visual only; the normal platform process and rider logic
-;; are intentionally not created.
 (defskelgroup *fisher-platformius-plat-sgc*
   plat
   plat-lod0-jg
@@ -702,8 +656,6 @@
     ((buf (-> (current-frame) global-buf))
       (bucket-id subtitle))
 
-    ;; Use the normal Latin glyph page.  The `large` flag selects a different
-    ;; atlas and produces Japanese glyphs when scaled down for lore text.
     (draw-string-xy-scaled
       *pc-encoded-matt-str*
       buf
@@ -797,19 +749,6 @@
   dst)
 
 
-;; --------------------------------------------------------------------------
-;; Main Cave dark-eco background wall.
-;;
-;; Reproduce the VISUAL layers from Jak 1's intro-start sequence:
-;;   2856 - moving hotdot body
-;;   2857 - trailing hotdot, retaining native next-launcher 198
-;;   2859 - the large bigpuff layer that fills the screen
-;;
-;; The stock sequence is screen-space.  These are world-space clones for the
-;; fishing curtain.  Color/motion/fade behavior is preserved; only world-space
-;; size is adapted.  Rotation is locked so birth-func-camera-orient alone owns
-;; billboard orientation and the particles never spin away from the camera.
-;; --------------------------------------------------------------------------
 (defpart 3584
   :init-specs
   ((:texture (hotdot effects))
@@ -879,13 +818,6 @@
     (:next-launcher 3588)))
 
 
-;; Self-contained continuation for the cloned intro hotdot trail.
-;; Do not reference launcher 198 from VI1.DGO: that launcher is not guaranteed
-;; to be resident while fishing in Main Cave.
-;;
-;; IMPORTANT: make the continuation EXPLICITLY camera-facing too.  The earlier
-;; minimal fade-only continuation could fall back to the default upward-facing
-;; sprite orientation on relaunch.
 (defpart 3587
   :init-specs
   ((:birth-func 'birth-func-camera-orient)
@@ -896,12 +828,6 @@
     (:fade-a -0.20)
     (:flags (bit2 bit3))))
 
-;; Self-contained clone of intro launcher 2861/2862 for the bigpuff fade cycle.
-;; Keeping the entire continuation chain here prevents relaunch from jumping
-;; into an unloaded VI1.DGO launcher table entry.
-;;
-;; IMPORTANT: both continuation launchers are explicitly camera-facing so every
-;; stage of the bigpuff curtain remains billboarded to the camera.
 (defpart 3588
   :init-specs
   ((:birth-func 'birth-func-camera-orient)
