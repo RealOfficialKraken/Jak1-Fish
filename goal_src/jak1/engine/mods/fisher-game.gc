@@ -6373,7 +6373,7 @@
          (draw-fisher-large-font-scaled "ROTATE THE RIGHT STICK!" 256 82 0.46))
 
         ((= (-> rt state) 'ticking)
-         (draw-fisher-large-font-scaled "!!! NUCLEAR BOMBFISH ARMED !!!" 256 86 0.46)))))
+         (draw-fisher-large-font-scaled "!!!" 256 86 0.46)))))
   (none))
 
 (defun fisher-finalboss-prime-resume-line! ((self fisher-game))
