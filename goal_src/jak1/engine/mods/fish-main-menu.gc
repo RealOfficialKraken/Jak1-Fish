@@ -64,7 +64,6 @@
 
 (defun main-menu-clear-fish! ()
   (kill-by-name "main-menu-precursor-towertop" *default-pool*)
-  (kill-by-name "main-menu-oracle-statue" *default-pool*)
   (kill-by-name "main-menu-orb-a" *default-pool*)
   (kill-by-name "main-menu-orb-b" *default-pool*)
   (kill-by-name "main-menu-orb-c" *default-pool*)
@@ -235,7 +234,7 @@
   (cond
     ((< index *fisher-species-count*) index)
     ((= index 7) (the-as int (fisher-species largemouth-ecofish)))
-    ((= index 8) (the-as int (fisher-species poisonous-eelfish)))
+    ((= index 8) (the-as int (fisher-species eco-drum)))
     (else (the-as int (fisher-species eco-drum)))))
 
 (defun main-menu-fish-suffix ((index int))
@@ -249,7 +248,7 @@
 (defun main-menu-fish-skelgroup ((index int))
   (cond
     ((= index 7) *catch-fishb-sgc*)
-    ((= index 8) *catch-fishc-sgc*)
+    ((= index 8) *catch-fisha-sgc*)
     ((or (= index 9) (= index 10)) *catch-fisha-sgc*)
     (else
       (the-as skeleton-group
@@ -290,9 +289,9 @@
 
       ((= suffix 8)
         (set! base-scale 0.42)
-        (set! r 1.00)
-        (set! g 0.56)
-        (set! b 0.06))
+        (set! r 0.56)
+        (set! g 0.18)
+        (set! b 0.88))
 
       ((= suffix 9)
         (set! base-scale 0.46)
@@ -339,15 +338,6 @@
             *fisher-precursor-attachment-offset-game*
             0.020
             "main-menu-precursor-towertop")))
-
-      ((= suffix 8)
-        (set! (-> self attachment-a)
-          (fisher-spawn-rare-attachment!
-            fish-proc
-            *oracle-sgc*
-            *fisher-oracle-attachment-offset-game*
-            0.13
-            "main-menu-oracle-statue")))
 
       ((= suffix 10)
         (set! (-> self attachment-a)
@@ -697,6 +687,18 @@
 
             (main-menu-fish-agent-remove! self)
             (process-deactivate))))
+
+      (when
+        (and
+          (= (main-menu-fish-suffix (-> self fish-index)) 8)
+          (-> self visual)
+          (zero? (mod (current-time) 6)))
+        (let ((fish-proc (-> (-> self visual) 0 self)))
+          (when fish-proc
+            (launch-particles
+              :system *sp-particle-system-3d*
+              (-> *part-id-table* 3569)
+              (-> (the-as manipy fish-proc) root trans)))))
 
       (suspend))))
 

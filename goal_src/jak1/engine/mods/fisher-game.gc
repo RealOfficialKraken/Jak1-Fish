@@ -646,6 +646,38 @@
             (+ 181 menu-offset)
             0.36))
 
+        ((= skill-mask 64)
+          (fisher-draw-level-up-title!
+            "UPGRADE UNLOCKED: REINFORCED LINE"
+            256
+            (+ 140 menu-offset)
+            0.42)
+
+          (draw-fisher-large-font-scaled
+            "MAXIMUM LINE HP IS NOW 250."
+            256
+            (+ 163 menu-offset)
+            0.36)
+
+          (draw-fisher-large-font-scaled
+            "CAST DISTANCE IS UNCHANGED."
+            256
+            (+ 181 menu-offset)
+            0.34))
+
+        ((= skill-mask 128)
+          (fisher-draw-level-up-title!
+            "FISHING MASTERED"
+            256
+            (+ 140 menu-offset)
+            0.46)
+
+          (draw-fisher-large-font-scaled
+            "RARE FISH ARE NOW SLIGHTLY EASIER TO FIND."
+            256
+            (+ 166 menu-offset)
+            0.31))
+
         ((> skill-mask 0)
           (fisher-draw-level-up-title!
             "SKILLS UNLOCKED"
@@ -1617,13 +1649,13 @@
       (or *fisher-in-debug?* (>= (fisher-current-level) *fisher-stop-lure-unlock-level*))
 
       (fisher-draw-reel-hint-text
-        "<PAD_SQUARE> TO STOP LURE"
+        "<PAD_SQUARE> STOP LURE"
         10
         174
         0.55))
 
     (fisher-draw-reel-hint-text
-      "<PAD_X> TO REEL"
+      "<PAD_X> REEL"
       10
       186
       0.55)
@@ -3761,6 +3793,7 @@
 
     (set! (-> owner caught-fish-species) 0)
     (set! (-> owner caught-fish-suffix) suffix)
+    (fisher-catalog-register-catch! 0 suffix)
     (set! (-> owner caught-fish-level) (-> self level))
     (set! (-> owner caught-weight-tenths) (-> self weight-tenths))
     (set!
@@ -4244,9 +4277,9 @@
                   (= (-> self caught-fish-suffix) 15)
                   (= (-> self caught-fish-suffix) 16))
                 *catch-fishb-sgc*)
-              ((or
-                  (= (-> self caught-fish-suffix) 8)
-                  (= (-> self caught-fish-suffix) 12))
+              ((= (-> self caught-fish-suffix) 8)
+                *catch-fisha-sgc*)
+              ((= (-> self caught-fish-suffix) 12)
                 *catch-fishc-sgc*)
               ((or
                   (= (-> self caught-fish-suffix) 9)
@@ -4655,11 +4688,33 @@
 
   (none))
 
+(defun fisher-submit-forgotten-catch-particles! ((self fisher-game))
+  (when
+    (and
+      (= (-> self caught-fish-suffix) 8)
+      (or
+        (= (-> self fish-state) 'catch-enter)
+        (= (-> self fish-state) 'catch-display)
+        (= (-> self fish-state) 'catch-exit))
+      (zero? (mod (current-time) 6))
+      (>= (-> self hooked-fish-slot) 0))
+    (let ((fish (fisher-fish-pointer self (-> self hooked-fish-slot))))
+      (when fish
+        (let ((fish-proc (-> fish 0 self)))
+          (when fish-proc
+            (launch-particles
+              :system *sp-particle-system-3d*
+              (-> *part-id-table* 3569)
+              (-> (the-as manipy fish-proc) root trans)))))))
+  (none))
+
 (defun fisher-update-catch-menu-animation! ((self fisher-game))
   (let ((dt
         (-> *display* seconds-per-frame)))
 
     (+! (-> self catch-transition-time) dt)
+
+    (fisher-submit-forgotten-catch-particles! self)
 
     (cond
       ((or
@@ -4701,13 +4756,15 @@
           (when (>= progress 1.0)
             (cond
               ((and
-                  (= (-> self fish-state) 'catch-exit)
+                  (= (-> self fish-state) 'rare-exit)
                   (= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish))))
                 (fisher-finalboss-finish-catch-card! self))
 
               ((and
                   (= (-> self fish-state) 'catch-exit)
-                  (fisher-rare-fish? (-> self caught-fish-suffix)))
+                  (or
+                    (= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish)))
+                    (fisher-rare-fish? (-> self caught-fish-suffix))))
 
                 (set! (-> self fish-state) 'rare-enter)
                 (set! (-> self catch-transition-time) 0.0)
@@ -7599,10 +7656,12 @@
 
 (defun fisher-start-cast! ((self fisher-game))
   (set! *fisher-line-hp-max*
-    (if
-      (fisher-finalboss-zone? self)
-      100.0
-      (+ 15.0 (* 85.0 (-> self cast-charge)))))
+    (cond
+      ((fisher-finalboss-zone? self) 100.0)
+      ((>= (fisher-current-level) *fisher-line-hp-upgrade-level*)
+        *fisher-line-hp-upgrade-max*)
+      (else
+        (+ 15.0 (* 85.0 (-> self cast-charge))))))
 
   (fisher-reset-line-hp!)
   (set! (-> self electric-slot) -1)
@@ -9008,7 +9067,7 @@
       (format *fish-ui-str* "PRECURSOR FISH"))
 
     ((= (-> self caught-fish-suffix) 8)
-      (format *fish-ui-str* "ORACLE'S GOLDFISH"))
+      (format *fish-ui-str* "FORGOTTEN FISH"))
 
     ((= (-> self caught-fish-suffix) 9)
       (format *fish-ui-str* "FRICKED UP FISH"))
@@ -9094,20 +9153,11 @@
           (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
         (draw-sprite2d-xy buf 58 (+ 58 menu-offset) 396 166
           (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
-      (draw-fisher-large-font-scaled "NUCLEAR BOMBFISH" 256 (+ 72 menu-offset) 0.58)
-      (draw-fisher-large-font-scaled "9000.0 LBS" 256 (+ 100 menu-offset) 0.50)
-      (draw-fisher-large-font-scaled
-        "THIS HERE FISH IS ONE OF A KIND!"
-        256 (+ 128 menu-offset) 0.34)
-      (draw-fisher-large-font-scaled
-        "BE CAREFUL THOUGH, IT CAN START TICKING"
-        256 (+ 146 menu-offset) 0.34)
-      (draw-fisher-large-font-scaled
-        "AT ANY MOMENT!"
-        256 (+ 164 menu-offset) 0.34)
+      (draw-fisher-large-font-scaled "NUCLEAR BOMBFISH" 256 (+ 78 menu-offset) 0.58)
+      (draw-fisher-large-font-scaled "9000.0 LBS" 256 (+ 112 menu-offset) 0.50)
       (draw-fisher-large-font-scaled
         "PRESS <PAD_X> TO CONTINUE"
-        256 (+ 198 menu-offset) 0.46)))
+        256 (+ 190 menu-offset) 0.46)))
   (none))
 
 (defun fisher-draw-catch-ui! ((self fisher-game))
@@ -9263,6 +9313,20 @@
         0.52)
 
       (cond
+        ((= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish)))
+          (draw-fisher-large-font-scaled
+            "THIS HERE FISH IS ONE OF A KIND!"
+            256 (+ 108 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "BE CAREFUL THOUGH, IT CAN START TICKING"
+            256 (+ 128 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "AT ANY MOMENT!"
+            256 (+ 148 menu-offset)
+            0.34))
+
         ((= suffix 7)
           (draw-fisher-large-font-scaled
             "THIS BAD BOY CAN MAKE A GROWN FISHERMAN CRY."
@@ -9291,12 +9355,16 @@
 
         ((= suffix 8)
           (draw-fisher-large-font-scaled
-            "AVAST! IT'S ALREADY ASKIN' ME FOR A HUNDRED"
-            256 (+ 116 menu-offset)
+            "THIS FISH LIVES IN THE CRYSTAL CAVES FOUND BY"
+            256 (+ 108 menu-offset)
             0.34)
           (draw-fisher-large-font-scaled
-            "AND TWENTY ORBS."
-            256 (+ 134 menu-offset)
+            "KUITAR FROM THE FORGOTTEN LANDS."
+            256 (+ 126 menu-offset)
+            0.34)
+          (draw-fisher-large-font-scaled
+            "HOW DID IT SWIM ALL THE WAY OVER HERE?"
+            256 (+ 144 menu-offset)
             0.34))
 
         ((= suffix 9)

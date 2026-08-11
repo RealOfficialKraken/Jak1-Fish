@@ -30,6 +30,8 @@
 (define *fisher-heal-line-cooldown-seconds* 26.0)
 (define *fisher-cooldown-skill-count* 5)
 (define *fisher-line-hp-max* 100.0)
+(define *fisher-line-hp-upgrade-level* 16)
+(define *fisher-line-hp-upgrade-max* 250.0)
 (define *fisher-power-cell-fish-chance* 0.10)
 (define *fisher-poison-eelfish-dps* 2.0)
 (define *fisher-electric-cycle-min-seconds* 7.0)
@@ -227,6 +229,27 @@
 )
 
 (define *fisher-man* (the (pointer fisher-man) #f))
+
+(deftype fisher-geologist (process-taskable)
+  ((level-name          symbol)
+    (dialogue-page       int)
+    (dialogue-char-count int)
+    (dialogue-char-timer float)
+    (dialogue-grabbed?   symbol)
+    (catalog-index       int)
+    (catalog-model       (pointer manipy))
+    (catalog-model-row   int)
+    (catalog-yaw         float)
+    (catalog-pitch       float)
+    (catalog-saved-camera-read-analog symbol))
+  (:states
+    fisher-geologist-idle
+    fisher-geologist-dialogue
+    fisher-geologist-catalog))
+
+(define *fisher-geologist* (the (pointer fisher-geologist) #f))
+(define *fisher-catalog-row-count* 34)
+(define-extern *geologist-sgc* skeleton-group)
 
 (deftype swimmer-pontoon (process-drawable)
   ((pontoon-type int)
@@ -987,6 +1010,75 @@
 (defun-extern singlefish-vector-reset-safe! vector vector)
 (defun-extern singlefish-vector-scale-safe! vector vector float vector)
 (defun-extern singlefish-vector-sub-safe! vector vector vector vector)
+;; Fish catalogue / geologist shared declarations.  These are implemented in
+;; fish-spawnings.gc, but several are referenced earlier in that file and/or
+;; from other mod files, so keep the header authoritative for forward refs.
+(define-extern *fisher-catalog-world-preview-active?* symbol)
+(define *fisher-geologist-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+    "YOU TWO ARE HELPING OUT MY FRIEND"
+    "WITH FISHING ARE YOU?"
+    ""
+    ""
+    "WELL, WHILE I AM AGAINST THE NATURE"
+    "OF FISHING FOR COMMODITY, I THINK IT'S"
+    "NOBLE OF YOU GUYS TO HELP HIM FISH"
+    "BACK POWER CELLS"
+    "...MAYBE YOU TWO COULD HELP ME OUT"
+    "AS WELL?"
+    "I'VE GOT A RESEARCH PROJECT GOING."
+    ""
+    "I AM CATALOGING ALL FISH IN EVERY AREA."
+    "IT'S A DIFFICULT TASK TO DO ALONE, BUT IF"
+    "YOU TWO COULD BRING BACK THE FISH"
+    "YOU FIND, IT WOULD MEAN THE WORLD TO ME."))
+(define-extern *fisher-geologist-bg-color* rgba)
+(define-extern *fisher-geologist-dialogue-buffer-0* string)
+(define-extern *fisher-geologist-dialogue-buffer-1* string)
+(define-extern *fisher-geologist-dialogue-buffer-2* string)
+(define-extern *fisher-geologist-dialogue-buffer-3* string)
+
+(defun-extern fisher-geologist-dialogue-line fisher-geologist int string)
+(defun-extern fisher-geologist-dialogue-total-length fisher-geologist int)
+(defun-extern fisher-geologist-visible-dialogue-line! fisher-geologist int string string)
+
+(defun-extern fisher-catalog-task-for-row int game-task)
+(defun-extern fisher-catalog-status-for-prefix int task-status)
+(defun-extern fisher-catalog-base-unique? int symbol)
+(defun-extern fisher-catalog-row-unique? int symbol)
+(defun-extern fisher-catalog-register-catch! int int none)
+(defun-extern fisher-catalog-prefix-caught? int int symbol)
+(defun-extern fisher-catalog-row-discovered? int symbol)
+(defun-extern fisher-catalog-prefix-count int int)
+(defun-extern fisher-catalog-discovered-count int)
+(defun-extern fisher-catalog-row-name int string)
+(defun-extern fisher-catalog-row-location int string)
+(defun-extern fisher-catalog-row-suffix int int)
+(defun-extern fisher-catalog-row-species int int)
+(defun-extern fisher-catalog-row-skeleton int skeleton-group)
+(defun-extern fisher-catalog-background-color! int rgba rgba)
+(defun-extern fisher-catalog-lore-line int int string)
+
+(defun-extern fisher-geologist-draw-text string int int float symbol symbol none)
+(defun-extern fisher-geologist-draw-catalog-text string int int float symbol symbol none)
+(defun-extern fisher-geologist-draw-catalog-text-right string int int float symbol none)
+(defun-extern fisher-geologist-draw-star! int int symbol none)
+(defun-extern fisher-geologist-draw-dialogue! fisher-geologist none)
+(defun-extern fisher-geologist-style-model! int manipy none)
+(defun-extern fisher-geologist-remove-model! fisher-geologist none)
+(defun-extern fisher-geologist-update-model-rotation! fisher-geologist none)
+(defun-extern fisher-geologist-position-model! fisher-geologist none)
+(defun-extern fisher-geologist-refresh-model! fisher-geologist none)
+(defun-extern fisher-geologist-draw-rare-effects! fisher-geologist none)
+(defun-extern fisher-geologist-draw-catalog! fisher-geologist none)
+(defun-extern fisher-geologist-near-jak? fisher-geologist basic)
+(defun-extern fisher-geologist-release-jak! fisher-geologist none)
+(defun-extern fisher-geologist-initialize-collision! fisher-geologist none)
+(defun-extern fisher-geologist-initialize-taskable! fisher-geologist none)
+(defun-extern kill-fisher-geologist none)
+(defun-extern spawn-fisher-geologist vector symbol none)
 (defun-extern spawn-fisher-man vector int symbol none)
 (defun-extern spawn-fisher-game int vector vector vector float float float none)
 (defun-extern spawn-pontoon-swimmer vector int float none)

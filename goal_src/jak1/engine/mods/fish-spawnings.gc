@@ -1206,17 +1206,40 @@
           ((< roll 99990) 5)
           (else 6))))))
 
-(defun fisher-roll-fish-suffix ()
+(defun fisher-rare-suffix-for-location ((self fisher-game))
   (cond
-    (*fisher-in-debug?*
-      (+ 7 (rand-vu-int-range 0 9)))
+    ((= (-> self location-id) (the-as int (fisher-zone sandover-dock))) 7)
+    ((= (-> self location-id) (the-as int (fisher-zone jungle-pillar))) 8)
+    ((= (-> self location-id) (the-as int (fisher-zone sentinel-pontoon))) 9)
+    ((= (-> self location-id) (the-as int (fisher-zone misty-island))) 10)
+    ((= (-> self location-id) (the-as int (fisher-zone village2-electric))) 11)
+    ((= (-> self location-id) (the-as int (fisher-zone sunken-voltage))) 12)
+    ((= (-> self location-id) (the-as int (fisher-zone swamp-sludge))) 13)
+    ((= (-> self location-id) (the-as int (fisher-zone village3-lava))) 14)
+    ((= (-> self location-id) (the-as int (fisher-zone snow-ice))) 15)
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))) 16)
+    (else -1)))
 
-    (else
-      (let ((rare-roll (rand-vu-int-range 0 99999))
-          (rare-threshold (if (fisher-golden-hour?) 667 250)))
-        (if (< rare-roll rare-threshold)
-          (+ 7 (rand-vu-int-range 0 9))
-          (fisher-roll-standard-fish-suffix))))))
+(defun fisher-roll-fish-suffix ((self fisher-game))
+  (let ((rare-suffix (fisher-rare-suffix-for-location self)))
+    (cond
+      ((< rare-suffix 0)
+        (fisher-roll-standard-fish-suffix))
+
+      (*fisher-in-debug?*
+        rare-suffix)
+
+      (else
+        (let ((rare-roll (rand-vu-int-range 0 99999))
+            (rare-threshold
+              (cond
+                ((>= (fisher-current-level) *fisher-level-cap*)
+                  (if (fisher-golden-hour?) 900 375))
+                (else
+                  (if (fisher-golden-hour?) 667 250)))))
+          (if (< rare-roll rare-threshold)
+            rare-suffix
+            (fisher-roll-standard-fish-suffix)))))))
 
 (defun fisher-rare-fish? ((suffix int))
   (and (>= suffix 7) (<= suffix 16)))
@@ -1240,7 +1263,7 @@
     ((= suffix 5) "MEGA")
     ((= suffix 6) "GOLDEN")
     ((= suffix 7) "PRECURSOR")
-    ((= suffix 8) "ORACLE")
+    ((= suffix 8) "FORGOTTEN")
     ((= suffix 9) "FRICKED UP")
     ((= suffix 10) "ORB-HUNTER")
     ((= suffix 11) "ARCHIPELAGOLD")
@@ -1341,7 +1364,7 @@
 
     (cond
       ((= suffix 7) (rand-vu-int-range 100 151))
-      ((= suffix 8) (rand-vu-int-range 30 61))
+      ((= suffix 8) (rand-vu-int-range 70 121))
       ((= suffix 9) (rand-vu-int-range 1 7))
       ((= suffix 10) (rand-vu-int-range 140 241))
       ((= suffix 11) (rand-vu-int-range 100 201))
@@ -1430,7 +1453,7 @@
 (defun fisher-configure-random-fish-slot!
   ((self fisher-game) (slot int) (species int))
   (fisher-set-fish-species! self slot species)
-  (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+  (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix self))
   (fisher-randomize-fish-level-and-weight! self slot)
   (none))
 
@@ -1465,7 +1488,7 @@
             i
             0)))
 
-      (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix))
+      (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix self))
       (fisher-randomize-fish-level-and-weight! self i)
 
       (+! i 1)))
@@ -3181,6 +3204,9 @@
 (define *fisher-platformius-group-offset-catch*
   (new 'static 'vector :y (meters 1.15) :w 0.0))
 
+;; Catalogue HUD-MERC previews use the PC MERC material path directly.
+;; Do not force PRIS residency here; that can bind the current area's page.
+
 (defun fisher-update-rare-attachment-transform! ((self manipy))
   (let ((parent-proc (ppointer->process (-> self parent)))
       (offset (-> self root transv)))
@@ -3188,9 +3214,15 @@
     (send-event
       self
       'max-vis-dist
-      (if (or *fisher-resident-fish-visible?* in-main-menu?)
+      (if
+        (or
+          *fisher-resident-fish-visible?*
+          in-main-menu?
+          *fisher-catalog-world-preview-active?*
+          (= (-> self draw dma-add-func) dma-add-process-drawable-hud-merc))
         (meters 999999.0)
         (meters 0.0)))
+
 
     (when
       (and
@@ -3283,7 +3315,12 @@
     (send-event
       self
       'max-vis-dist
-      (if (or *fisher-resident-fish-visible?* in-main-menu?)
+      (if
+        (or
+          *fisher-resident-fish-visible?*
+          in-main-menu?
+          *fisher-catalog-world-preview-active?*
+          (= (-> self draw dma-add-func) dma-add-process-drawable-hud-merc))
         (meters 999999.0)
         (meters 0.0)))
 
@@ -3387,7 +3424,13 @@
 (defbehavior fisher-platformius-platform-trans manipy ()
   (fisher-update-rare-attachment-transform! self)
 
-  (when (zero? (mod (current-time) 12))
+  ;; Catalogue attachments use HUD coordinates, which are not valid world-space
+  ;; positions for the 3D sparticle system. The catalogue draws the equivalent
+  ;; Platformius sparks in its preview panel instead.
+  (when
+    (and
+      (!= (-> self draw dma-add-func) dma-add-process-drawable-hud-merc)
+      (zero? (mod (current-time) 12)))
     (launch-particles
       :system *sp-particle-system-3d*
       (-> *part-id-table* 3569)
@@ -3568,7 +3611,15 @@
     (scale float)
     (attachment-name string))
 
-  (let ((attachment
+  ;; Rare-fish attachments normally live in world-space meters. Catalogue
+  ;; previews use HUD-MERC perspective screen-space. The model is placed at
+  ;; 8x the old generic-HUD depth, so the old 0.014 child conversion becomes
+  ;; 0.112 to preserve the same apparent attachment size and offsets.
+  (let* ((catalog-hud?
+          (= (-> fish-proc draw dma-add-func) dma-add-process-drawable-hud-merc))
+      (hud-x (* 0.112 (-> *video-parms* relative-x-scale)))
+      (hud-y (* 0.112 (-> *video-parms* relative-y-scale)))
+      (attachment
         (manipy-spawn
           (-> fish-proc root trans)
           #f
@@ -3583,13 +3634,29 @@
             (the-as manipy (ppointer->process attachment))))
 
         (when attachment-proc
-          (set! (-> attachment-proc root transv quad) (-> offset quad))
-          (set! (-> attachment-proc root transv w) 0.0)
-          (send-event attachment-proc 'max-vis-dist (meters 999999.0))
+          (cond
+            (catalog-hud?
+              (set! (-> attachment-proc root transv x) (* (-> offset x) hud-x))
+              (set! (-> attachment-proc root transv y) (* (-> offset y) hud-y))
+              (set! (-> attachment-proc root transv z) (* (-> offset z) hud-x))
+              (set! (-> attachment-proc root transv w) 0.0)
+              (set-vector!
+                (-> attachment-proc root scale)
+                (* scale hud-x)
+                (* scale hud-y)
+                (* scale hud-x)
+                1.0)
+              (set!
+                (-> attachment-proc draw dma-add-func)
+                dma-add-process-drawable-hud-merc))
+            (else
+              (set! (-> attachment-proc root transv quad) (-> offset quad))
+              (set! (-> attachment-proc root transv w) 0.0)
+              (set-vector!
+                (-> attachment-proc root scale)
+                scale scale scale 1.0)))
 
-          (set-vector!
-            (-> attachment-proc root scale)
-            scale scale scale 1.0)
+          (send-event attachment-proc 'max-vis-dist (meters 999999.0))
 
           (cond
             ((= skel *towertop-sgc*)
@@ -3621,16 +3688,6 @@
           *fisher-precursor-attachment-offset-game*)
         (if catch-display? 0.025 0.015)
         "fisher-precursor-towertop"))
-
-    ((= suffix 8)
-      (fisher-spawn-rare-attachment!
-        fish-proc
-        *oracle-sgc*
-        (if catch-display?
-          *fisher-oracle-attachment-offset-catch*
-          *fisher-oracle-attachment-offset-game*)
-        (if catch-display? 0.16 0.10)
-        "fisher-oracle-statue"))
 
     ((= suffix 10)
       (fisher-spawn-rare-attachment!
@@ -3902,9 +3959,9 @@
         (set! base-scale (if catch-display? 0.62 0.34)))
 
       ((= suffix 8)
-        (set! r 1.00)
-        (set! g 0.56)
-        (set! b 0.06)
+        (set! r 0.56)
+        (set! g 0.18)
+        (set! b 0.88)
         (set! base-scale (if catch-display? 0.62 0.34)))
 
       ((= suffix 9)
@@ -4574,7 +4631,7 @@
           (rand-vu-int-range 2000 4000)))
 
       (else
-        (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+        (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix self))
         (fisher-randomize-fish-level-and-weight! self slot)))
 
     (when (> (fisher-fish-power-cell-task self slot) 1)
@@ -4744,9 +4801,9 @@
                 (= (fisher-fish-suffix owner slot) 15)
                 (= (fisher-fish-suffix owner slot) 16))
               *catch-fishb-sgc*)
-            ((or
-                (= (fisher-fish-suffix owner slot) 8)
-                (= (fisher-fish-suffix owner slot) 12))
+            ((= (fisher-fish-suffix owner slot) 8)
+              *catch-fisha-sgc*)
+            ((= (fisher-fish-suffix owner slot) 12)
               *catch-fishc-sgc*)
             ((or
                 (= (fisher-fish-suffix owner slot) 9)
@@ -5031,7 +5088,7 @@
             slot
             (fisher-table-species-for-new-slot self golden?))
           (fisher-set-fish-power-cell-task! self slot 0)
-          (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix))
+          (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix self))
           (fisher-randomize-fish-slot! self slot)
           (fisher-roll-passive-special-for-slot! self slot)
 
@@ -5049,6 +5106,23 @@
 
     (fisher-refresh-active-slot-levels! self))
 
+  (none))
+
+(defun fisher-submit-forgotten-fish-particles! ((self fisher-game))
+  (when
+    (and
+      (fisher-pool-visuals-needed? self)
+      (zero? (mod (current-time) 6)))
+    (dotimes (slot (-> self fish-count))
+      (when (= (fisher-fish-suffix self slot) 8)
+        (let ((fish (fisher-fish-pointer self slot)))
+          (when fish
+            (let ((fish-proc (-> fish 0 self)))
+              (when fish-proc
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3569)
+                  (-> (the-as manipy fish-proc) root trans)))))))))
   (none))
 
 (defun fisher-maintain-pool-rendering! ((self fisher-game))
@@ -5092,6 +5166,8 @@
     self
     (fisher-pool-visuals-needed? self))
 
+  (fisher-submit-forgotten-fish-particles! self)
+
   (none))
 
 (defun fisher-refill-missing-fish! ((self fisher-game))
@@ -5104,7 +5180,7 @@
         i
         (fisher-table-species-for-new-slot self (-> self pool-golden?)))
       (fisher-set-fish-power-cell-task! self i 0)
-      (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix))
+      (fisher-set-fish-suffix! self i (fisher-roll-fish-suffix self))
       (fisher-randomize-fish-slot! self i)
       (fisher-roll-passive-special-for-slot! self i)
 
@@ -5465,6 +5541,7 @@
 
     (set! (-> self caught-fish-species) 4)
     (set! (-> self caught-fish-suffix) 2)
+    (fisher-catalog-register-catch! 4 2)
     (set! (-> self caught-fish-level) (fisher-fish-level self slot))
     (set! (-> self caught-weight-tenths) 500)
     (set! (-> self caught-orb-value) 0)
@@ -5562,6 +5639,7 @@
 
       (set! (-> self caught-fish-species) species)
       (set! (-> self caught-fish-suffix) suffix)
+      (fisher-catalog-register-catch! species suffix)
       (set! (-> self caught-fish-level) fish-level)
       (set! (-> self caught-weight-tenths) weight)
       (set!
@@ -5647,19 +5725,19 @@
     "I'VE JUST BEEN HAVIN' A LITTLE TROUBLE WITH"
     "THE PEOPLE THESE DAYS."
 
-    "SOMETHIN'S FISHY HERE."
-    "FIRST, ALL OF EVERYONE'S POWERCELLS WERE"
-    "TAKEN FROM THEM, NOW EVERYONE'S TELLIN"
-    "ME TO FISH FER THEM!"
+    "THE FISH HAVE DONE GOBBLED UP ME"
+    "POWERCELLS!"
+    "...AND IT WOULD SEEM THAT I BE NOT THE FIRST."
+    ""
 
     "YE BEST BE HELPIN' ME OUT, FRIENDS."
     ""
     ""
     ""
 
-    "HERE, IF YE CAN LEARN TO CATCH SOME FISH,"
-    "I'LL LET YE KEEP THIS OLD FISHIN' ROD AND LURE."
-    ""
+    "IF YE CAN LEARN TO CATCH SOME REAL FISH,"
+    "IN REAL WATER, I'LL GIVE YOU ALL OF MY"
+    "POWER CELLS I HAVE."
     ""
 
     "FIND A FISHIN SPOT ON THIS ISLAND, AND"
@@ -5687,19 +5765,19 @@
     "I'VE JUST BEEN HAVIN' A LITTLE TROUBLE WITH"
     "THE PEOPLE THESE DAYS."
 
-    "SOMETHIN'S FISHY HERE."
-    "FIRST, ALL OF EVERYONE'S POWERCELLS WERE"
-    "TAKEN FROM THEM, NOW EVERYONE'S TELLIN"
-    "ME TO FISH FER THEM!"
+    "THE FISH HAVE DONE GOBBLED UP ME"
+    "POWERCELLS!"
+    "...AND IT WOULD SEEM THAT I BE NOT THE FIRST."
+    ""
 
     "YE BEST BE HELPIN' ME OUT, FRIENDS."
     ""
     ""
     ""
 
-    "HERE, IF YE CAN LEARN TO CATCH SOME FISH,"
-    "I'LL LET YE KEEP THIS OLD FISHIN' ROD AND LURE."
-    ""
+    "IF YE CAN LEARN TO CATCH SOME REAL FISH,"
+    "IN REAL WATER, I'LL GIVE YOU ALL OF MY"
+    "POWER CELLS I HAVE."
     ""
 
     "FIND A FISHIN SPOT ON THIS ISLAND, AND"
@@ -5717,17 +5795,17 @@
     'boxed-array
     :type string
 
-    "AYE, DID YE NOT HEAR WHAT I SAID?"
-    ""
-    ""
-    ""
-
-    "GO FIND YERSELF A FISHIN' SPOT AND"
-    "CATCH SOME FISH!"
-    ""
+    "AYE, I LEFT ME NET IN THE FISHING SPOT."
+    "IF YE FIND A NET HERE, YOU SHOULD BE ABLE"
+    "TO CATCH SOME FISH IN THAT AREA!"
     ""
 
-    "BRING ME BACK 10 PRECURSOR ORBS."
+    "BRING ME BACK 10 PRECURSOR ORBS,"
+    "AND I'LL GIVE YE ALL 4 OF ME"
+    "POWER CELLS."
+    ""
+
+    "WHAT ARE YA WAITIN' FER?"
     ""
     ""
     ""))
@@ -5777,9 +5855,9 @@
     'boxed-array
     :type string
 
-    "YE GOT YER 4 FREE POWER CELLS"
-    "TAKE THE WARP GATE BACK AND"
-    "CATCH ME MORE FISH!!!"
+    "AYE, THERE BE NO MORE USEFUL FISH TO"
+    "CATCH HERE. YE BE BETTER OFF IN OTHER"
+    "WATERS!"
     ""))
 
 
@@ -5814,7 +5892,7 @@
     :type string
 
     "BE AWARE, LAD!"
-    "THE ZOOMER WILL NOT SPAWN"
+    "THE ZOOMER WILL NOT BE TRANSPORTED HERE"
     "UNLESS YE COLLECTED THE POWERCELL"
     "FER FINISHIN THIS HERE MOUNTAIN PASS."
 
@@ -5885,7 +5963,7 @@
 
     "YE WOULD BE WISE TO CATCH THE"
     "FISH THAT HOLDS THE CELL FOR THIS"
-    "AREA BEFORE CROSSIN' IT!"
+    "AREA BEFORE CROSSIN' THE CANYON!"
     ""
 
     "WORD AROUND THE SEA IS THAT"
@@ -5919,7 +5997,7 @@
     ""
 
     "HE BE SWIMMIN IN THE DARK ECO"
-    "POOLS OF SPIDER CAVE!"
+    "POOLS OF SPIDER CAVE ONLY!"
     "ATTRACTED ONLY AFTER 72"
     "CELLS HAVE BEEN COLLECTED!"
 
@@ -6784,4 +6862,1155 @@
 
   (set! *fisher-man* #f)
 
+  (none))
+
+(define *fisher-geologist-bg-color* (new 'static 'rgba :r #x00 :g #x00 :b #x00 :a #xff))
+
+;; Catalogue preview models use the same normal world/MERC path as the
+;; fishing loot-window fish. Keep rare child models alive while this preview
+;; is active without switching them to a HUD renderer.
+(define *fisher-catalog-world-preview-active?* #f)
+
+;; Geologist dialogue uses the same buffered typewriter presentation as the fisherman.
+(define *fisher-geologist-dialogue-buffer-0*
+  (new 'global 'string 256 (the string #f)))
+
+(define *fisher-geologist-dialogue-buffer-1*
+  (new 'global 'string 256 (the string #f)))
+
+(define *fisher-geologist-dialogue-buffer-2*
+  (new 'global 'string 256 (the string #f)))
+
+(define *fisher-geologist-dialogue-buffer-3*
+  (new 'global 'string 256 (the string #f)))
+
+(defun fisher-geologist-dialogue-line
+  ((self fisher-geologist)
+    (line-index int))
+  (cond
+    ((or
+        (< (-> self dialogue-page) 0)
+        (>= (-> self dialogue-page) 4)
+        (< line-index 0)
+        (>= line-index 4))
+      "")
+    (else
+      (->
+        *fisher-geologist-dialogue-lines*
+        data
+        (+ (* (-> self dialogue-page) 4) line-index)))))
+
+(defun fisher-geologist-dialogue-total-length
+  ((self fisher-geologist))
+  (+
+    (length (fisher-geologist-dialogue-line self 0))
+    (length (fisher-geologist-dialogue-line self 1))
+    (length (fisher-geologist-dialogue-line self 2))
+    (length (fisher-geologist-dialogue-line self 3))))
+
+(defun fisher-geologist-visible-dialogue-line!
+  ((self fisher-geologist)
+    (line-index int)
+    (dst string))
+  (let* ((line-0 (fisher-geologist-dialogue-line self 0))
+      (line-1 (fisher-geologist-dialogue-line self 1))
+      (line-2 (fisher-geologist-dialogue-line self 2))
+      (line (fisher-geologist-dialogue-line self line-index))
+      (line-start
+        (cond
+          ((= line-index 0) 0)
+          ((= line-index 1) (length line-0))
+          ((= line-index 2) (+ (length line-0) (length line-1)))
+          (else (+ (length line-0) (length line-1) (length line-2)))))
+      (visible-count (- (-> self dialogue-char-count) line-start))
+      (line-length (length line)))
+    (cond
+      ((<= visible-count 0)
+        (clear dst))
+      ((>= visible-count line-length)
+        (copy-string<-string dst line))
+      (else
+        (substring! dst line 0 visible-count)))))
+
+(defun fisher-catalog-task-for-row ((row int))
+  (the-as game-task
+    (cond
+      ((< row 24) (+ 120 row))
+      (else (+ 144 (- row 24))))))
+
+(defun fisher-catalog-status-for-prefix ((prefix int))
+  (cond
+    ((= prefix 0) (task-status unknown))
+    ((= prefix 1) (task-status need-hint))
+    ((= prefix 2) (task-status need-introduction))
+    ((= prefix 3) (task-status need-reminder-a))
+    ((= prefix 4) (task-status need-reminder))
+    ((= prefix 5) (task-status need-reward-speech))
+    (else (task-status need-resolution))))
+
+(defun fisher-catalog-base-unique? ((species int))
+  (or (= species 4) (= species 6) (= species 23)))
+
+(defun fisher-catalog-row-unique? ((row int))
+  (or
+    (>= row 24)
+    (fisher-catalog-base-unique? row)))
+
+(defun fisher-catalog-register-catch! ((species int) (suffix int))
+  ;; Each normal fish owns seven permanent cstages (one per prefix/star).
+  ;; Only autosave when this catch closes a cstage that was not already saved.
+  (cond
+    ((fisher-catalog-base-unique? species)
+      (let ((task (the-as game-task (+ 120 species))))
+        (when (not (task-closed? task (task-status unknown)))
+          (close-specific-task! task (task-status unknown))
+          (auto-save-command 'auto-save 0 0 *default-pool*))))
+    ((fisher-rare-fish? suffix)
+      (let ((task (the-as game-task (+ 144 (- suffix 7)))))
+        (when (not (task-closed? task (task-status unknown)))
+          (close-specific-task! task (task-status unknown))
+          (auto-save-command 'auto-save 0 0 *default-pool*))))
+    ((and (>= suffix 0) (<= suffix 6))
+      (let ((task (the-as game-task (+ 120 species)))
+          (status (fisher-catalog-status-for-prefix suffix)))
+        (when (not (task-closed? task status))
+          (close-specific-task! task status)
+          (auto-save-command 'auto-save 0 0 *default-pool*)))))
+  (none))
+
+(defun fisher-catalog-prefix-caught? ((row int) (prefix int))
+  (and
+    (not (fisher-catalog-row-unique? row))
+    (task-closed?
+      (fisher-catalog-task-for-row row)
+      (fisher-catalog-status-for-prefix prefix))))
+
+(defun fisher-catalog-row-discovered? ((row int))
+  (cond
+    ((fisher-catalog-row-unique? row)
+      (task-closed?
+        (fisher-catalog-task-for-row row)
+        (task-status unknown)))
+    (else
+      (let ((found? #f))
+        (dotimes (prefix 7)
+          (when (fisher-catalog-prefix-caught? row prefix)
+            (set! found? #t)))
+        found?))))
+
+(defun fisher-catalog-prefix-count ((row int))
+  (let ((count 0))
+    (when (not (fisher-catalog-row-unique? row))
+      (dotimes (prefix 7)
+        (when (fisher-catalog-prefix-caught? row prefix)
+          (+! count 1))))
+    count))
+
+(defun fisher-catalog-discovered-count ()
+  (let ((count 0))
+    (dotimes (row *fisher-catalog-row-count*)
+      (when (fisher-catalog-row-discovered? row)
+        (+! count 1)))
+    count))
+
+(defun fisher-catalog-row-name ((row int))
+  (cond
+    ((< row 24)
+      (-> (fisher-species-info-for row) name))
+    ((= row 24) "PRECURSOR FISH")
+    ((= row 25) "FORGOTTEN FISH")
+    ((= row 26) "FRICKED UP FISH")
+    ((= row 27) "PRECURSOR ORB-HUNTER")
+    ((= row 28) "ARCHIPELAGOLDFISH")
+    ((= row 29) "SPEC OPS FISH")
+    ((= row 30) "COMPLICATED FISH")
+    ((= row 31) "L TETROMINO FISH")
+    ((= row 32) "PLATFORMIUS")
+    (else "SCREAMING FISH")))
+
+(defun fisher-catalog-row-location ((row int))
+  (cond
+    ((or (= row 0) (= row 1) (= row 24)) "ANY HUB 1 AREA")
+    ((or (= row 2) (= row 3) (= row 25)) "FORBIDDEN JUNGLE")
+    ((= row 26) "SENTINEL BEACH")
+    ((or (= row 5) (= row 27)) "MISTY ISLAND")
+    ((= row 4) "ANY FISHING AREA")
+    ((or (= row 6) (= row 7) (= row 8) (= row 9) (= row 28)) "ANY HUB 2 AREA")
+    ((= row 29) "LOST PRECURSOR CITY")
+    ((or (= row 10) (= row 11) (= row 12) (= row 30)) "BOGGY SWAMP")
+    ((or (= row 13) (= row 14) (= row 15) (= row 31)) "VOLCANIC CRATER")
+    ((or (= row 16) (= row 17) (= row 18) (= row 32)) "SNOWY MOUNTAIN")
+    ((or (= row 19) (= row 20) (= row 21) (= row 22) (= row 33)) "SPIDER CAVE")
+    (else "???")))
+
+(defun fisher-catalog-row-suffix ((row int))
+  (if (>= row 24)
+    (+ 7 (- row 24))
+    -1))
+
+(defun fisher-catalog-row-species ((row int))
+  (cond
+    ((< row 24) row)
+    ((or (= row 24) (= row 28) (= row 31) (= row 32) (= row 33)) 1)
+    (else 0)))
+
+(defun fisher-catalog-row-skeleton ((row int))
+  (let ((suffix (fisher-catalog-row-suffix row)))
+    (cond
+      ((< suffix 0)
+        (the-as skeleton-group
+          (-> (fisher-species-info-for row) skeleton)))
+      ((or (= suffix 7) (= suffix 11) (= suffix 14) (= suffix 15) (= suffix 16))
+        *catch-fishb-sgc*)
+      ((= suffix 12) *catch-fishc-sgc*)
+      (else *catch-fisha-sgc*))))
+
+(defun fisher-catalog-background-color! ((row int) (dst rgba))
+  ;; Give each fishing area its own preview-panel color.  Rare fish inherit
+  ;; the area listed by fisher-catalog-row-location rather than being grouped
+  ;; into one generic water/lava color.
+  (cond
+    ;; Sandover Village waters
+    ((or (= row 0) (= row 1) (= row 24))
+      (set! (-> dst r) 58) (set! (-> dst g) 126) (set! (-> dst b) 154))
+    ;; Forbidden Jungle
+    ((or (= row 2) (= row 3) (= row 25))
+      (set! (-> dst r) 48) (set! (-> dst g) 105) (set! (-> dst b) 72))
+    ;; Sentinel Beach
+    ((= row 26)
+      (set! (-> dst r) 74) (set! (-> dst g) 145) (set! (-> dst b) 176))
+    ;; Misty Island
+    ((or (= row 5) (= row 27))
+      (set! (-> dst r) 43) (set! (-> dst g) 88) (set! (-> dst b) 76))
+    ;; Fish that may be found across fishing areas
+    ((= row 4)
+      (set! (-> dst r) 66) (set! (-> dst g) 112) (set! (-> dst b) 128))
+    ;; Rock Village waters
+    ((or (= row 6) (= row 7) (= row 8) (= row 9) (= row 28))
+      (set! (-> dst r) 32) (set! (-> dst g) 103) (set! (-> dst b) 120))
+    ;; Lost Precursor City
+    ((= row 29)
+      (set! (-> dst r) 92) (set! (-> dst g) 151) (set! (-> dst b) 126))
+    ;; Boggy Swamp
+    ((or (= row 10) (= row 11) (= row 12) (= row 30))
+      (set! (-> dst r) 71) (set! (-> dst g) 91) (set! (-> dst b) 45))
+    ;; Volcanic Crater
+    ((or (= row 13) (= row 14) (= row 15) (= row 31))
+      (set! (-> dst r) 151) (set! (-> dst g) 61) (set! (-> dst b) 24))
+    ;; Snowy Mountain
+    ((or (= row 16) (= row 17) (= row 18) (= row 32))
+      (set! (-> dst r) 166) (set! (-> dst g) 201) (set! (-> dst b) 219))
+    ;; Spider Cave
+    ((or (= row 19) (= row 20) (= row 21) (= row 22) (= row 33))
+      (set! (-> dst r) 54) (set! (-> dst g) 48) (set! (-> dst b) 80))
+    ;; Final boss arena / Nuclear Bombfish
+    (else
+      (set! (-> dst r) 126) (set! (-> dst g) 45) (set! (-> dst b) 24)))
+  ;; This panel is drawn in the sprite bucket after the normal world/MERC
+  ;; preview model. Keep it genuinely translucent so it tints the preview
+  ;; area without painting over the fish. Jak 1 sprite alpha uses the GS-style
+  ;; 0..128 range for normal blending; #x38 is intentionally light.
+  (set! (-> dst a) #x38)
+  dst)
+
+(defun fisher-catalog-lore-line ((row int) (line int))
+  (cond
+    ((= row 23)
+      (cond
+        ((= line 0) "THIS HERE FISH IS ONE OF A KIND!")
+        ((= line 1) "BE CAREFUL THOUGH, IT CAN START TICKING")
+        ((= line 2) "AT ANY MOMENT!")
+        (else "")))
+    ((= row 24)
+      (cond
+        ((= line 0) "THIS BAD BOY CAN MAKE A GROWN FISHERMAN CRY.")
+        ((= line 1) "YE THOUGHT THE PRECURSORS DIDN'T WORK THEIR MAGIC")
+        ((= line 2) "ACROSS THE FISH, DID YE? THIS HERE FISH WAS ONCE")
+        ((= line 3) "SAID TO LEAD THE PRECURSORS TO THE LOCATION OF")
+        ((= line 4) "BUILDING AN ANCIENT PRECURSOR CITY THAT IS LOST")
+        ((= line 5) "TO TIME ITSELF! GOOD CATCH LAD!")
+        (else "")))
+    ((= row 25)
+      (cond
+        ((= line 0) "THIS FISH LIVES IN THE CRYSTAL CAVES FOUND BY")
+        ((= line 1) "KUITAR FROM THE FORGOTTEN LANDS.")
+        ((= line 2) "HOW DID IT SWIM ALL THE WAY OVER HERE?")
+        (else "")))
+    ((= row 26)
+      (cond
+        ((= line 0) "AVAST! YE---WHAT? WHAT THE FRICK IS THIS FISH?")
+        ((= line 1) "DID ZED DESTROY MY MOD?")
+        (else "")))
+    ((= row 27)
+      (cond
+        ((= line 0) "YE BEST KEEP THAT FISH SAFE FROM OTHER FISHERMEN.--")
+        ((= line 1) "I'LL BUY IT FROM YE FOR 90 ORBS.")
+        (else "")))
+    ((= row 28)
+      (cond
+        ((= line 0) "THIS FISH BE FROM ANOTHER DIMENSION!")
+        ((= line 1) "MARKUS HAS BEEN BUSY...")
+        (else "")))
+    ((= row 29)
+      (cond
+        ((= line 0) "DON'T TURN YOUR BACK ON THIS FISH!")
+        ((= line 1) "IT'LL SNEAK UP ON YE. I KNOW IT NOT BE POSSIBLE,")
+        ((= line 2) "BUT RUH WOULD WANT TO HAVE THIS FISH.")
+        (else "")))
+    ((= row 30)
+      (cond
+        ((= line 0) "IF YE DON'T CATCH THIS FISH FAST ENOUGH,")
+        ((= line 1) "YE MAY BE PUNISHED. MIKE, CRASH THE GAME, PLEASE.")
+        (else "")))
+    ((= row 31)
+      (cond
+        ((= line 0) "GRATEFUL FOREST SAYS")
+        ((= line 1) "WHERE DOES THE L TETROMINO FISH GO? THATS RIGHT!")
+        ((= line 2) "IT GOES IN THE SQUARE HOLE!")
+        (else "")))
+    ((= row 32)
+      (cond
+        ((= line 0) "THIS HERE FISH STOLE A BUNCH OF PLATFORMS FROM")
+        ((= line 1) "GRATEFUL FOREST, AND PUT IT ON ITS HEAD! MAYBE")
+        ((= line 2) "IT CAN HELP YE GET TO THE TOP... ON SECOND THOUGHT,")
+        ((= line 3) "MAYBE JUST SELL THIS FISH.")
+        (else "")))
+    ((= row 33)
+      (cond
+        ((= line 0) "THIS FISH BE NORMAL, EXCEPT IT HAS BEEN POUNDED")
+        ((= line 1) "LIKE ONE TENDERIZES A YAKOW STEAK! YE BEST BE")
+        ((= line 2) "PUTTIN THIS FISH OUT OF ITS MISERY, LAD.")
+        (else "")))
+    (else "")))
+
+(defun fisher-geologist-draw-text
+  ((text string) (x int) (y int) (scale float) (selected? symbol) (middle? symbol))
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id subtitle))
+    (cond
+      (middle?
+        (draw-string-xy-scaled
+          *pc-encoded-matt-str*
+          buf
+          x
+          y
+          (if selected? (font-color red) (font-color white))
+          (font-flags large middle shadow kerning)
+          scale))
+      (else
+        (draw-string-xy-scaled
+          *pc-encoded-matt-str*
+          buf
+          x
+          y
+          (if selected? (font-color red) (font-color white))
+          (font-flags large shadow kerning)
+          scale))))
+  (none))
+
+;; The catalogue uses the same large Jak 1 font face, but is placed in the
+;; regular sprite bucket so the 3D catalogue fish can render in front of it.
+;; This intentionally does NOT use the debug bucket.
+(defun fisher-geologist-draw-catalog-text
+  ((text string) (x int) (y int) (scale float) (selected? symbol) (middle? symbol))
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id sprite))
+    (cond
+      (middle?
+        (draw-string-xy-scaled
+          *pc-encoded-matt-str*
+          buf
+          x
+          y
+          (if selected? (font-color red) (font-color white))
+          (font-flags large middle shadow kerning)
+          scale))
+      (else
+        (draw-string-xy-scaled
+          *pc-encoded-matt-str*
+          buf
+          x
+          y
+          (if selected? (font-color red) (font-color white))
+          (font-flags large shadow kerning)
+          scale))))
+  (none))
+
+(defun fisher-geologist-draw-catalog-text-right
+  ((text string) (x int) (y int) (scale float) (selected? symbol))
+  (clear matt-str)
+  (clear *pc-encoded-matt-str*)
+  (format matt-str text)
+  (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id sprite))
+    (draw-string-xy-scaled
+      *pc-encoded-matt-str*
+      buf
+      x
+      y
+      (if selected? (font-color red) (font-color white))
+      (font-flags large right shadow kerning)
+      scale))
+  (none))
+
+(defun fisher-geologist-draw-star! ((x int) (y int) (filled? symbol))
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id sprite))
+    (let ((color
+          (if filled?
+            (new 'static 'rgba :r #xf0 :g #x90 :b #x20 :a #xff)
+            (new 'static 'rgba :r #x78 :g #x58 :b #x38 :a #xe8))))
+      ;; Symmetric five-point pixel star.  Keep the lower two points broad
+      ;; and separated so the bottom reads as star legs instead of an arrow.
+      (draw-sprite2d-xy buf (+ x 6) y 1 1 color)
+      (draw-sprite2d-xy buf (+ x 5) (+ y 1) 3 2 color)
+      (draw-sprite2d-xy buf (+ x 4) (+ y 3) 5 1 color)
+      (draw-sprite2d-xy buf x (+ y 4) 13 1 color)
+      (draw-sprite2d-xy buf (+ x 1) (+ y 5) 11 1 color)
+      (draw-sprite2d-xy buf (+ x 2) (+ y 6) 9 1 color)
+      (draw-sprite2d-xy buf (+ x 3) (+ y 7) 7 1 color)
+      (draw-sprite2d-xy buf (+ x 2) (+ y 8) 4 1 color)
+      (draw-sprite2d-xy buf (+ x 7) (+ y 8) 4 1 color)
+      (draw-sprite2d-xy buf (+ x 1) (+ y 9) 4 1 color)
+      (draw-sprite2d-xy buf (+ x 8) (+ y 9) 4 1 color)
+      (draw-sprite2d-xy buf x (+ y 10) 4 1 color)
+      (draw-sprite2d-xy buf (+ x 9) (+ y 10) 4 1 color)))
+  (none))
+
+(defun fisher-geologist-draw-dialogue! ((self fisher-geologist))
+  ;; Match the fisherman dialogue box dimensions and line spacing exactly.
+  (with-dma-buffer-add-bucket
+    ((buf (-> (current-frame) global-buf))
+      (bucket-id subtitle))
+    (draw-sprite2d-xy
+      buf 34 139 444 80
+      (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xee))
+    (draw-sprite2d-xy
+      buf 39 144 434 70
+      (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xe8)))
+  (fisher-geologist-draw-text
+    (fisher-geologist-visible-dialogue-line! self 0 *fisher-geologist-dialogue-buffer-0*)
+    256 153 0.50 #f #t)
+  (fisher-geologist-draw-text
+    (fisher-geologist-visible-dialogue-line! self 1 *fisher-geologist-dialogue-buffer-1*)
+    256 168 0.50 #f #t)
+  (fisher-geologist-draw-text
+    (fisher-geologist-visible-dialogue-line! self 2 *fisher-geologist-dialogue-buffer-2*)
+    256 183 0.50 #f #t)
+  (fisher-geologist-draw-text
+    (fisher-geologist-visible-dialogue-line! self 3 *fisher-geologist-dialogue-buffer-3*)
+    256 198 0.50 #f #t)
+  (fisher-geologist-draw-text "<PAD_X>" 446 205 0.55 #f #t)
+  (fisher-geologist-draw-text "<PAD_TRIANGLE> EXIT" 421 114 0.55 #f #t)
+  (none))
+
+(defun fisher-geologist-style-model! ((row int) (fish-proc manipy))
+  ;; Normal species rows start from their native fisher-species-info color, so
+  ;; they always represent the unrecolored/healthy fish rather than a Mutant or
+  ;; Golden prefix. Rare rows then apply the exact suffix signature colors used
+  ;; by fisher-apply-slot-appearance!. Keep catch-scale normalization for the
+  ;; catalogue window.
+  (let* ((species (fisher-catalog-row-species row))
+      (suffix (fisher-catalog-row-suffix row))
+      (info (fisher-species-info-for species))
+      (scale (* (-> info catch-scale) 0.50))
+      (sx 1.0)
+      (sy 1.0)
+      (sz 1.0)
+      (r (-> info color-r))
+      (g (-> info color-g))
+      (b (-> info color-b)))
+    (cond
+      ((= row 23)
+        (set! scale (* 0.74 0.50))
+        (set! sx 0.62)
+        (set! sy 0.72)
+        (set! sz 1.55)
+        (set! r 0.0)
+        (set! g 0.0)
+        (set! b 0.0))
+      ((= suffix 7)
+        (set! scale (* 0.62 0.50))
+        (set! r 0.62)
+        (set! g 0.36)
+        (set! b 0.12))
+      ((= suffix 8)
+        (set! scale (* 0.62 0.50))
+        (set! r 0.56)
+        (set! g 0.18)
+        (set! b 0.88))
+      ((= suffix 9)
+        (set! scale (* 0.68 0.50))
+        (set! sx 0.13)
+        (set! sy 0.20)
+        (set! sz 2.35)
+        (set! r 0.56)
+        (set! g 0.82)
+        (set! b 0.62))
+      ((= suffix 10)
+        (set! scale (* 0.68 0.50))
+        (set! sx 1.18)
+        (set! sy 1.12)
+        (set! sz 1.18)
+        (set! r 0.82)
+        (set! g 0.48)
+        (set! b 0.16))
+      ((= suffix 11)
+        (set! scale (* 0.62 0.50))
+        (set! r 1.0)
+        (set! g 1.0)
+        (set! b 1.0))
+      ((= suffix 12)
+        (set! scale (* 0.64 0.50))
+        (set! r 0.003)
+        (set! g 0.003)
+        (set! b 0.003))
+      ((= suffix 13)
+        (set! scale (* 0.64 0.50))
+        (set! r 1.0)
+        (set! g 1.0)
+        (set! b 1.0))
+      ((= suffix 14)
+        (set! scale (* 0.44 0.50))
+        (set! r 1.0)
+        (set! g 1.0)
+        (set! b 1.0))
+      ((= suffix 15)
+        (set! scale (* 0.62 0.50))
+        (set! r 1.0)
+        (set! g 1.0)
+        (set! b 1.0))
+      ((= suffix 16)
+        (set! scale (* 0.62 0.50))
+        (set! r 1.0)
+        (set! g 1.0)
+        (set! b 1.0)))
+    (set-vector! (-> fish-proc root scale) (* scale sx) (* scale sy) (* scale sz) 1.0)
+    (set! (-> fish-proc draw color-mult r) r)
+    (set! (-> fish-proc draw color-mult g) g)
+    (set! (-> fish-proc draw color-mult b) b)
+    (set! (-> fish-proc draw color-mult a) (if (= row 23) 8.0 1.0))
+    (set-vector! (-> fish-proc draw color-emissive) 0.0 0.0 0.0 1.0))
+  (none))
+
+(defun fisher-geologist-remove-model! ((self fisher-geologist))
+  (when (-> self catalog-model)
+    (let ((proc (ppointer->process (-> self catalog-model))))
+      (when proc
+        (deactivate proc)))
+    (set! (-> self catalog-model) (the-as (pointer manipy) #f)))
+  (set! (-> self catalog-model-row) -1)
+  (none))
+
+(defun fisher-geologist-update-model-rotation! ((self fisher-geologist))
+  ;; Catalogue preview rotates left/right only.  Vertical right-stick input is
+  ;; intentionally ignored so the fish always stays upright.
+  (let* ((stick-x (the int (-> *cpad-list* cpads 0 rightx)))
+      (step (* (degrees 110.0) (-> *display* seconds-per-frame))))
+    (cond
+      ((>= stick-x 150) (+! (-> self catalog-yaw) step))
+      ((<= stick-x 106) (-! (-> self catalog-yaw) step))))
+  (none))
+
+(defun fisher-geologist-project-world! ((world-pos vector) (screen-pos vector))
+  ;; Project using the same transform used by fisher-world-to-screen!, but keep
+  ;; this helper local to the geologist catalogue so it does not depend on a
+  ;; fisher-game instance.
+  (let ((projected (new 'stack 'vector4w-2))
+      (point (new 'stack-no-clear 'vector)))
+    (vector-copy! point world-pos)
+    (set! (-> point w) 1.0)
+    (transform-point-qword! (-> projected vector 0) point)
+    (set! (-> screen-pos x)
+      (+ 256.0 (/ (- (the float (-> projected vector 0 x)) 32768.0) 64.0)))
+    (set! (-> screen-pos y)
+      (+ 224.0 (/ (- (the float (-> projected vector 0 y)) 32768.0) 64.0)))
+    (set! (-> screen-pos z) 0.0)
+    (set! (-> screen-pos w) 1.0))
+  (none))
+
+(defun fisher-geologist-position-model! ((self fisher-geologist))
+  ;; Keep the catalogue model on the exact normal world/MERC path used by the
+  ;; catch/loot fish.  Instead of guessing screen-to-world offsets, project a
+  ;; forward point plus one-meter camera-right/up probes and solve the local
+  ;; 2D mapping so the model root lands at the preview box every frame.
+  (when
+    (and
+      (-> self catalog-model)
+      *camera*
+      (> (-> *camera* num-slaves) 0))
+    (let ((fish-proc (the-as manipy (ppointer->process (-> self catalog-model)))))
+      (when fish-proc
+        (let* ((cam-slave (-> *camera* slave 0 0))
+            (species (fisher-catalog-row-species (-> self catalog-index)))
+            (suffix (fisher-catalog-row-suffix (-> self catalog-index)))
+            (forward (new 'stack-no-clear 'vector))
+            (right (new 'stack-no-clear 'vector))
+            (up (new 'stack-no-clear 'vector))
+            (fish-forward (new 'stack-no-clear 'vector))
+            (fish-down (new 'stack-no-clear 'vector))
+            (rot (new 'stack-no-clear 'matrix))
+            (preview-pos (new 'stack-no-clear 'vector))
+            (probe-right (new 'stack-no-clear 'vector))
+            (probe-up (new 'stack-no-clear 'vector))
+            (screen-base (new 'stack-no-clear 'vector))
+            (screen-right (new 'stack-no-clear 'vector))
+            (screen-up (new 'stack-no-clear 'vector))
+            (yaw (-> self catalog-yaw))
+            (target-x 362.0)
+            ;; Fish roots are bottom-biased.  Putting an ordinary fish root a
+            ;; little below the visual center centers its body; Scout Fly uses
+            ;; its own origin and targets the literal center.
+            (target-y (if (= species (the-as int (fisher-species scout-fly))) 79.0 94.0)))
+
+          (vector-copy! forward (-> cam-slave tracking inv-mat vector 2))
+          (set! (-> forward w) 0.0)
+          (singlefish-vector-normalize-safe! forward 1.0)
+
+          (singlefish-vector-cross-safe! right forward (-> *camera* local-down))
+          (set! (-> right w) 0.0)
+          (singlefish-vector-normalize-safe! right 1.0)
+
+          (singlefish-vector-cross-safe! up right forward)
+          (set! (-> up w) 0.0)
+          (singlefish-vector-normalize-safe! up 1.0)
+
+          ;; Start exactly like the loot-window fish: straight ahead of camera.
+          (singlefish-vector-add-scaled-safe!
+            preview-pos (-> cam-slave trans) forward (meters 5.0))
+
+          ;; Measure the actual current-frame projection of camera-right/up.
+          (vector-copy! probe-right preview-pos)
+          (singlefish-vector-add-scaled-safe!
+            probe-right probe-right right (meters 1.0))
+          (vector-copy! probe-up preview-pos)
+          (singlefish-vector-add-scaled-safe!
+            probe-up probe-up up (meters 1.0))
+
+          (fisher-geologist-project-world! preview-pos screen-base)
+          (fisher-geologist-project-world! probe-right screen-right)
+          (fisher-geologist-project-world! probe-up screen-up)
+
+          (let* ((rx (- (-> screen-right x) (-> screen-base x)))
+              (ry (- (-> screen-right y) (-> screen-base y)))
+              (ux (- (-> screen-up x) (-> screen-base x)))
+              (uy (- (-> screen-up y) (-> screen-base y)))
+              (dx (- target-x (-> screen-base x)))
+              (dy (- target-y (-> screen-base y)))
+              (det (- (* rx uy) (* ry ux))))
+            (when (> (abs det) 0.0001)
+              (let ((right-m (/ (- (* dx uy) (* dy ux)) det))
+                  (up-m (/ (- (* rx dy) (* ry dx)) det)))
+                (singlefish-vector-add-scaled-safe!
+                  preview-pos preview-pos right (meters right-m))
+                (singlefish-vector-add-scaled-safe!
+                  preview-pos preview-pos up (meters up-m)))))
+
+          (set! (-> fish-proc root trans quad) (-> preview-pos quad))
+          (set! (-> fish-proc root trans w) 1.0)
+
+          ;; Reassert visibility every frame while catalogue owns the preview.
+          (logclear! (-> fish-proc draw status) (draw-status hidden))
+          (send-event fish-proc 'max-vis-dist (meters 999999.0))
+          (set! (-> fish-proc draw force-lod) 0)
+
+          ;; Present the side profile at yaw 0, then rotate around camera-up.
+          (set-vector!
+            fish-forward
+            (+ (* (-> right x) (cos yaw)) (* (-> forward x) (sin yaw)))
+            (+ (* (-> right y) (cos yaw)) (* (-> forward y) (sin yaw)))
+            (+ (* (-> right z) (cos yaw)) (* (-> forward z) (sin yaw)))
+            0.0)
+          (singlefish-vector-normalize-safe! fish-forward 1.0)
+
+          ;; Scout Fly and Screaming Fish use the opposite authored vertical basis.
+          (if
+            (or
+              (= species (the-as int (fisher-species scout-fly)))
+              (= suffix 16))
+            (set-vector!
+              fish-down
+              (- (-> *camera* local-down x))
+              (- (-> *camera* local-down y))
+              (- (-> *camera* local-down z))
+              0.0)
+            (vector-copy! fish-down (-> *camera* local-down)))
+
+          (set! (-> fish-down w) 0.0)
+          (singlefish-vector-normalize-safe! fish-down 1.0)
+          (forward-down->inv-matrix rot fish-forward fish-down)
+          (matrix->quaternion (-> fish-proc root quat) rot)))))
+  (none))
+
+(defun fisher-geologist-refresh-model! ((self fisher-geologist))
+  (when (!= (-> self catalog-model-row) (-> self catalog-index))
+    (fisher-geologist-remove-model! self)
+    (set! (-> self catalog-model-row) (-> self catalog-index))
+    (set! (-> self catalog-yaw) 0.0)
+    (set! (-> self catalog-pitch) 0.0)
+    (when (fisher-catalog-row-discovered? (-> self catalog-index))
+      (let ((spawn-pos (new 'stack-no-clear 'vector)))
+        (singlefish-vector-copy-safe! spawn-pos (target-pos 0))
+        (let ((model
+              (the-as (pointer manipy)
+                (manipy-spawn
+                  spawn-pos
+                  #f
+                  (fisher-catalog-row-skeleton (-> self catalog-index))
+                  #f
+                  :from *default-dead-pool*
+                  :to *default-pool*
+                  :name "fisher-catalog-model"))))
+          (when model
+            (set! (-> self catalog-model) model)
+            (let ((fish-proc (the-as manipy (ppointer->process model))))
+              (when fish-proc
+                (send-event fish-proc 'anim-mode 'loop)
+                (send-event fish-proc 'max-vis-dist (meters 999999.0))
+                (set! (-> fish-proc draw force-lod) 0)
+                (logclear! (-> fish-proc draw status) (draw-status hidden))
+                (fisher-geologist-style-model! (-> self catalog-index) fish-proc)
+
+                ;; Do NOT override draw.dma-add-func. This deliberately stays on
+                ;; the exact normal world/MERC renderer used by the loot fish so
+                ;; the art group's own texture/material association is preserved.
+
+                (let ((suffix (fisher-catalog-row-suffix (-> self catalog-index))))
+                  (when (fisher-rare-fish? suffix)
+                    (fisher-spawn-rare-fish-attachments! fish-proc suffix #f))))))))))
+  (fisher-geologist-position-model! self)
+  (none))
+
+(defun fisher-geologist-draw-rare-effects! ((self fisher-geologist))
+  ;; Forgotten Fish keeps its catalogue motes. Platformius now uses the real
+  ;; world-space particle launch from fisher-platformius-platform-trans.
+  (let ((suffix (fisher-catalog-row-suffix (-> self catalog-index)))
+      (tick (current-time)))
+    (when (= suffix 8)
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf))
+          (bucket-id sprite))
+        (dotimes (i 8)
+          (let* ((phase (mod (+ tick (* i 11)) 58))
+              (px (+ 298 (mod (+ (* i 23) (/ phase 3)) 128)))
+              (py (- 112 (mod (+ (* i 7) phase) 64)))
+              (sz (+ 1 (mod i 2))))
+            (draw-sprite2d-xy
+              buf px py sz sz
+              (new 'static 'rgba :r #x60 :g #xd8 :b #xff :a #x88)))))))
+  (none))
+
+(defun fisher-geologist-draw-catalog! ((self fisher-geologist))
+  (let* ((selected (-> self catalog-index))
+      (last-start (- *fisher-catalog-row-count* 12))
+      (start (max 0 (min last-start (- selected 5))))
+      (discovered? (fisher-catalog-row-discovered? selected)))
+    (fisher-catalog-background-color! selected *fisher-geologist-bg-color*)
+
+    ;; The preview fish stays on the normal world/MERC path, exactly like the
+    ;; catch/loot-window fish.  Do NOT put ordinary sprite DMA into renderer-
+    ;; specific buckets such as `shadow`: the PC ShadowRenderer expects its own
+    ;; STCYCL/UNPACK VIF protocol and will assert if a sprite chain is inserted.
+    ;;
+    ;; Instead, compose this exactly like the loot window: the normal 3D fish is
+    ;; drawn first, then this translucent area-color card and the rest of the UI
+    ;; are drawn later in the normal sprite bucket.
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) global-buf))
+        (bucket-id sprite))
+      ;; Translucent preview color.  Because the world/MERC fish was submitted
+      ;; earlier, it remains visible through this card while keeping its normal
+      ;; materials/textures.
+      ;; Outer frame.
+      (draw-sprite2d-xy buf 18 9 476 29 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
+      (draw-sprite2d-xy buf 18 120 476 94 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
+      (draw-sprite2d-xy buf 18 38 268 82 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
+      (draw-sprite2d-xy buf 438 38 56 82 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
+
+      ;; Brown inset.
+      (draw-sprite2d-xy buf 22 13 468 25 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
+      (draw-sprite2d-xy buf 22 120 468 90 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
+      (draw-sprite2d-xy buf 22 38 264 82 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
+      (draw-sprite2d-xy buf 438 38 52 82 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
+
+      ;; Inner dark panel.
+      (draw-sprite2d-xy buf 26 17 460 21 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
+      (draw-sprite2d-xy buf 26 120 460 86 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
+      (draw-sprite2d-xy buf 26 38 260 82 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
+      (draw-sprite2d-xy buf 438 38 48 82 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
+
+      ;; List panel.
+      (draw-sprite2d-xy buf 31 31 202 163 (new 'static 'rgba :r #x24 :g #x18 :b #x10 :a #xe8))
+
+      ;; Right details panel, carved around the preview.
+      (draw-sprite2d-xy buf 238 31 241 7 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
+      (draw-sprite2d-xy buf 238 120 241 74 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
+      (draw-sprite2d-xy buf 238 38 48 82 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
+      (draw-sprite2d-xy buf 438 38 41 82 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
+
+      ;; Preview border draws after the model and masks the edges cleanly.
+      (draw-sprite2d-xy buf 286 38 152 4 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
+      (draw-sprite2d-xy buf 286 116 152 4 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
+      (draw-sprite2d-xy buf 286 42 4 74 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
+      (draw-sprite2d-xy buf 434 42 4 74 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
+
+      (draw-sprite2d-xy buf 32 (+ 43 (* (- selected start) 12)) 198 12 (new 'static 'rgba :r #x38 :g #x18 :b #x10 :a #x90)))
+
+    (when discovered?
+      (fisher-geologist-draw-rare-effects! self))
+
+    ;; Large Jak 1 font, scaled down for this denser menu.
+    (fisher-geologist-draw-catalog-text "FISH CATALOGUE" 132 22 0.26 #f #t)
+    (clear *fish-ui-str*)
+    (format *fish-ui-str* "DISCOVERED ~D/~D" (fisher-catalog-discovered-count) *fisher-catalog-row-count*)
+    (fisher-geologist-draw-catalog-text *fish-ui-str* 410 22 0.16 #f #t)
+
+    (dotimes (i 12)
+      (let ((row (+ start i)))
+        (when (< row *fisher-catalog-row-count*)
+          (fisher-geologist-draw-catalog-text
+            (if (fisher-catalog-row-discovered? row)
+              (fisher-catalog-row-name row)
+              "???")
+            38
+            (+ 45 (* i 12))
+            0.32
+            (= row selected)
+            #f)
+
+          ;; Show prefix completion on the right edge of each option region.
+          ;; Unique fish have one catalogue state rather than seven prefixes.
+          (clear *fish-ui-str*)
+          (cond
+            ((fisher-catalog-row-unique? row)
+              (format *fish-ui-str* "~D/1" (if (fisher-catalog-row-discovered? row) 1 0)))
+            (else
+              (format *fish-ui-str* "~D/7" (fisher-catalog-prefix-count row))))
+          (fisher-geologist-draw-catalog-text-right
+            *fish-ui-str*
+            226
+            (+ 45 (* i 12))
+            0.30
+            (= row selected)))))
+
+    (cond
+      (discovered?
+        (fisher-geologist-draw-catalog-text (fisher-catalog-row-name selected) 362 126 0.44 #f #t)
+        (cond
+          ((fisher-catalog-row-unique? selected)
+            (fisher-geologist-draw-catalog-text "UNIQUE" 362 141 0.36 #f #t))
+          (else
+            (dotimes (prefix 7)
+              (fisher-geologist-draw-star!
+                (+ 310 (* prefix 16))
+                135
+                (fisher-catalog-prefix-caught? selected prefix)))))
+        (when (not (string= (fisher-catalog-lore-line selected 0) ""))
+          (fisher-geologist-draw-catalog-text "FIELD NOTES" 356 146 0.34 #f #t)
+          (dotimes (line 6)
+            (fisher-geologist-draw-catalog-text
+              (fisher-catalog-lore-line selected line)
+              248
+              (+ 154 (* line 8))
+              0.25
+              #f
+              #f))))
+      (else
+        (fisher-geologist-draw-catalog-text "?" 362 83 1.04 #f #t)
+        (fisher-geologist-draw-catalog-text "???" 362 126 0.44 #f #t)
+        (fisher-geologist-draw-catalog-text "UNDISCOVERED" 362 148 0.34 #f #t)
+        (fisher-geologist-draw-catalog-text "CAUGHT IN:" 248 165 0.28 #f #f)
+        (fisher-geologist-draw-catalog-text (fisher-catalog-row-location selected) 248 178 0.29 #f #f)))
+    (fisher-geologist-draw-catalog-text "RIGHT STICK: ROTATE" 362 190 0.27 #f #t)
+    (fisher-geologist-draw-catalog-text "<PAD_TRIANGLE> EXIT" 256 198 0.38 #f #t))
+  (none))
+
+(defun fisher-geologist-near-jak? ((self fisher-geologist))
+  (and
+    *target*
+    (<=
+      (vector-vector-distance
+        (-> self root trans)
+        (target-pos 0))
+      (meters 8.5))))
+
+(defun fisher-geologist-release-jak! ((self fisher-geologist))
+  (when
+    (and (-> self dialogue-grabbed?) *target*)
+    (process-release? *target*))
+  (set! (-> self dialogue-grabbed?) #f)
+  (none))
+
+(defun fisher-geologist-initialize-collision! ((self fisher-geologist))
+  (let ((shape
+        (new 'process
+          'collide-shape
+          self
+          (collide-list-enum hit-by-player))))
+    (let ((group
+          (new 'process
+            'collide-shape-prim-group
+            shape
+            (the-as uint 1)
+            0)))
+      (set! (-> group prim-core collide-as) (collide-kind enemy))
+      (set! (-> group collide-with) (collide-kind target))
+      (set! (-> group prim-core action) (collide-action solid))
+      (set! (-> group prim-core offense) (collide-offense indestructible))
+      (set-vector! (-> group local-sphere) 4096.0 0.0 4096.0 12288.0)
+      (set-root-prim! shape group)
+      (let ((body
+            (new 'process
+              'collide-shape-prim-sphere
+              shape
+              (the-as uint 0))))
+        (set! (-> body prim-core collide-as) (collide-kind enemy))
+        (set! (-> body collide-with) (collide-kind target))
+        (set! (-> body prim-core action) (collide-action solid))
+        (set! (-> body prim-core offense) (collide-offense indestructible))
+        (set! (-> body transform-index) 3)
+        (set-vector! (-> body local-sphere) 0.0 0.0 0.0 6144.0)
+        (append-prim group body)))
+    (set! (-> shape nav-radius) (* 0.75 (-> shape root-prim local-sphere w)))
+    (backup-collide-with-as shape)
+    (set! (-> self root) shape))
+  (none))
+
+(defun fisher-geologist-initialize-taskable! ((self fisher-geologist))
+  (stack-size-set! (-> self main-thread) 512)
+  (set! (-> self tasks) *fisher-geologist-intro-tasks*)
+  (set! (-> self will-talk) #f)
+  (set! (-> self bounce-away) #f)
+  (set! (-> self skippable) #f)
+  (set! (-> self blend-on-exit) (the-as art-joint-anim #f))
+  (set! (-> self camera) (the-as handle #f))
+  (set! (-> self cell-x) (the-as handle #f))
+  (set! (-> self cell-for-task) (game-task none))
+  (set! (-> self center-joint-index) 3)
+  (set! (-> self cam-joint-index) 3)
+  (set! (-> self neck-joint-index) 3)
+  (set! (-> self cur-trans-hook) nothing)
+  (set! (-> self been-kicked) #f)
+  (set! (-> self sound-flava) (music-flava default))
+  (set! (-> self have-flava) #f)
+  (set! (-> self music) #f)
+  (set! (-> self have-music) #f)
+  (ambient-control-method-9 (-> self ambient))
+  (none))
+
+(defmethod should-display? ((this fisher-geologist)) #t)
+(defmethod process-taskable-method-38 ((this fisher-geologist)) (none))
+(defmethod process-taskable-method-43 ((this fisher-geologist)) #f)
+
+(defbehavior fisher-geologist-init-by-other fisher-geologist ((spawn-pos vector) (level-name symbol))
+  (set! (-> self level-name) level-name)
+  (set! (-> self dialogue-page) 0)
+  (set! (-> self dialogue-char-count) 0)
+  (set! (-> self dialogue-char-timer) 0.0)
+  (set! (-> self dialogue-grabbed?) #f)
+  (set! (-> self catalog-index) 0)
+  (set! (-> self catalog-model) (the-as (pointer manipy) #f))
+  (set! (-> self catalog-model-row) -1)
+  (set! (-> self catalog-yaw) 0.0)
+  (set! (-> self catalog-pitch) 0.0)
+  (set! (-> self catalog-saved-camera-read-analog) #t)
+  (logclear! (-> self mask) (process-mask actor-pause))
+  (fisher-geologist-initialize-taskable! self)
+  (fisher-geologist-initialize-collision! self)
+  (initialize-skeleton self *geologist-sgc* '())
+  (logior! (-> self skel status) (janim-status eye))
+  (#when PC_PORT
+    (set! (-> self skel postbind-function) process-drawable-joint-callback-pc))
+  (set! (-> self draw origin-joint-index) (the-as uint 3))
+  (set! (-> self draw shadow-joint-index) (the-as uint 3))
+  (set! (-> self center-joint-index) 3)
+  (set! (-> self cam-joint-index) 3)
+  (set! (-> self neck-joint-index) 3)
+  (set! (-> self draw-bounds-y-offset) (-> self draw bounds y))
+  (set! (-> self root pause-adjust-distance) -122880.0)
+  (set! (-> self shadow-backup) (-> self draw shadow))
+  (logclear! (-> self draw status) (draw-status hidden))
+  (set! (-> self root trans quad) (-> spawn-pos quad))
+  (set! (-> self root trans w) 1.0)
+  (set! (-> self draw force-lod) 0)
+  (ja :group! geologist-idle-ja)
+  (transform-post)
+  (go fisher-geologist-idle))
+
+(defstate fisher-geologist-idle (fisher-geologist)
+  :enter
+  (behavior ()
+    (set! *fisher-catalog-world-preview-active?* #f)
+    (fisher-geologist-remove-model! self)
+    (fisher-geologist-release-jak! self))
+  :code
+  (behavior ()
+    (loop
+      (ja-no-eval :group! geologist-idle-ja :num! (seek!) :frame-num 0.0)
+      (until (ja-done? 0)
+        (when (fisher-geologist-near-jak? self)
+          (fisher-geologist-draw-text "PRESS <PAD_CIRCLE> TO TALK." 356 170 0.55 #f #t)
+          (when (cpad-pressed? 0 circle)
+            (cpad-clear! 0 circle)
+            (if
+              (task-closed?
+                (game-task fisher-geologist-intro)
+                (task-status need-introduction))
+              (go fisher-geologist-catalog)
+              (go fisher-geologist-dialogue))))
+        (suspend)
+        (ja :num! (seek!)))))
+  :post transform-post)
+
+(defstate fisher-geologist-dialogue (fisher-geologist)
+  :enter
+  (behavior ()
+    (set! (-> self dialogue-page) 0)
+    (set! (-> self dialogue-char-count) 0)
+    (set! (-> self dialogue-char-timer) 0.0)
+    (set! (-> self dialogue-grabbed?) #f)
+    (when *target*
+      (process-grab? *target*)
+      (set! (-> self dialogue-grabbed?) #t))
+    (ja-no-eval :group! geologist-idle-ja :num! (seek!) :frame-num 0.0))
+  :exit
+  (behavior ()
+    ;; Dialogue may transition directly into the catalogue. Keep Jak grabbed
+    ;; across that state transition; idle/kill paths still release him.
+    (none))
+  :code
+  (behavior ()
+    (loop
+      (fisher-geologist-draw-dialogue! self)
+
+      (+!
+        (-> self dialogue-char-timer)
+        (-> *display* seconds-per-frame))
+
+      (while
+        (and
+          (>= (-> self dialogue-char-timer) 0.025)
+          (<
+            (-> self dialogue-char-count)
+            (fisher-geologist-dialogue-total-length self)))
+        (-! (-> self dialogue-char-timer) 0.025)
+        (+! (-> self dialogue-char-count) 1))
+
+      (when (cpad-pressed? 0 x)
+        (cpad-clear! 0 x)
+        (cond
+          ((<
+              (-> self dialogue-char-count)
+              (fisher-geologist-dialogue-total-length self))
+            (set!
+              (-> self dialogue-char-count)
+              (fisher-geologist-dialogue-total-length self))
+            (set! (-> self dialogue-char-timer) 0.0))
+          ((< (-> self dialogue-page) 3)
+            (+! (-> self dialogue-page) 1)
+            (set! (-> self dialogue-char-count) 0)
+            (set! (-> self dialogue-char-timer) 0.0))
+          (else
+            (close-specific-task!
+              (game-task fisher-geologist-intro)
+              (task-status need-introduction))
+            (auto-save-command 'auto-save 0 0 *default-pool*)
+            (go fisher-geologist-catalog))))
+      (when (cpad-pressed? 0 triangle)
+        (cpad-clear! 0 triangle)
+        (go fisher-geologist-idle))
+      (suspend)
+      (ja :num! (seek!))))
+  :post transform-post)
+
+(defstate fisher-geologist-catalog (fisher-geologist)
+  :enter
+  (behavior ()
+    ;; Catalogue owns Jak for its entire lifetime.  Save camera-stick state,
+    ;; then disable normal camera analog input so the right stick controls only
+    ;; the preview fish.
+    (set! (-> self catalog-saved-camera-read-analog) *camera-read-analog*)
+    (set! *camera-read-analog* #f)
+    (set! *fisher-catalog-world-preview-active?* #t)
+    (when *target*
+      (process-grab? *target*)
+      (set! (-> self dialogue-grabbed?) #t))
+    (set! (-> self catalog-model-row) -1)
+    (fisher-geologist-refresh-model! self)
+    (ja-no-eval :group! geologist-idle-ja :num! (seek!) :frame-num 0.0))
+  :exit
+  (behavior ()
+    (set! *camera-read-analog* (-> self catalog-saved-camera-read-analog))
+    (set! *fisher-catalog-world-preview-active?* #f)
+    (fisher-geologist-remove-model! self)
+    (fisher-geologist-release-jak! self))
+  :code
+  (behavior ()
+    (loop
+      ;; Reassert both locks every frame.  If another process releases Jak or
+      ;; re-enables camera analog while this menu is open, catalogue takes
+      ;; ownership back immediately.
+      (set! *camera-read-analog* #f)
+      (set! *fisher-catalog-world-preview-active?* #t)
+      (when *target*
+        (process-grab? *target*)
+        (set! (-> self dialogue-grabbed?) #t))
+      (fisher-geologist-update-model-rotation! self)
+      (fisher-geologist-refresh-model! self)
+      (fisher-geologist-draw-catalog! self)
+      (cond
+        ((cpad-pressed? 0 up)
+          (cpad-clear! 0 up)
+          (set! (-> self catalog-index)
+            (mod (+ (-> self catalog-index) (- *fisher-catalog-row-count* 1)) *fisher-catalog-row-count*))
+          (fisher-geologist-refresh-model! self))
+        ((cpad-pressed? 0 down)
+          (cpad-clear! 0 down)
+          (set! (-> self catalog-index)
+            (mod (+ (-> self catalog-index) 1) *fisher-catalog-row-count*))
+          (fisher-geologist-refresh-model! self))
+        ((cpad-pressed? 0 triangle)
+          (cpad-clear! 0 triangle)
+          (go fisher-geologist-idle)))
+      (suspend)
+      (ja :num! (seek!))))
+  :post transform-post)
+
+(defun spawn-fisher-geologist ((spawn-pos vector) (level-name symbol))
+  (when *fisher-geologist*
+    (kill-fisher-geologist))
+  (set!
+    *fisher-geologist*
+    (process-spawn
+      fisher-geologist
+      spawn-pos
+      level-name
+      :name "fisher-geologist"
+      :to *active-pool*))
+  (none))
+
+(defun kill-fisher-geologist ()
+  (set! *fisher-catalog-world-preview-active?* #f)
+  (when *fisher-geologist*
+    (fisher-geologist-remove-model! (-> *fisher-geologist* 0))
+    (when
+      (and
+        (-> *fisher-geologist* 0 dialogue-grabbed?)
+        *target*)
+      (process-release? *target*))
+    (kill-by-name "fisher-geologist" *active-pool*))
+  (set! *fisher-geologist* #f)
   (none))

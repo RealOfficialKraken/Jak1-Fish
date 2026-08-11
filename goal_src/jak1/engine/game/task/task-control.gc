@@ -17,10 +17,78 @@
   "Get the status for this cstage"
   (-> this status))
 
+(defun fisher-catalog-game-task? ((task game-task))
+  (and
+    (>= (the-as int task) (the-as int (game-task catalog-eco-drum)))
+    (<= (the-as int task) (the-as int (game-task catalog-screaming-fish)))))
+
+;; The seven prefix discoveries for a normal catalogue fish are stored as
+;; seven cstages on that fish's single permanent game-task:
+;;   unknown              = MALNUTRITIONED
+;;   need-hint            = STRESSED
+;;   need-introduction    = HEALTHY
+;;   need-reminder-a      = MUTANT
+;;   need-reminder        = RARE
+;;   need-reward-speech   = MEGA
+;;   need-resolution      = GOLDEN
+;; Each cstage maps to one persistent bit in entity-perm.user-uint64.
+(defun fisher-catalog-status-mask ((status task-status))
+  (cond
+    ((= status (task-status unknown)) #x01)
+    ((= status (task-status need-hint)) #x02)
+    ((= status (task-status need-introduction)) #x04)
+    ((= status (task-status need-reminder-a)) #x08)
+    ((= status (task-status need-reminder)) #x10)
+    ((= status (task-status need-reward-speech)) #x20)
+    ((= status (task-status need-resolution)) #x40)
+    (else 0)))
+
+(defun fisher-ensure-task-perm-storage! ()
+  "Make permanent task storage large enough for modded game-task values.
+   Rebuild the extension after loading an older save whose task-list only had 116 entries."
+  (let* ((required (the-as int (game-task max)))
+      (old-list (-> *game-info* task-perm-list)))
+    (when
+      (or
+        (< (-> old-list allocated-length) required)
+        (< (-> old-list length) required))
+      (let* ((copy-count (min (-> old-list length) required))
+          (new-list (new 'global 'entity-perm-array required)))
+        ;; Start all newly-added task-perm entries empty and give every slot
+        ;; its matching task id.  This is also what vanilla game-info does.
+        (dotimes (i required)
+          (set! (-> new-list data i aid) (the-as actor-id 0))
+          (set! (-> new-list data i task) (the-as game-task i))
+          (set! (-> new-list data i status) (the-as entity-perm-status 0))
+          (set! (-> new-list data i user-uint64) (the-as uint64 0)))
+
+        ;; Preserve every task entry that actually existed in the loaded save.
+        (dotimes (i copy-count)
+          (set! (-> new-list data i quad) (-> old-list data i quad)))
+
+        ;; Task 1 is vanilla's permanently-complete sentinel.  A real game-info
+        ;; already has it, but keep the invariant if this ever repairs an empty list.
+        (when (= copy-count 0)
+          (logior!
+            (-> new-list data 1 status)
+            (entity-perm-status real-complete)))
+
+        (set! (-> *game-info* task-perm-list) new-list))))
+  (none))
+
 (defmethod closed? ((this task-cstage))
   "Is the closed flag set?"
   (declare (inline))
-  (logtest? (-> this flags) (task-flags closed)))
+  (cond
+    ((fisher-catalog-game-task? (-> this game-task))
+      (fisher-ensure-task-perm-storage!)
+      (or
+        (logtest? (-> this flags) (task-flags closed))
+        (logtest?
+          (-> (get-entity-task-perm *game-info* (-> this game-task)) user-uint64)
+          (fisher-catalog-status-mask (-> this status)))))
+    (else
+      (logtest? (-> this flags) (task-flags closed)))))
 
 (defmethod closed-by-default? ((this task-cstage))
   "Is the closed-by-default flag set?"
@@ -29,10 +97,13 @@
 
 (defmethod task-available? ((this task-cstage) (arg0 task-control))
   "Is this task available to be the current task?"
+  (fisher-ensure-task-perm-storage!)
   (cond
     ((closed? this)
      ;; we're already closed.
      #f)
+    ((fisher-catalog-game-task? (-> this game-task))
+     ((-> this condition) arg0))
     ((>= (the-as int (-> (get-entity-task-perm *game-info* (-> this game-task)) user-uint8 0)) (the-as int (-> this status)))
      ;; the permanent entity for this task has stored that we have progresssed past
      ;; our status. Remember that we are closed, and return #f.
@@ -49,6 +120,7 @@
 
 (defmethod close-task! ((this task-cstage))
   "Close this task!"
+  (fisher-ensure-task-perm-storage!)
   (if (= (-> this game-task) (game-task none))
     ;; invalid task.
     (return (the-as int #f)))
@@ -60,8 +132,16 @@
     (let ((v1-9 (get-entity-task-perm *game-info* (-> this game-task))))
       ;; we set a bit to indicate that we are storing a non-default status
       (logior! (-> v1-9 status) (entity-perm-status user-set-from-cstage))
-      ;; and store the actual status (only increment)
-      (if (< (-> v1-9 user-uint8 0) (the-as uint (-> this status))) (set! (-> v1-9 user-int8 0) (the-as int (-> this status))))))
+      (cond
+        ((fisher-catalog-game-task? (-> this game-task))
+          (set!
+            (-> v1-9 user-uint64)
+            (logior
+              (-> v1-9 user-uint64)
+              (fisher-catalog-status-mask (-> this status)))))
+        (else
+          ;; and store the actual status (only increment)
+          (if (< (-> v1-9 user-uint8 0) (the-as uint (-> this status))) (set! (-> v1-9 user-int8 0) (the-as int (-> this status))))))))
   0)
 
 (defmethod open-task! ((this task-cstage))
@@ -1860,6 +1940,1770 @@
                  :condition
                  (lambda :behavior process-taskable ((arg0 task-control))
                    #t)))))
+
+(define *fisher-geologist-intro-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task fisher-geologist-intro)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-eco-drum-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-eco-drum)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-largemouth-ecofish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-largemouth-ecofish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-babak-ecofish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-babak-ecofish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-lurker-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lurker-shark)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-scout-fly-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-scout-fly)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-poisonous-eelfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-poisonous-eelfish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-fire-canyon-cell-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fire-canyon-cell-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-electric-grubfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-grubfish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-electric-eelfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-eelfish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-electric-lurker-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-electric-lurker-shark)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-swamp-guppie-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-swamp-guppie)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-sludge-crappie-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-sludge-crappie)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-black-lurker-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-black-lurker-shark)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-lava-drum-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-lava-drum)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-magma-serpent-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-magma-serpent)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-inferno-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-inferno-shark)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-frost-biter-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-frost-biter)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-crystal-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-crystal-fish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-ice-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-ice-shark)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-helix-voidfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-helix-voidfish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-dark-precursor-fangfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-dark-precursor-fangfish)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-phantasm-shark-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-phantasm-shark)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-megaloviathan-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-megaloviathan)
+        :status (task-status need-resolution)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-nuclear-bombfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-nuclear-bombfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-precursor-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-precursor-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-forgotten-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-forgotten-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-fricked-up-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fricked-up-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-precursor-orb-hunter-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-precursor-orb-hunter)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-archipelagoldfish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-archipelagoldfish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-spec-ops-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-spec-ops-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-complicated-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-complicated-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-l-tetromino-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-l-tetromino-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-platformius-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-platformius)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
+
+(define *fisher-catalog-screaming-fish-tasks*
+  (new 'static
+    'task-control
+    :current-stage -1
+    :stage
+    (new 'static
+      'boxed-array
+      :type task-cstage
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-screaming-fish)
+        :status (task-status unknown)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable
+          ((arg0 task-control))
+          #t)))))
 
 (define *task-controls*
   (the-as (array task-control)
@@ -5029,10 +6873,46 @@
                ;; Task 117
                '*fisher-man-orb-tasks*
                ;; Task 118
-               '*fisher-button-fight-hint-tasks*)))
+               '*fisher-button-fight-hint-tasks*
+               '*fisher-geologist-intro-tasks*
+               '*fisher-catalog-eco-drum-tasks*
+               '*fisher-catalog-largemouth-ecofish-tasks*
+               '*fisher-catalog-babak-ecofish-tasks*
+               '*fisher-catalog-lurker-shark-tasks*
+               '*fisher-catalog-scout-fly-tasks*
+               '*fisher-catalog-poisonous-eelfish-tasks*
+               '*fisher-catalog-fire-canyon-cell-shark-tasks*
+               '*fisher-catalog-electric-grubfish-tasks*
+               '*fisher-catalog-electric-eelfish-tasks*
+               '*fisher-catalog-electric-lurker-shark-tasks*
+               '*fisher-catalog-swamp-guppie-tasks*
+               '*fisher-catalog-sludge-crappie-tasks*
+               '*fisher-catalog-black-lurker-shark-tasks*
+               '*fisher-catalog-lava-drum-tasks*
+               '*fisher-catalog-magma-serpent-tasks*
+               '*fisher-catalog-inferno-shark-tasks*
+               '*fisher-catalog-frost-biter-tasks*
+               '*fisher-catalog-crystal-fish-tasks*
+               '*fisher-catalog-ice-shark-tasks*
+               '*fisher-catalog-helix-voidfish-tasks*
+               '*fisher-catalog-dark-precursor-fangfish-tasks*
+               '*fisher-catalog-phantasm-shark-tasks*
+               '*fisher-catalog-megaloviathan-tasks*
+               '*fisher-catalog-nuclear-bombfish-tasks*
+               '*fisher-catalog-precursor-fish-tasks*
+               '*fisher-catalog-forgotten-fish-tasks*
+               '*fisher-catalog-fricked-up-fish-tasks*
+               '*fisher-catalog-precursor-orb-hunter-tasks*
+               '*fisher-catalog-archipelagoldfish-tasks*
+               '*fisher-catalog-spec-ops-fish-tasks*
+               '*fisher-catalog-complicated-fish-tasks*
+               '*fisher-catalog-l-tetromino-fish-tasks*
+               '*fisher-catalog-platformius-tasks*
+               '*fisher-catalog-screaming-fish-tasks*)))
 
 (defun task-control-reset ((arg0 symbol))
   "Reset all task controls and set their current stage"
+  (fisher-ensure-task-perm-storage!)
   (let ((s5-0 *task-controls*))
     (countdown (s4-0 (-> s5-0 length))
       (reset! (-> s5-0 s4-0) arg0 #f)
@@ -5091,6 +6971,7 @@
   (game-task none))
 
 (defun task-closed? ((arg0 game-task) (arg1 task-status))
+  (fisher-ensure-task-perm-storage!)
   (closed? (get-task-control arg0) arg0 arg1))
 
 (defun task-exists? ((arg0 game-task) (arg1 task-status))

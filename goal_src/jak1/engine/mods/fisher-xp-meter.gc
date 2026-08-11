@@ -338,7 +338,21 @@
           (< starting-level *fisher-heal-line-unlock-level*)
           (>= level *fisher-heal-line-unlock-level*))
 
-        (+! *fisher-level-up-window-skill-mask* 32)))
+        (+! *fisher-level-up-window-skill-mask* 32))
+
+      (when
+        (and
+          (< starting-level *fisher-line-hp-upgrade-level*)
+          (>= level *fisher-line-hp-upgrade-level*))
+
+        (+! *fisher-level-up-window-skill-mask* 64))
+
+      (when
+        (and
+          (< starting-level *fisher-level-cap*)
+          (>= level *fisher-level-cap*))
+
+        (+! *fisher-level-up-window-skill-mask* 128)))
 
     (max 0 awarded-xp)))
 
@@ -483,7 +497,21 @@
                 (< old-level *fisher-heal-line-unlock-level*)
                 (>= new-level *fisher-heal-line-unlock-level*))
 
-              (+! *fisher-level-up-window-skill-mask* 32)))))))
+              (+! *fisher-level-up-window-skill-mask* 32))
+
+            (when
+              (and
+                (< old-level *fisher-line-hp-upgrade-level*)
+                (>= new-level *fisher-line-hp-upgrade-level*))
+
+              (+! *fisher-level-up-window-skill-mask* 64))
+
+            (when
+              (and
+                (< old-level *fisher-level-cap*)
+                (>= new-level *fisher-level-cap*))
+
+              (+! *fisher-level-up-window-skill-mask* 128)))))))
 
   (none))
 
@@ -846,39 +874,43 @@
                 1.0
                 (/ *fisher-xp-bar-flash-time* 0.30))))))
 
-      (set!
-        (-> fill-color r)
-        (the uint8
-          (+ 216.0 (* 39.0 fill-light-blend))))
-
-      (set!
-        (-> fill-color g)
-        (the uint8
-          (+ 120.0 (* 80.0 fill-light-blend))))
-
-      (set!
-        (-> fill-color b)
-        (the uint8
-          (+ 40.0 (* 72.0 fill-light-blend))))
-
-      (set! (-> fill-color a) #xe0)
-
-      (set!
-        (-> fill-shine-color r)
-        (the uint8
-          (+ 240.0 (* 15.0 fill-light-blend))))
-
-      (set!
-        (-> fill-shine-color g)
-        (the uint8
-          (+ 160.0 (* 64.0 fill-light-blend))))
-
-      (set!
-        (-> fill-shine-color b)
-        (the uint8
-          (+ 72.0 (* 72.0 fill-light-blend))))
-
-      (set! (-> fill-shine-color a) #xc0)
+      (cond
+        (at-cap?
+          (set! (-> fill-color r) #x28)
+          (set! (-> fill-color g) #x78)
+          (set! (-> fill-color b) #xd8)
+          (set! (-> fill-color a) #xe0)
+          (set! (-> fill-shine-color r) #x58)
+          (set! (-> fill-shine-color g) #xb8)
+          (set! (-> fill-shine-color b) #xff)
+          (set! (-> fill-shine-color a) #xc0))
+        (else
+          (set!
+            (-> fill-color r)
+            (the uint8
+              (+ 216.0 (* 39.0 fill-light-blend))))
+          (set!
+            (-> fill-color g)
+            (the uint8
+              (+ 120.0 (* 80.0 fill-light-blend))))
+          (set!
+            (-> fill-color b)
+            (the uint8
+              (+ 40.0 (* 72.0 fill-light-blend))))
+          (set! (-> fill-color a) #xe0)
+          (set!
+            (-> fill-shine-color r)
+            (the uint8
+              (+ 240.0 (* 15.0 fill-light-blend))))
+          (set!
+            (-> fill-shine-color g)
+            (the uint8
+              (+ 160.0 (* 64.0 fill-light-blend))))
+          (set!
+            (-> fill-shine-color b)
+            (the uint8
+              (+ 72.0 (* 72.0 fill-light-blend))))
+          (set! (-> fill-shine-color a) #xc0)))
 
       (clear *fisher-level-text*)
       (clear *fisher-xp-text*)
@@ -889,7 +921,7 @@
 
       (if
         at-cap?
-        (format *fisher-xp-text* "MAX")
+        (format *fisher-xp-text* "MASTERED")
         (format *fisher-xp-text* "~D/~D" current-xp xp-needed))
 
       (pc-encode-utf8-string
@@ -911,13 +943,17 @@
 
         (draw-sprite2d-xy
           buf 116 (+ 206 meter-y) 280 16
-          (new 'static 'rgba
-            :r #x48 :g #x28 :b #x10 :a #xe0))
+          (if
+            at-cap?
+            (new 'static 'rgba :r #x18 :g #x48 :b #x78 :a #xe0)
+            (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xe0)))
 
         (draw-sprite2d-xy
           buf 118 (+ 208 meter-y) 276 12
-          (new 'static 'rgba
-            :r #x24 :g #x18 :b #x10 :a #xd0))
+          (if
+            at-cap?
+            (new 'static 'rgba :r #x10 :g #x28 :b #x48 :a #xd0)
+            (new 'static 'rgba :r #x24 :g #x18 :b #x10 :a #xd0)))
 
         (when (> fill-width 0)
           (draw-sprite2d-xy
@@ -933,7 +969,7 @@
           buf
           256
           (+ 180 meter-y)
-          (font-color orange)
+          (if at-cap? (font-color white) (font-color orange))
           (font-flags large middle shadow kerning)
           level-scale)
 

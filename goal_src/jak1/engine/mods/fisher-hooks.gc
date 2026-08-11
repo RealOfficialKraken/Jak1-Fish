@@ -1026,6 +1026,26 @@
               1
               'village1))
 
+          ((= current-level 'village2)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 357.4125)
+                :y (meters 1.3473)
+                :z (meters -1723.6861)
+                :w 1.0)
+              1
+              'village2))
+
+          ((= current-level 'village3)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 1124.3986)
+                :y (meters 45.8166)
+                :z (meters -3568.5393)
+                :w 1.0)
+              1
+              'village3))
+
           ((and
               (= current-level 'ogre)
               (not
@@ -1075,6 +1095,46 @@
                 (matrix->quaternion
                   (-> *fisher-man* 0 root quat)
                   firecanyon-fisher-rot))))))))
+
+  (when
+    (and
+      *level*
+      *target*
+      (= (pause-allowed?) #t)
+      (= (paused?) #f))
+    (let ((current-level (-> (level-get-target-inside *level*) name)))
+      (when
+        (and
+          *fisher-geologist*
+          (!= current-level (-> *fisher-geologist* 0 level-name)))
+        (kill-fisher-geologist))
+      (when
+        (not *fisher-geologist*)
+        (cond
+          ((= current-level 'village1)
+            (spawn-fisher-geologist
+              (new 'static 'vector
+                :x (meters -54.8791)
+                :y (meters 9.1207)
+                :z (meters 79.7542)
+                :w 1.0)
+              'village1))
+          ((= current-level 'village2)
+            (spawn-fisher-geologist
+              (new 'static 'vector
+                :x (meters 365.4533)
+                :y (meters 1.2650)
+                :z (meters -1728.5472)
+                :w 1.0)
+              'village2))
+          ((= current-level 'village3)
+            (spawn-fisher-geologist
+              (new 'static 'vector
+                :x (meters 1124.9919)
+                :y (meters 45.7740)
+                :z (meters -3563.2534)
+                :w 1.0)
+              'village3))))))
 
   (when *debug-segment* (orb-placer-maintenance))
   (none))
