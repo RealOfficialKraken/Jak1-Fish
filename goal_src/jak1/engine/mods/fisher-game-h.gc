@@ -831,6 +831,7 @@
 (defun-extern fisher-update-xp-meter-drop! none)
 (defun-extern draw-fisher-small-text string int int none)
 (defun-extern draw-mod-menu-text-custom string int int symbol symbol symbol none)
+(defun-extern fisher-display-skeleton-for int int skeleton-group)
 (defun-extern fisher-apply-slot-appearance! fisher-game int manipy symbol none)
 (defun-extern fisher-spawn-gameplay-fish fisher-game int (pointer manipy))
 (defun-extern fisher-debug-draw-fish-cone! fisher-game int manipy none)
@@ -1014,6 +1015,7 @@
 ;; fish-spawnings.gc, but several are referenced earlier in that file and/or
 ;; from other mod files, so keep the header authoritative for forward refs.
 (define-extern *fisher-catalog-world-preview-active?* symbol)
+(define-extern *fisher-catalog-attachment-spawn-scale* float)
 (define *fisher-geologist-dialogue-lines*
   (new 'static
     'boxed-array
@@ -1066,7 +1068,10 @@
 (defun-extern fisher-geologist-draw-catalog-text-right string int int float symbol none)
 (defun-extern fisher-geologist-draw-star! int int symbol none)
 (defun-extern fisher-geologist-draw-dialogue! fisher-geologist none)
+(defun-extern fisher-draw-bones-catalog-hud-merc! draw-control dma-buffer none)
+(defun-extern fisher-dma-add-process-drawable-catalog-hud-merc! process-drawable draw-control symbol dma-buffer none)
 (defun-extern fisher-geologist-style-model! int manipy none)
+(defun-extern fisher-catalog-convert-manipy-tree-to-hud! manipy float none)
 (defun-extern fisher-geologist-remove-model! fisher-geologist none)
 (defun-extern fisher-geologist-update-model-rotation! fisher-geologist none)
 (defun-extern fisher-geologist-position-model! fisher-geologist none)

@@ -1,6 +1,8 @@
 ;;-*-Lisp-*-
 (in-package goal)
 (bundles "JUN.DGO")
+(require "pc/hud-classes-pc.gc")
+(require "engine/gfx/foreground/bones.gc")
 
 ;;name: fish-spawnings.gc
 
@@ -3204,8 +3206,8 @@
 (define *fisher-platformius-group-offset-catch*
   (new 'static 'vector :y (meters 1.15) :w 0.0))
 
-;; Catalogue HUD-MERC previews use the PC MERC material path directly.
-;; Do not force PRIS residency here; that can bind the current area's page.
+;; Catalogue previews use screen-space bones with native PC MERC materials.
+;; Never force PRIS/generic texture residency here; the fish keeps its MERC material bindings.
 
 (defun fisher-update-rare-attachment-transform! ((self manipy))
   (let ((parent-proc (ppointer->process (-> self parent)))
@@ -3219,7 +3221,7 @@
           *fisher-resident-fish-visible?*
           in-main-menu?
           *fisher-catalog-world-preview-active?*
-          (= (-> self draw dma-add-func) dma-add-process-drawable-hud-merc))
+          (= (-> self draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!))
         (meters 999999.0)
         (meters 0.0)))
 
@@ -3320,7 +3322,7 @@
           *fisher-resident-fish-visible?*
           in-main-menu?
           *fisher-catalog-world-preview-active?*
-          (= (-> self draw dma-add-func) dma-add-process-drawable-hud-merc))
+          (= (-> self draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!))
         (meters 999999.0)
         (meters 0.0)))
 
@@ -3429,7 +3431,7 @@
   ;; Platformius sparks in its preview panel instead.
   (when
     (and
-      (!= (-> self draw dma-add-func) dma-add-process-drawable-hud-merc)
+      (!= (-> self draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!)
       (zero? (mod (current-time) 12)))
     (launch-particles
       :system *sp-particle-system-3d*
@@ -3616,7 +3618,7 @@
   ;; 8x the old generic-HUD depth, so the old 0.014 child conversion becomes
   ;; 0.112 to preserve the same apparent attachment size and offsets.
   (let* ((catalog-hud?
-          (= (-> fish-proc draw dma-add-func) dma-add-process-drawable-hud-merc))
+          (= (-> fish-proc draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!))
       (hud-x (* 0.112 (-> *video-parms* relative-x-scale)))
       (hud-y (* 0.112 (-> *video-parms* relative-y-scale)))
       (attachment
@@ -3648,13 +3650,21 @@
                 1.0)
               (set!
                 (-> attachment-proc draw dma-add-func)
-                dma-add-process-drawable-hud-merc))
+                fisher-dma-add-process-drawable-catalog-hud-merc!))
             (else
-              (set! (-> attachment-proc root transv quad) (-> offset quad))
+              (set! (-> attachment-proc root transv x)
+                (* (-> offset x) *fisher-catalog-attachment-spawn-scale*))
+              (set! (-> attachment-proc root transv y)
+                (* (-> offset y) *fisher-catalog-attachment-spawn-scale*))
+              (set! (-> attachment-proc root transv z)
+                (* (-> offset z) *fisher-catalog-attachment-spawn-scale*))
               (set! (-> attachment-proc root transv w) 0.0)
               (set-vector!
                 (-> attachment-proc root scale)
-                scale scale scale 1.0)))
+                (* scale *fisher-catalog-attachment-spawn-scale*)
+                (* scale *fisher-catalog-attachment-spawn-scale*)
+                (* scale *fisher-catalog-attachment-spawn-scale*)
+                1.0)))
 
           (send-event attachment-proc 'max-vis-dist (meters 999999.0))
 
@@ -3920,17 +3930,38 @@
   )
   (none))
 
-(defun fisher-apply-slot-appearance!
-  ((self fisher-game) (slot int) (fish-proc manipy) (catch-display? symbol))
 
-  (let* ((suffix
-        (fisher-fish-suffix self slot))
+(defun fisher-display-skeleton-for ((species int) (suffix int))
+  ;; Single source of truth for the model shown by both the real catch/loot
+  ;; window and the fish catalogue. Rare suffixes deliberately replace the
+  ;; base species skeleton exactly as the original catch-display code did.
+  (cond
+    ((or (= suffix 7) (= suffix 11) (= suffix 14) (= suffix 15) (= suffix 16))
+      *catch-fishb-sgc*)
+    ((= suffix 8)
+      *catch-fisha-sgc*)
+    ((= suffix 12)
+      *catch-fishc-sgc*)
+    ((or (= suffix 9) (= suffix 10) (= suffix 13))
+      *catch-fisha-sgc*)
+    (else
+      (the-as skeleton-group
+        (-> (fisher-species-info-for species) skeleton)))))
 
-      (species (fisher-fish-species self slot))
+(defun fisher-apply-fish-appearance!
+  ((species int)
+    (suffix int)
+    (power-cell-task int)
+    (slot int)
+    (location-id int)
+    (weight-tenths int)
+    (fish-proc manipy)
+    (catch-display? symbol))
 
-      (power-cell-task (fisher-fish-power-cell-task self slot))
-
-      (info
+  ;; Shared appearance path for live/catch fish and catalogue previews.
+  ;; This is the loot-window appearance code, with the fish metadata passed
+  ;; explicitly so the geologist catalogue can use it without a fisher-game.
+  (let* ((info
         (fisher-species-info-for species))
 
       (base-scale
@@ -4122,7 +4153,7 @@
 
     (when
       (and
-        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= location-id (the-as int (fisher-zone village3-lava)))
         (= species (the-as int (fisher-species magma-serpent))))
       (set! base-scale (if catch-display? 3.00 2.16))
       (set! x-scale 0.62)
@@ -4131,7 +4162,7 @@
 
     (when
       (and
-        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (= location-id (the-as int (fisher-zone snow-ice)))
         (!= species (the-as int (fisher-species scout-fly))))
       (set! r 0.05)
       (set! g 1.00)
@@ -4148,10 +4179,10 @@
       (set! z-scale 1.0))
 
     (when
-      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (= location-id (the-as int (fisher-zone maincave-dark-eco)))
       (let* ((min-weight (the float (-> info min-weight-tenths)))
           (max-weight (the float (-> info max-weight-tenths)))
-          (weight (the float (fisher-fish-weight-tenths self slot)))
+          (weight (the float weight-tenths))
           (weight-range (fmax 1.0 (- max-weight min-weight)))
           (weight-ratio
             (fmax 0.0 (fmin 1.0 (/ (- weight min-weight) weight-range))))
@@ -4213,7 +4244,7 @@
 
     (when
       (and
-        (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+        (= location-id (the-as int (fisher-zone finalboss-nuclear)))
         (= species (the-as int (fisher-species nuclear-bombfish))))
       (set! r 0.0)
       (set! g 0.0)
@@ -4234,7 +4265,7 @@
     (set! (-> fish-proc draw color-mult a) 1.0)
 
     (when
-      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (= location-id (the-as int (fisher-zone maincave-dark-eco)))
       (cond
         ((and
             (= species (the-as int (fisher-species fire-canyon-cellfish)))
@@ -4254,7 +4285,7 @@
 
     (when
       (and
-        (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear)))
+        (= location-id (the-as int (fisher-zone finalboss-nuclear)))
         (= species (the-as int (fisher-species nuclear-bombfish))))
       (set! (-> fish-proc draw color-mult a) 8.00))
 
@@ -4265,7 +4296,7 @@
 
     (when
       (and
-        (= (-> self location-id) (the-as int (fisher-zone village3-lava)))
+        (= location-id (the-as int (fisher-zone village3-lava)))
         (not (fisher-rare-fish? suffix)))
       (cond
         ((= species (the-as int (fisher-species lava-drum)))
@@ -4280,14 +4311,14 @@
 
     (when
       (and
-        (= (-> self location-id) (the-as int (fisher-zone snow-ice)))
+        (= location-id (the-as int (fisher-zone snow-ice)))
         (!= species (the-as int (fisher-species scout-fly))))
       (set! (-> fish-proc draw color-emissive r) 0.035)
       (set! (-> fish-proc draw color-emissive g) 0.18)
       (set! (-> fish-proc draw color-emissive b) 0.22))
 
     (when
-      (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
+      (= location-id (the-as int (fisher-zone maincave-dark-eco)))
       (cond
         ((= species (the-as int (fisher-species helix-voidfish)))
           (set! (-> fish-proc draw color-emissive r) 0.08)
@@ -4302,6 +4333,22 @@
         (degrees 180.0))))
 
   (none))
+
+(defun fisher-apply-slot-appearance!
+  ((self fisher-game) (slot int) (fish-proc manipy) (catch-display? symbol))
+
+  (fisher-apply-fish-appearance!
+    (fisher-fish-species self slot)
+    (fisher-fish-suffix self slot)
+    (fisher-fish-power-cell-task self slot)
+    slot
+    (-> self location-id)
+    (fisher-fish-weight-tenths self slot)
+    fish-proc
+    catch-display?)
+
+  (none))
+
 
 (defun fisher-fish-pointer ((self fisher-game) (slot int))
   (-> self fish-data slot slot visual))
@@ -6389,6 +6436,7 @@
 
     (when
       (and
+        (not (paused?))
         (fisher-man-valid-dialogue?
           (-> self dialogue-type))
         (fisher-man-near-jak? self))
@@ -6866,10 +6914,19 @@
 
 (define *fisher-geologist-bg-color* (new 'static 'rgba :r #x00 :g #x00 :b #x00 :a #xff))
 
-;; Catalogue preview models use the same normal world/MERC path as the
-;; fishing loot-window fish. Keep rare child models alive while this preview
-;; is active without switching them to a HUD renderer.
+;; Keep rare child models alive while the catalogue owns a preview. The root
+;; fish is first built exactly like a catch-display fish, then the completed
+;; MERC tree is converted to the foreground HUD renderer below.
 (define *fisher-catalog-world-preview-active?* #f)
+
+;; The catalogue uses OpenGOAL's foreground MERC HUD renderer.  0.014 is the
+;; world-model -> 512x448 HUD scale that puts an ordinary catch-display fish
+;; in the same visual size range as the game's 3D HUD icons.  A uniform fit
+;; multiplier is applied only when a fish's authored catch proportions would
+;; otherwise exceed the preview window.
+(define *fisher-catalog-hud-unit-scale* 0.14)
+(define *fisher-catalog-hud-fit-scale* 1.0)
+(define *fisher-catalog-attachment-spawn-scale* 1.0)
 
 ;; Geologist dialogue uses the same buffered typewriter presentation as the fisherman.
 (define *fisher-geologist-dialogue-buffer-0*
@@ -6979,24 +7036,28 @@
   (none))
 
 (defun fisher-catalog-prefix-caught? ((row int) (prefix int))
-  (and
-    (not (fisher-catalog-row-unique? row))
-    (task-closed?
-      (fisher-catalog-task-for-row row)
-      (fisher-catalog-status-for-prefix prefix))))
-
-(defun fisher-catalog-row-discovered? ((row int))
-  (cond
-    ((fisher-catalog-row-unique? row)
+  (or
+    *fisher-in-debug?*
+    (and
+      (not (fisher-catalog-row-unique? row))
       (task-closed?
         (fisher-catalog-task-for-row row)
-        (task-status unknown)))
-    (else
-      (let ((found? #f))
-        (dotimes (prefix 7)
-          (when (fisher-catalog-prefix-caught? row prefix)
-            (set! found? #t)))
-        found?))))
+        (fisher-catalog-status-for-prefix prefix)))))
+
+(defun fisher-catalog-row-discovered? ((row int))
+  (if *fisher-in-debug?*
+    #t
+    (cond
+      ((fisher-catalog-row-unique? row)
+        (task-closed?
+          (fisher-catalog-task-for-row row)
+          (task-status unknown)))
+      (else
+        (let ((found? #f))
+          (dotimes (prefix 7)
+            (when (fisher-catalog-prefix-caught? row prefix)
+              (set! found? #t)))
+          found?)))))
 
 (defun fisher-catalog-prefix-count ((row int))
   (let ((count 0))
@@ -7043,6 +7104,36 @@
     ((or (= row 19) (= row 20) (= row 21) (= row 22) (= row 33)) "SPIDER CAVE")
     (else "???")))
 
+(defun fisher-catalog-row-zone ((row int))
+  ;; Use the same location-id that the fish has when it is shown in the real
+  ;; catch/loot window.  This matters for lava, snow, dark-eco and final-boss
+  ;; appearance overrides.
+  (cond
+    ((or (= row 0) (= row 1) (= row 24))
+      (the-as int (fisher-zone sandover-dock)))
+    ((or (= row 2) (= row 3) (= row 25))
+      (the-as int (fisher-zone jungle-pillar)))
+    ((= row 26)
+      (the-as int (fisher-zone sentinel-pontoon)))
+    ((or (= row 5) (= row 27))
+      (the-as int (fisher-zone misty-island)))
+    ((= row 4)
+      (the-as int (fisher-zone sandover-dock)))
+    ((or (= row 6) (= row 7) (= row 8) (= row 9) (= row 28))
+      (the-as int (fisher-zone village2-electric)))
+    ((= row 29)
+      (the-as int (fisher-zone sunken-voltage)))
+    ((or (= row 10) (= row 11) (= row 12) (= row 30))
+      (the-as int (fisher-zone swamp-sludge)))
+    ((or (= row 13) (= row 14) (= row 15) (= row 31))
+      (the-as int (fisher-zone village3-lava)))
+    ((or (= row 16) (= row 17) (= row 18) (= row 32))
+      (the-as int (fisher-zone snow-ice)))
+    ((or (= row 19) (= row 20) (= row 21) (= row 22) (= row 33))
+      (the-as int (fisher-zone maincave-dark-eco)))
+    (else
+      (the-as int (fisher-zone finalboss-nuclear)))))
+
 (defun fisher-catalog-row-suffix ((row int))
   (if (>= row 24)
     (+ 7 (- row 24))
@@ -7055,15 +7146,10 @@
     (else 0)))
 
 (defun fisher-catalog-row-skeleton ((row int))
-  (let ((suffix (fisher-catalog-row-suffix row)))
-    (cond
-      ((< suffix 0)
-        (the-as skeleton-group
-          (-> (fisher-species-info-for row) skeleton)))
-      ((or (= suffix 7) (= suffix 11) (= suffix 14) (= suffix 15) (= suffix 16))
-        *catch-fishb-sgc*)
-      ((= suffix 12) *catch-fishc-sgc*)
-      (else *catch-fisha-sgc*))))
+  (let* ((species (fisher-catalog-row-species row))
+      (row-suffix (fisher-catalog-row-suffix row))
+      (suffix (if (< row-suffix 0) 2 row-suffix)))
+    (fisher-display-skeleton-for species suffix)))
 
 (defun fisher-catalog-background-color! ((row int) (dst rgba))
   ;; Give each fishing area its own preview-panel color.  Rare fish inherit
@@ -7317,93 +7403,307 @@
   (fisher-geologist-draw-text "<PAD_TRIANGLE> EXIT" 421 114 0.55 #f #t)
   (none))
 
+
+;; Catalogue model renderer: use the HUD/screen-space bone transform, but submit
+;; the actual MERC effects through pc-merc-draw-request instead of generic-merc.
+;; draw-bones-hud forces every effect through mercneric, which is why a fish can
+;; be visible yet sample unrelated level textures.  The stock draw-bones-hud-merc
+;; has the right matrix path, but leaves ordinary non-envmap effects marked as
+;; mercneric; pc-merc-draw-request then excludes them.  This copy fixes that one
+;; split: every normal effect is enabled for native PC MERC.
+(defun fisher-draw-bones-catalog-hud-merc!
+  ((draw draw-control) (dma-buf dma-buffer))
+  (local-vars
+    (at-2 int)
+    (t2-10 vu-lights)
+    (t3-3 uint128)
+    (t3-4 uint128)
+    (t3-5 uint128)
+    (t3-6 uint128))
+
+  (let ((buf dma-buf))
+    (let* ((dma-start (-> buf base))
+        (joints (+ (-> draw mgeo num-joints) 3))
+        (bone-calc (the bone-calculation (&+ dma-start 16)))
+        (bone-calc-size (* joints 128))
+        (mat-data (the object (&+ dma-start 64)))
+        (spr-work (scratchpad-object terrain-context)))
+
+      ;; Same screen-space matrix setup as draw-bones-hud/draw-bones-hud-merc.
+      (let ((mat-aligned (logand (the int mat-data) 48)))
+        (when (nonzero? mat-aligned)
+          (set! mat-data
+            (&- (&+ (the pointer mat-data) 64) (the uint mat-aligned)))))
+
+      (let ((regs (scratchpad-object bone-regs :offset 240)))
+        (set! (-> regs joint-ptr)
+          (the (inline-array joint) (-> draw jgeo data 0)))
+        (set! (-> regs bone-ptr) (-> draw skeleton bones))
+        (set! (-> regs num-bones) joints))
+
+      (let ((t2-0 mat-data)
+          (bone-mem (scratchpad-object bone-memory :offset 16))
+          (bone-list *bone-calculation-list*)
+          (t1-6 bone-calc))
+        (let ((t4-0 (-> bone-mem work regs joint-ptr))
+            (t5-0 (-> bone-mem work regs bone-ptr))
+            (t6-1 (-> bone-mem work regs num-bones))
+            (t7-0 t1-6))
+          ;; bncfl01 is the important HUD/screen-space bone calculation flag.
+          (set! (-> t7-0 flags) (bone-calc-flags bncfl01))
+          (set! (-> t7-0 num-bones) t6-1)
+          (set! (-> t7-0 matrix-area) (the (inline-array matrix) t2-0))
+          (set! (-> t7-0 joints) t4-0)
+          (set! (-> t7-0 bones) t5-0)
+          (set! (-> t7-0 next) (the bone-calculation 0)))
+        (when (nonzero? (-> bone-list next))
+          (set! (-> bone-list next next) t1-6))
+        (when (zero? (-> bone-list first))
+          (set! (-> bone-list first) t1-6))
+        (set! (-> bone-list next) t1-6))
+
+      (&+ (the pointer bone-calc) 48)
+
+      (let ((a2-2 (the object (+ (the uint mat-data) bone-calc-size))))
+        (set!
+          (-> (the (pointer uint128) dma-start))
+          (logior
+            (-> spr-work work foreground bone-mem work next-tag quad)
+            (shl (the-as int a2-2) 32)))
+
+        (when (= (-> draw data-format) 1)
+          (let ((mgeo (-> draw lod-set lod 0 geo)))
+            (dotimes (effect-idx (the-as int (-> mgeo header effect-count)))
+              ;; Normal draw-bones clears this state before choosing MERC vs
+              ;; mercneric. Do the same so another foreground object cannot
+              ;; leak fade/alpha state into the catalogue fish.
+              (set!
+                (-> *merc-bucket-info* effect effect-idx color-fade)
+                (new 'static 'rgba :r 0 :g 0 :b 0 :a 0))
+              (set!
+                (-> *merc-bucket-info* effect effect-idx use-mercneric)
+                (the-as uint 0))
+              (set!
+                (-> *merc-bucket-info* effect effect-idx ignore-alpha)
+                (the-as uint 0))
+
+              ;; Keep the HUD merc envmap behavior, but still leave the effect
+              ;; enabled for pc-merc-draw-request.
+              (when (nonzero? (-> mgeo effect effect-idx envmap-usage))
+                (set!
+                  (-> *merc-bucket-info* effect effect-idx color-fade)
+                  (new 'static 'rgba :r #x80 :g #x80 :b #x80 :a #x80))
+                (set!
+                  (-> *merc-bucket-info* effect effect-idx ignore-alpha)
+                  (the-as uint 1)))))
+
+          (when (logtest? *vu1-enable-user* (vu1-renderer-mask merc))
+            (set!
+              (-> buf base)
+              (pc-merc-draw-request
+                draw
+                (the pointer a2-2)
+                (the pointer mat-data)
+                #f
+                (the (pointer float) 0)))
+            (set! a2-2 (-> buf base))))
+
+        ;; Same DMA alignment/link tail as the engine HUD bone renderer.
+        (let ((a0-17 (logand (the int a2-2) 48)))
+          (when (nonzero? a0-17)
+            (set! at-2 #x20000000)
+            (set!
+              (-> (the (pointer int128) a2-2))
+              (the int128 at-2))
+            (let ((v1-2 (the pointer a2-2)))
+              (set! a2-2
+                (+ (&- (the pointer a2-2) (the uint a0-17)) 64))
+              (set!
+                (-> (the (pointer uint32) (&+ v1-2 4)))
+                (the int a2-2)))))
+
+        (set! (-> buf base) (the pointer a2-2)))))
+
+  0
+  (none))
+
+(defun fisher-dma-add-process-drawable-catalog-hud-merc!
+  ((proc process-drawable)
+    (draw draw-control)
+    (arg2 symbol)
+    (buf dma-buffer))
+
+  (logclear! (-> draw status) (draw-status was-drawn))
+
+  (when
+    (zero?
+      (logand
+        (-> draw status)
+        (draw-status hidden no-anim no-skeleton-update)))
+
+    ;; Keep the stable HUD light rig, but copy it both to the scratchpad (the
+    ;; usual HUD convention) and directly to merc-bucket-info because native
+    ;; pc-merc-draw-request reads its lights from there.
+    (let ((vu-lgt (the-as vu-lights (+ 64 (scratchpad-object int))))
+        (merc-lgt (-> *merc-bucket-info* light))
+        (lgt *hud-pc-lights*)
+        (mult (-> draw color-mult))
+        (emissive (-> draw color-emissive)))
+      (set! (-> vu-lgt direction 0 quad) (-> lgt direction 0 quad))
+      (set! (-> vu-lgt direction 1 quad) (-> lgt direction 1 quad))
+      (set! (-> vu-lgt direction 2 quad) (-> lgt direction 2 quad))
+
+      ;; Match dma-add-process-drawable's appearance math: directional light
+      ;; colors are multiplied by draw.color-mult, while ambient additionally
+      ;; receives draw.color-emissive.  fisher-apply-fish-appearance! writes the
+      ;; healthy/rare fish tint into exactly those fields.
+      (set-vector!
+        (-> vu-lgt color 0)
+        (* (-> lgt color 0 x) (-> mult x))
+        (* (-> lgt color 0 y) (-> mult y))
+        (* (-> lgt color 0 z) (-> mult z))
+        (* (-> lgt color 0 w) (-> mult w)))
+      (set-vector!
+        (-> vu-lgt color 1)
+        (* (-> lgt color 1 x) (-> mult x))
+        (* (-> lgt color 1 y) (-> mult y))
+        (* (-> lgt color 1 z) (-> mult z))
+        (* (-> lgt color 1 w) (-> mult w)))
+      (set-vector!
+        (-> vu-lgt color 2)
+        (* (-> lgt color 2 x) (-> mult x))
+        (* (-> lgt color 2 y) (-> mult y))
+        (* (-> lgt color 2 z) (-> mult z))
+        (* (-> lgt color 2 w) (-> mult w)))
+      (set-vector!
+        (-> vu-lgt ambient)
+        (+ (* (-> lgt ambient x) (-> mult x)) (-> emissive x))
+        (+ (* (-> lgt ambient y) (-> mult y)) (-> emissive y))
+        (+ (* (-> lgt ambient z) (-> mult z)) (-> emissive z))
+        (+ (* (-> lgt ambient w) (-> mult w)) (-> emissive w)))
+
+      ;; Native pc-merc-draw-request reads this copy, not the scratchpad one.
+      (set! (-> merc-lgt direction 0 quad) (-> vu-lgt direction 0 quad))
+      (set! (-> merc-lgt direction 1 quad) (-> vu-lgt direction 1 quad))
+      (set! (-> merc-lgt direction 2 quad) (-> vu-lgt direction 2 quad))
+      (set! (-> merc-lgt color 0 quad) (-> vu-lgt color 0 quad))
+      (set! (-> merc-lgt color 1 quad) (-> vu-lgt color 1 quad))
+      (set! (-> merc-lgt color 2 quad) (-> vu-lgt color 2 quad))
+      (set! (-> merc-lgt ambient quad) (-> vu-lgt ambient quad)))
+
+    (set! (-> *merc-bucket-info* needs-clip) 0)
+    (set! (-> *merc-bucket-info* need-mercprime-if-merc) 0)
+    (set! (-> *merc-bucket-info* must-use-mercneric-for-clip) 0)
+
+    (lod-set! draw 0)
+    (logior! (-> draw status) (draw-status was-drawn))
+    (fisher-draw-bones-catalog-hud-merc! draw buf))
+
+  0
+  (none))
+
 (defun fisher-geologist-style-model! ((row int) (fish-proc manipy))
-  ;; Normal species rows start from their native fisher-species-info color, so
-  ;; they always represent the unrecolored/healthy fish rather than a Mutant or
-  ;; Golden prefix. Rare rows then apply the exact suffix signature colors used
-  ;; by fisher-apply-slot-appearance!. Keep catch-scale normalization for the
-  ;; catalogue window.
+  ;; This deliberately calls the SAME appearance function used by
+  ;; fisher-spawn-catch-display-fish!.  Normal catalogue entries are forced to
+  ;; suffix 2 (HEALTHY); unique entries keep their real rare suffix.
   (let* ((species (fisher-catalog-row-species row))
-      (suffix (fisher-catalog-row-suffix row))
+      (row-suffix (fisher-catalog-row-suffix row))
+      (suffix (if (< row-suffix 0) 2 row-suffix))
+      (location-id (fisher-catalog-row-zone row))
       (info (fisher-species-info-for species))
-      (scale (* (-> info catch-scale) 0.50))
-      (sx 1.0)
-      (sy 1.0)
-      (sz 1.0)
-      (r (-> info color-r))
-      (g (-> info color-g))
-      (b (-> info color-b)))
-    (cond
-      ((= row 23)
-        (set! scale (* 0.74 0.50))
-        (set! sx 0.62)
-        (set! sy 0.72)
-        (set! sz 1.55)
-        (set! r 0.0)
-        (set! g 0.0)
-        (set! b 0.0))
-      ((= suffix 7)
-        (set! scale (* 0.62 0.50))
-        (set! r 0.62)
-        (set! g 0.36)
-        (set! b 0.12))
-      ((= suffix 8)
-        (set! scale (* 0.62 0.50))
-        (set! r 0.56)
-        (set! g 0.18)
-        (set! b 0.88))
-      ((= suffix 9)
-        (set! scale (* 0.68 0.50))
-        (set! sx 0.13)
-        (set! sy 0.20)
-        (set! sz 2.35)
-        (set! r 0.56)
-        (set! g 0.82)
-        (set! b 0.62))
-      ((= suffix 10)
-        (set! scale (* 0.68 0.50))
-        (set! sx 1.18)
-        (set! sy 1.12)
-        (set! sz 1.18)
-        (set! r 0.82)
-        (set! g 0.48)
-        (set! b 0.16))
-      ((= suffix 11)
-        (set! scale (* 0.62 0.50))
-        (set! r 1.0)
-        (set! g 1.0)
-        (set! b 1.0))
-      ((= suffix 12)
-        (set! scale (* 0.64 0.50))
-        (set! r 0.003)
-        (set! g 0.003)
-        (set! b 0.003))
-      ((= suffix 13)
-        (set! scale (* 0.64 0.50))
-        (set! r 1.0)
-        (set! g 1.0)
-        (set! b 1.0))
-      ((= suffix 14)
-        (set! scale (* 0.44 0.50))
-        (set! r 1.0)
-        (set! g 1.0)
-        (set! b 1.0))
-      ((= suffix 15)
-        (set! scale (* 0.62 0.50))
-        (set! r 1.0)
-        (set! g 1.0)
-        (set! b 1.0))
-      ((= suffix 16)
-        (set! scale (* 0.62 0.50))
-        (set! r 1.0)
-        (set! g 1.0)
-        (set! b 1.0)))
-    (set-vector! (-> fish-proc root scale) (* scale sx) (* scale sy) (* scale sz) 1.0)
-    (set! (-> fish-proc draw color-mult r) r)
-    (set! (-> fish-proc draw color-mult g) g)
-    (set! (-> fish-proc draw color-mult b) b)
-    (set! (-> fish-proc draw color-mult a) (if (= row 23) 8.0 1.0))
-    (set-vector! (-> fish-proc draw color-emissive) 0.0 0.0 0.0 1.0))
+      (weight-tenths
+        (the int
+          (/
+            (+
+              (-> info min-weight-tenths)
+              (-> info max-weight-tenths))
+            2))))
+
+    (fisher-apply-fish-appearance!
+      species
+      suffix
+      0
+      0
+      location-id
+      weight-tenths
+      fish-proc
+      #t)
+
+    ;; The catch code above leaves the model in its exact loot-window scale.
+    ;; Compute one UNIFORM fit multiplier so unusually large/long fish remain
+    ;; inside the catalogue window without changing their proportions.
+    (let ((largest
+          (fmax
+            (abs (-> fish-proc root scale x))
+            (fmax
+              (abs (-> fish-proc root scale y))
+              (abs (-> fish-proc root scale z))))))
+      (set! *fisher-catalog-hud-fit-scale*
+        ;; Normalize EVERY catalogue fish to one fixed presentation envelope.
+        ;; Do not preserve catch-size differences here: the catalogue should
+        ;; give every species the same maximum authored scale axis, then apply
+        ;; that exact uniform multiplier to the complete child/attachment tree.
+        (if (> largest 0.0001) (/ 0.19 largest) 1.0))))
+
+  (none))
+
+(defun fisher-catalog-convert-manipy-tree-to-hud!
+  ((model manipy) (unit-scale float))
+  ;; Convert the already-built catch-display tree (fish + real manipy children)
+  ;; to the catalogue screen-space coordinate system. Materials stay on
+  ;; the model; only transform units and the custom native-MERC DMA function
+  ;; change.
+  (let* ((sx (-> model root scale x))
+      (sy (-> model root scale y))
+      (sz (-> model root scale z))
+      (tx (-> model root transv x))
+      (ty (-> model root transv y))
+      (tz (-> model root transv z))
+      (aspect (/ 512.0 448.0)))
+
+    (set-vector!
+      (-> model root scale)
+      (* sx unit-scale (-> *video-parms* relative-x-scale))
+      (* sy unit-scale aspect (-> *video-parms* relative-y-scale))
+      (* sz unit-scale (-> *video-parms* relative-x-scale))
+      1.0)
+
+    ;; transv is the authored local attachment offset.  Preserve W because
+    ;; several attachment behaviors store animation seeds there.
+    (set! (-> model root transv x) (* tx unit-scale))
+    (set! (-> model root transv y) (* ty unit-scale aspect))
+    (set! (-> model root transv z) (* tz unit-scale))
+
+    (set!
+      (-> model draw dma-add-func)
+      fisher-dma-add-process-drawable-catalog-hud-merc!)
+
+    ;; Match hud-pc-make-icon's process behavior as well as its renderer.
+    ;; The catalogue can be entered while normal gameplay process masks are
+    ;; changing, so keep this model on the same mask setup as built-in 3D HUD
+    ;; MERC icons.
+    (logior! (-> model mask) (process-mask pause))
+    (logclear! (-> model mask) (process-mask menu progress))
+
+    (set! (-> model draw force-lod) 0)
+    (logclear! (-> model draw status) (draw-status hidden no-anim no-skeleton-update))
+    (send-event model 'max-vis-dist (meters 999999.0)))
+
+  ;; Rare fish can have nested manipy trees (orb groups, tetromino pieces,
+  ;; Platformius platforms, Snowy Mountain crystals). Convert every one so the
+  ;; catalogue is literally the same model tree as the catch display.
+  (let ((child (-> model child)))
+    (while child
+      (let ((child-proc (ppointer->process child)))
+        (when
+          (and
+            child-proc
+            (type-type? (-> child-proc type) manipy))
+          (fisher-catalog-convert-manipy-tree-to-hud!
+            (the-as manipy child-proc)
+            unit-scale)))
+      (set! child (-> child 0 brother))))
+
   (none))
 
 (defun fisher-geologist-remove-model! ((self fisher-geologist))
@@ -7425,145 +7725,72 @@
       ((<= stick-x 106) (-! (-> self catalog-yaw) step))))
   (none))
 
-(defun fisher-geologist-project-world! ((world-pos vector) (screen-pos vector))
-  ;; Project using the same transform used by fisher-world-to-screen!, but keep
-  ;; this helper local to the geologist catalogue so it does not depend on a
-  ;; fisher-game instance.
-  (let ((projected (new 'stack 'vector4w-2))
-      (point (new 'stack-no-clear 'vector)))
-    (vector-copy! point world-pos)
-    (set! (-> point w) 1.0)
-    (transform-point-qword! (-> projected vector 0) point)
-    (set! (-> screen-pos x)
-      (+ 256.0 (/ (- (the float (-> projected vector 0 x)) 32768.0) 64.0)))
-    (set! (-> screen-pos y)
-      (+ 224.0 (/ (- (the float (-> projected vector 0 y)) 32768.0) 64.0)))
-    (set! (-> screen-pos z) 0.0)
-    (set! (-> screen-pos w) 1.0))
-  (none))
-
 (defun fisher-geologist-position-model! ((self fisher-geologist))
-  ;; Keep the catalogue model on the exact normal world/MERC path used by the
-  ;; catch/loot fish.  Instead of guessing screen-to-world offsets, project a
-  ;; forward point plus one-meter camera-right/up probes and solve the local
-  ;; 2D mapping so the model root lands at the preview box every frame.
-  (when
-    (and
-      (-> self catalog-model)
-      *camera*
-      (> (-> *camera* num-slaves) 0))
-    (let ((fish-proc (the-as manipy (ppointer->process (-> self catalog-model)))))
+  ;; draw-bones-hud uses logical 512x448 HUD coordinates directly.  Do not
+  ;; convert this back into a world/camera position: that was the reason the
+  ;; previous catalogue model could be valid yet never appear in the panel.
+  (when (-> self catalog-model)
+    (let ((fish-proc
+          (the-as manipy (ppointer->process (-> self catalog-model)))))
       (when fish-proc
-        (let* ((cam-slave (-> *camera* slave 0 0))
-            (species (fisher-catalog-row-species (-> self catalog-index)))
+        (let* ((species (fisher-catalog-row-species (-> self catalog-index)))
             (suffix (fisher-catalog-row-suffix (-> self catalog-index)))
-            (forward (new 'stack-no-clear 'vector))
-            (right (new 'stack-no-clear 'vector))
-            (up (new 'stack-no-clear 'vector))
-            (fish-forward (new 'stack-no-clear 'vector))
-            (fish-down (new 'stack-no-clear 'vector))
-            (rot (new 'stack-no-clear 'matrix))
-            (preview-pos (new 'stack-no-clear 'vector))
-            (probe-right (new 'stack-no-clear 'vector))
-            (probe-up (new 'stack-no-clear 'vector))
-            (screen-base (new 'stack-no-clear 'vector))
-            (screen-right (new 'stack-no-clear 'vector))
-            (screen-up (new 'stack-no-clear 'vector))
-            (yaw (-> self catalog-yaw))
-            (target-x 362.0)
-            ;; Fish roots are bottom-biased.  Putting an ordinary fish root a
-            ;; little below the visual center centers its body; Scout Fly uses
-            ;; its own origin and targets the literal center.
-            (target-y (if (= species (the-as int (fisher-species scout-fly))) 79.0 94.0)))
+            ;; The catalogue cutout itself is x=290..434, y=42..116 in the
+            ;; 2D UI.  The custom native-MERC HUD bone path has a presentation
+            ;; offset relative to sprite coordinates, so use the calibrated
+            ;; native-MERC coordinates below rather than feeding sprite center
+            ;; coordinates directly.
+            ;; Native PC MERC HUD bones have an additional presentation offset
+            ;; relative to the 2D sprite coordinate system.  Calibrated from the
+            ;; actual catalogue framebuffer: these values put the model center at
+            ;; the visual center of the x=290..434, y=42..116 cutout.
+            (target-x -290.0)
+            (target-y 300.0)
+            (yaw-quat (new 'stack-no-clear 'quaternion))
+            (flip-quat (new 'stack-no-clear 'quaternion)))
 
-          (vector-copy! forward (-> cam-slave tracking inv-mat vector 2))
-          (set! (-> forward w) 0.0)
-          (singlefish-vector-normalize-safe! forward 1.0)
-
-          (singlefish-vector-cross-safe! right forward (-> *camera* local-down))
-          (set! (-> right w) 0.0)
-          (singlefish-vector-normalize-safe! right 1.0)
-
-          (singlefish-vector-cross-safe! up right forward)
-          (set! (-> up w) 0.0)
-          (singlefish-vector-normalize-safe! up 1.0)
-
-          ;; Start exactly like the loot-window fish: straight ahead of camera.
-          (singlefish-vector-add-scaled-safe!
-            preview-pos (-> cam-slave trans) forward (meters 5.0))
-
-          ;; Measure the actual current-frame projection of camera-right/up.
-          (vector-copy! probe-right preview-pos)
-          (singlefish-vector-add-scaled-safe!
-            probe-right probe-right right (meters 1.0))
-          (vector-copy! probe-up preview-pos)
-          (singlefish-vector-add-scaled-safe!
-            probe-up probe-up up (meters 1.0))
-
-          (fisher-geologist-project-world! preview-pos screen-base)
-          (fisher-geologist-project-world! probe-right screen-right)
-          (fisher-geologist-project-world! probe-up screen-up)
-
-          (let* ((rx (- (-> screen-right x) (-> screen-base x)))
-              (ry (- (-> screen-right y) (-> screen-base y)))
-              (ux (- (-> screen-up x) (-> screen-base x)))
-              (uy (- (-> screen-up y) (-> screen-base y)))
-              (dx (- target-x (-> screen-base x)))
-              (dy (- target-y (-> screen-base y)))
-              (det (- (* rx uy) (* ry ux))))
-            (when (> (abs det) 0.0001)
-              (let ((right-m (/ (- (* dx uy) (* dy ux)) det))
-                  (up-m (/ (- (* rx dy) (* ry dx)) det)))
-                (singlefish-vector-add-scaled-safe!
-                  preview-pos preview-pos right (meters right-m))
-                (singlefish-vector-add-scaled-safe!
-                  preview-pos preview-pos up (meters up-m)))))
-
-          (set! (-> fish-proc root trans quad) (-> preview-pos quad))
+          (set! (-> fish-proc root trans x) (- target-x 256.0))
+          (set!
+            (-> fish-proc root trans y)
+            (- target-y (the float (-> *video-parms* screen-sy))))
+          (set! (-> fish-proc root trans z) (meters 0.5))
           (set! (-> fish-proc root trans w) 1.0)
 
-          ;; Reassert visibility every frame while catalogue owns the preview.
-          (logclear! (-> fish-proc draw status) (draw-status hidden))
-          (send-event fish-proc 'max-vis-dist (meters 999999.0))
+          (logclear!
+            (-> fish-proc draw status)
+            (draw-status hidden no-anim no-skeleton-update))
           (set! (-> fish-proc draw force-lod) 0)
 
-          ;; Present the side profile at yaw 0, then rotate around camera-up.
-          (set-vector!
-            fish-forward
-            (+ (* (-> right x) (cos yaw)) (* (-> forward x) (sin yaw)))
-            (+ (* (-> right y) (cos yaw)) (* (-> forward y) (sin yaw)))
-            (+ (* (-> right z) (cos yaw)) (* (-> forward z) (sin yaw)))
-            0.0)
-          (singlefish-vector-normalize-safe! fish-forward 1.0)
+          ;; Same base orientation as the loot fish (identity), with only the
+          ;; user's requested left/right catalogue yaw added.  Screaming Fish's
+          ;; catch-display 180-degree correction is preserved.
+          (quaternion-axis-angle!
+            yaw-quat 0.0 1.0 0.0 (-> self catalog-yaw))
+          (cond
+            ((= suffix 16)
+              (quaternion-axis-angle!
+                flip-quat 0.0 0.0 1.0 (degrees 180.0))
+              (quaternion*!
+                (-> fish-proc root quat)
+                flip-quat
+                yaw-quat))
+            (else
+              (quaternion-copy!
+                (-> fish-proc root quat)
+                yaw-quat)))))))
 
-          ;; Scout Fly and Screaming Fish use the opposite authored vertical basis.
-          (if
-            (or
-              (= species (the-as int (fisher-species scout-fly)))
-              (= suffix 16))
-            (set-vector!
-              fish-down
-              (- (-> *camera* local-down x))
-              (- (-> *camera* local-down y))
-              (- (-> *camera* local-down z))
-              0.0)
-            (vector-copy! fish-down (-> *camera* local-down)))
-
-          (set! (-> fish-down w) 0.0)
-          (singlefish-vector-normalize-safe! fish-down 1.0)
-          (forward-down->inv-matrix rot fish-forward fish-down)
-          (matrix->quaternion (-> fish-proc root quat) rot)))))
   (none))
 
 (defun fisher-geologist-refresh-model! ((self fisher-geologist))
   (when (!= (-> self catalog-model-row) (-> self catalog-index))
     (fisher-geologist-remove-model! self)
     (set! (-> self catalog-model-row) (-> self catalog-index))
-    (set! (-> self catalog-yaw) 0.0)
+    (set! (-> self catalog-yaw) (degrees 90.0))
     (set! (-> self catalog-pitch) 0.0)
+
     (when (fisher-catalog-row-discovered? (-> self catalog-index))
       (let ((spawn-pos (new 'stack-no-clear 'vector)))
-        (singlefish-vector-copy-safe! spawn-pos (target-pos 0))
+        (set-vector! spawn-pos 0.0 0.0 0.0 1.0)
         (let ((model
               (the-as (pointer manipy)
                 (manipy-spawn
@@ -7572,45 +7799,72 @@
                   (fisher-catalog-row-skeleton (-> self catalog-index))
                   #f
                   :from *default-dead-pool*
-                  :to *default-pool*
+                  :to *display-pool*
                   :name "fisher-catalog-model"))))
           (when model
             (set! (-> self catalog-model) model)
             (let ((fish-proc (the-as manipy (ppointer->process model))))
               (when fish-proc
+                ;; Match fisher-spawn-catch-display-fish! before doing anything
+                ;; catalogue-specific.
                 (send-event fish-proc 'anim-mode 'loop)
+                (fisher-randomize-manipy-anim-frame! fish-proc)
                 (send-event fish-proc 'max-vis-dist (meters 999999.0))
                 (set! (-> fish-proc draw force-lod) 0)
-                (logclear! (-> fish-proc draw status) (draw-status hidden))
-                (fisher-geologist-style-model! (-> self catalog-index) fish-proc)
+                (logclear!
+                  (-> fish-proc draw status)
+                  (draw-status hidden no-anim no-skeleton-update))
 
-                ;; Do NOT override draw.dma-add-func. This deliberately stays on
-                ;; the exact normal world/MERC renderer used by the loot fish so
-                ;; the art group's own texture/material association is preserved.
+                (fisher-geologist-style-model!
+                  (-> self catalog-index)
+                  fish-proc)
 
-                (let ((suffix (fisher-catalog-row-suffix (-> self catalog-index))))
+                ;; Build the SAME child model tree as the catch/loot window while
+                ;; everything is still in ordinary catch-display units.
+                (let ((suffix
+                      (fisher-catalog-row-suffix (-> self catalog-index)))
+                    (species
+                      (fisher-catalog-row-species (-> self catalog-index))))
+                  (set! *fisher-catalog-attachment-spawn-scale* 1.0)
+
                   (when (fisher-rare-fish? suffix)
-                    (fisher-spawn-rare-fish-attachments! fish-proc suffix #f))))))))))
+                    (fisher-spawn-rare-fish-attachments!
+                      fish-proc suffix #t))
+
+                  (when
+                    (=
+                      (fisher-catalog-row-zone (-> self catalog-index))
+                      (the-as int (fisher-zone snow-ice)))
+                    (fisher-spawn-snow-ice-crystal!
+                      fish-proc species #t)))
+
+                ;; Only after the exact loot model is complete do we move the
+                ;; whole tree to the MERC foreground HUD renderer.
+                (fisher-catalog-convert-manipy-tree-to-hud!
+                  fish-proc
+                  (*
+                    *fisher-catalog-hud-unit-scale*
+                    *fisher-catalog-hud-fit-scale*)))))))))
+
   (fisher-geologist-position-model! self)
   (none))
 
 (defun fisher-geologist-draw-rare-effects! ((self fisher-geologist))
-  ;; Forgotten Fish keeps its catalogue motes. Platformius now uses the real
-  ;; world-space particle launch from fisher-platformius-platform-trans.
-  (let ((suffix (fisher-catalog-row-suffix (-> self catalog-index)))
-      (tick (current-time)))
-    (when (= suffix 8)
-      (with-dma-buffer-add-bucket
-        ((buf (-> (current-frame) global-buf))
-          (bucket-id sprite))
-        (dotimes (i 8)
-          (let* ((phase (mod (+ tick (* i 11)) 58))
-              (px (+ 298 (mod (+ (* i 23) (/ phase 3)) 128)))
-              (py (- 112 (mod (+ (* i 7) phase) 64)))
-              (sz (+ 1 (mod i 2))))
-            (draw-sprite2d-xy
-              buf px py sz sz
-              (new 'static 'rgba :r #x60 :g #xd8 :b #xff :a #x88)))))))
+  ;; Use the same real 3D particle launch as the live/catch Forgotten Fish.
+  ;; Platformius already launches this particle from its real platform child.
+  (let ((suffix (fisher-catalog-row-suffix (-> self catalog-index))))
+    (when
+      (and
+        (= suffix 8)
+        (-> self catalog-model)
+        (zero? (mod (current-time) 6)))
+      (let ((fish-proc
+            (the-as manipy (ppointer->process (-> self catalog-model)))))
+        (when fish-proc
+          (launch-particles
+            :system *sp-particle-system-3d*
+            (-> *part-id-table* 3569)
+            (-> fish-proc root trans))))))
   (none))
 
 (defun fisher-geologist-draw-catalog! ((self fisher-geologist))
@@ -7719,13 +7973,12 @@
                 135
                 (fisher-catalog-prefix-caught? selected prefix)))))
         (when (not (string= (fisher-catalog-lore-line selected 0) ""))
-          (fisher-geologist-draw-catalog-text "FIELD NOTES" 356 146 0.34 #f #t)
           (dotimes (line 6)
             (fisher-geologist-draw-catalog-text
               (fisher-catalog-lore-line selected line)
               248
-              (+ 154 (* line 8))
-              0.25
+              (+ 149 (* line 6))
+              0.19
               #f
               #f))))
       (else
@@ -7734,7 +7987,6 @@
         (fisher-geologist-draw-catalog-text "UNDISCOVERED" 362 148 0.34 #f #t)
         (fisher-geologist-draw-catalog-text "CAUGHT IN:" 248 165 0.28 #f #f)
         (fisher-geologist-draw-catalog-text (fisher-catalog-row-location selected) 248 178 0.29 #f #f)))
-    (fisher-geologist-draw-catalog-text "RIGHT STICK: ROTATE" 362 190 0.27 #f #t)
     (fisher-geologist-draw-catalog-text "<PAD_TRIANGLE> EXIT" 256 198 0.38 #f #t))
   (none))
 
@@ -7824,7 +8076,7 @@
   (set! (-> self catalog-index) 0)
   (set! (-> self catalog-model) (the-as (pointer manipy) #f))
   (set! (-> self catalog-model-row) -1)
-  (set! (-> self catalog-yaw) 0.0)
+  (set! (-> self catalog-yaw) (degrees 90.0))
   (set! (-> self catalog-pitch) 0.0)
   (set! (-> self catalog-saved-camera-read-analog) #t)
   (logclear! (-> self mask) (process-mask actor-pause))
@@ -7861,7 +8113,10 @@
     (loop
       (ja-no-eval :group! geologist-idle-ja :num! (seek!) :frame-num 0.0)
       (until (ja-done? 0)
-        (when (fisher-geologist-near-jak? self)
+        (when
+          (and
+            (not (paused?))
+            (fisher-geologist-near-jak? self))
           (fisher-geologist-draw-text "PRESS <PAD_CIRCLE> TO TALK." 356 170 0.55 #f #t)
           (when (cpad-pressed? 0 circle)
             (cpad-clear! 0 circle)
