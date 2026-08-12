@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
-  "sourceName": "Kraken",
-  "lastUpdated": "2026-08-12T02:56:00Z",
+  "sourceName": "KrakenMods",
+  "lastUpdated": "2026-08-12T03:47:00Z",
   "mods": {
     "the-fishing-legacy": {
       "displayName": "The Fishing Legacy",
@@ -16,7 +16,22 @@
         "jak1"
       ],
       "websiteUrl": "https://github.com/RealOfficialKraken/Jak1-Fish",
-      "versions": []
+      "coverArtUrl": "https://raw.githubusercontent.com/RealOfficialKraken/Jak1-Fish/main/mod-image.png",
+      "thumbnailArtUrl": "https://raw.githubusercontent.com/RealOfficialKraken/Jak1-Fish/main/mod-icon.png",
+      "versions": [
+        {
+          "version": "0.0.3",
+          "publishedDate": "2026-08-12T03:46:00Z",
+          "supportedGames": [
+            "jak1"
+          ],
+          "assets": {
+            "windows": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v0.0.3/windows-v0.0.3.zip",
+            "linux": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v0.0.3/linux-v0.0.3.tar.gz",
+            "macos": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v0.0.3/macos-intel-v0.0.3.tar.gz"
+          }
+        }
+      ]
     }
   },
   "texturePacks": {}
