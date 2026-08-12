@@ -114,9 +114,17 @@
                  (and *target* (logtest? (-> *target* control root-prim prim-core action) (collide-action racer))))
            (goto cfg-77)))
         ((5)
-         (cond
-           ((and *cheat-mode* (cpad-hold? 0 l3)) (goto cfg-77))
-           ((>= (-> *game-info* fuel) 72.0) (goto cfg-77))))
+         (let ((gp-0 (get-task-control (game-task lavatube-start))))
+           (if (and *cheat-mode* (cpad-hold? 0 l3)) (goto cfg-77))
+           (first-any gp-0 #t)
+           (case (current-status gp-0)
+             (((task-status need-reward-speech))
+              (ja-channel-set! 1)
+              (ja :group! racer-racer-idle-ja)
+              (set! (-> self root root-prim prim-core action) (collide-action solid attackable-unused))
+              (set! (-> self root root-prim prim-core offense) (collide-offense indestructible))
+              (ja-post))
+             (((task-status invalid)) (goto cfg-77)))))
         ((3)
          (cond
            ((and (task-complete? *game-info* (-> self entity extra perm task)) (not (handle->process (-> self cell))))
@@ -192,7 +200,7 @@
       (set! (-> self root root-prim prim-core action) (collide-action solid attackable-unused))
       (set! (-> self root root-prim prim-core offense) (collide-offense indestructible))
       0.0 
-    ;; \<modbase:preserve-this> Reduce auto-mount distance from 15 meters to 6 meters to avoid crash in Lava Tube.
+    ;; \\\<modbase:preserve-this> Reduce auto-mount distance from 15 meters to 6 meters to avoid crash in Lava Tube.
     (let ((f30-0 (if (= (-> self condition) 4) 24576.0 20480.0)))
         (loop
           (if (and *target* (logtest? (-> *target* control root-prim prim-core action) (collide-action racer)))
