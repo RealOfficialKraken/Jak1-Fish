@@ -15,6 +15,19 @@
 
     (set! *part-id-table* new-part-id-table)))
 
+(when (< (-> *part-group-id-table* length) 4096)
+  (let ((old-part-group-id-table *part-group-id-table*)
+      (old-part-group-count (-> *part-group-id-table* length))
+      (new-part-group-id-table
+        (new 'global 'boxed-array sparticle-launch-group 4096)))
+
+    (dotimes (group-index old-part-group-count)
+      (set!
+        (-> new-part-group-id-table group-index)
+        (-> old-part-group-id-table group-index)))
+
+    (set! *part-group-id-table* new-part-group-id-table)))
+
 ;; name: fisher-assets.gc
 
 
@@ -456,8 +469,6 @@
     (:flags (bit2 bit3 bit14))))
 
 
-;; Forgotten Fish: use the same visual recipe as fisher.gc's group-bad-fish
-;; (gray bigpuff + lakedrop), but enlarged so the cloud surrounds the rare fish.
 (defpart 3590
   :init-specs
   ((:texture (bigpuff effects))
@@ -466,7 +477,6 @@
     (:y (meters 0.20))
     (:scale-x (meters 1.65) (meters 2.10))
     (:scale-y :copy scale-x)
-    ;; Camera-oriented billboard with a very saturated purple tint.
     (:r 190.0 190.0)
     (:g 0.0 0.0)
     (:b 255.0 255.0)
@@ -495,7 +505,6 @@
     (:z (meters -0.22) (meters 0.35))
     (:scale-x (meters 0.12) (meters 0.22))
     (:scale-y :copy scale-x)
-    ;; Match the cloud layer: camera-facing and intensely purple.
     (:r 190.0)
     (:g 0.0)
     (:b 255.0)
@@ -505,15 +514,12 @@
     (:timer (seconds 0.5))
     (:flags (bit2 bit3 bit14))))
 
-;; Static catalogue equivalents of the Magma Serpent's body flame/smoke modes.
-;; These avoid mutating the live lava particle launcher while the catalogue is open.
 (defpart 3593
   :init-specs
   ((:texture (bigpuff effects))
     (:birth-func 'birth-func-camera-orient)
     (:num 1.0)
     (:scale-x (meters 2.16))
-    (:rot-x (degrees -90))
     (:scale-y (meters 2.76))
     (:r 255.0)
     (:g 48.0)
@@ -534,7 +540,6 @@
     (:birth-func 'birth-func-camera-orient)
     (:num 2.0)
     (:scale-x (meters 0.58))
-    (:rot-x (degrees -90))
     (:scale-y (meters 0.58))
     (:r 0.0)
     (:g 0.0)
@@ -548,6 +553,140 @@
     (:fade-a -0.22)
     (:timer (seconds 1.3))
     (:flags (bit2 bit3 bit14))))
+
+
+
+(defpart 3595
+  :init-specs
+  ((:texture (starflash effects))
+    (:num 0.12)
+    (:scale-x (meters 1.70))
+    (:rot-z (degrees 0) (degrees 360))
+    (:scale-y (meters 1.50))
+    (:r 255.0)
+    (:g 82.0)
+    (:b 18.0)
+    (:a 112.0)
+    (:rotvel-z (degrees -0.40))
+    (:fade-a -0.32)
+    (:timer (seconds 0.45))
+    (:flags (bit2 bit9))))
+
+(defpart 3596
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:num 0.16)
+    (:x (meters -0.55) (meters 1.10))
+    (:y (meters -0.30) (meters 0.60))
+    (:scale-x (meters 2.16))
+    (:scale-y (meters 2.76))
+    (:r 255.0)
+    (:g 48.0)
+    (:b 0.0)
+    (:a 104.0)
+    (:scalevel-x (meters 0.0030))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.60)
+    (:timer (seconds 0.50))
+    (:flags (bit2 bit9))))
+
+(defpart 3597
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:num 0.10)
+    (:x (meters -0.65) (meters 1.30))
+    (:y (meters -0.25) (meters 0.70))
+    (:z (meters 0.03))
+    (:scale-x (meters 0.58))
+    (:scale-y :copy scale-x)
+    (:r 0.0)
+    (:g 0.0)
+    (:b 0.0)
+    (:a 76.0)
+    (:scalevel-x (meters 0.0030))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.22)
+    (:timer (seconds 1.30))
+    (:flags (bit2 bit9))))
+
+(defpart 3598
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:num 0.08)
+    (:x (meters -0.45) (meters 0.90))
+    (:y (meters -0.25) (meters 0.55))
+    (:scale-x (meters 1.65) (meters 0.45))
+    (:scale-y :copy scale-x)
+    (:r 190.0)
+    (:g 0.0)
+    (:b 255.0)
+    (:a 42.0)
+    (:scalevel-x (meters 0.0020))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.18)
+    (:timer (seconds 1.20))
+    (:flags (bit2 bit9))))
+
+(defpart 3599
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:num 0.12)
+    (:x (meters -0.90) (meters 1.80))
+    (:y (meters -0.30) (meters 0.60))
+    (:z (meters 0.02))
+    (:scale-x (meters 0.12) (meters 0.10))
+    (:scale-y :copy scale-x)
+    (:r 190.0)
+    (:g 0.0)
+    (:b 255.0)
+    (:a 48.0)
+    (:fade-a -0.42)
+    (:timer (seconds 0.55))
+    (:flags (bit2 bit9))))
+
+(defpart 3600
+  :init-specs
+  ((:texture (hotdot effects))
+    (:num 0.12)
+    (:x (meters -0.70) (meters 1.40))
+    (:y (meters -0.35) (meters 0.70))
+    (:z (meters 0.02))
+    (:scale-x (meters 0.08) (meters 0.08))
+    (:scale-y :copy scale-x)
+    (:r 96.0 72.0)
+    (:g 224.0 96.0)
+    (:b 255.0 80.0)
+    (:a 118.0 52.0)
+    (:scalevel-x (meters -0.00018))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.72)
+    (:timer (seconds 0.42))
+    (:flags (bit2 bit9))))
+
+(defpartgroup group-fisher-catalog-gatekeeper
+  :id 3601
+  :flags (always-draw screen-space)
+  :bounds (static-bspherem 0 0 0 100)
+  :parts ((sp-item 3595 :flags (launch-asap))))
+
+(defpartgroup group-fisher-catalog-magma
+  :id 3602
+  :flags (always-draw screen-space)
+  :bounds (static-bspherem 0 0 0 100)
+  :parts ((sp-item 3596 :flags (launch-asap)) (sp-item 3597 :flags (launch-asap))))
+
+(defpartgroup group-fisher-catalog-forgotten
+  :id 3603
+  :flags (always-draw screen-space)
+  :bounds (static-bspherem 0 0 0 100)
+  :parts ((sp-item 3598 :flags (launch-asap)) (sp-item 3599 :flags (launch-asap))))
+
+(defpartgroup group-fisher-catalog-platformius
+  :id 3604
+  :flags (always-draw screen-space)
+  :bounds (static-bspherem 0 0 0 100)
+  :parts ((sp-item 3600 :flags (launch-asap))))
+
 
 (defskelgroup *sharkey-sgc*
   sharkey
@@ -654,9 +793,6 @@
   ((junglefish-lod0-mg (meters 20)) (junglefish-lod1-mg (meters 40)) (junglefish-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 1 0 1.5))
 
-;; Megaloviathan reuses the junglefish art, but its gameplay model is enormous.
-;; Give it its own generous culling sphere so its long body remains drawable
-;; when the root/center moves near the edge of the camera frustum.
 (defskelgroup *fisher-megaloviathan-sg*
   junglefish
   junglefish-lod0-jg

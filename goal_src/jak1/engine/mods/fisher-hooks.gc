@@ -142,7 +142,7 @@
   (set! (-> self bottom-height) (meters 12.0))
   (set! (-> self target) (the-as handle #f))
   (set! (-> self attack-event) #f)
-  (set! (-> self look) 36) ; water-anim-training-lake
+  (set! (-> self look) 36)
   (set! (-> self play-ambient-sound?) #f)
   (set! (-> self flag) (water-flag can-wade can-swim part-water part-splash))
 
@@ -1192,8 +1192,6 @@
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
-  ;; The carried/thrown Nuclear Bombfish is a named spawned process. Kill it
-  ;; directly on death before the final-boss runtime is reset and forgets it.
   (kill-by-name "fisher-finalboss-bombfish-back" *default-pool*)
   (kill-by-name "test-fisher-net" *default-pool*)
   (when *fisher-finalboss-danger-music-active?*

@@ -1454,9 +1454,6 @@
 (defun fisher-configure-random-fish-slot!
   ((self fisher-game) (slot int) (species int))
   (fisher-set-fish-species! self slot species)
-  ;; Magma Serpent and Megaloviathan are unique species, not seven-prefix
-  ;; species. Keep their internal suffix on the neutral HEALTHY appearance so
-  ;; respawns can never roll MALNUTRITIONED/STRESSED/MUTANT/etc.
   (fisher-set-fish-suffix!
     self
     slot
@@ -1812,8 +1809,6 @@
 
 (defun fisher-add-mountain-pass-cellfish-slots! ((self fisher-game))
   (when (fisher-mountain-pass-cellfish-eligible? self)
-    ;; Defeat Klaww is intentionally NOT a fishing reward. Its authored
-    ;; Power Cell is exempted in collectables.gc instead.
     (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end)))
   (none))
 
@@ -2093,9 +2088,6 @@
         (slot -1)
         (candidate 0))
 
-      ;; Do not consume the resident Lurker Shark to make the Gatekeeper
-      ;; Cell Shark.  If a normal shark is present the outer condition above
-      ;; defers this special fish until a later shark-free population.
       (while
         (and
           (< step (-> self fish-count))
@@ -2193,8 +2185,6 @@
         (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
         (= (fisher-fish-species self slot)
           (the-as int (fisher-species megaloviathan))))
-      ;; Hub 1's normal Lurker Shark is a population member, not a disposable
-      ;; carrier slot.  Never let passive Scout Fly / cell-fish rolls replace it.
       (= (fisher-fish-species self slot)
         (the-as int (fisher-species lurker-shark))))
     (return #f))
@@ -3016,10 +3006,6 @@
         (else
           (return (the-as int (fisher-species ice-shark)))))))
 
-  ;; Hub 1 sharks are injected through shark-chance instead of the normal
-  ;; species ranges.  Re-apply that rule when replacing a caught/despawned slot
-  ;; so a shark is not an initial-pool-only fish.  Keep at most one resident
-  ;; normal Lurker Shark.
   (when
     (and
       (or
@@ -3183,7 +3169,6 @@
   (new 'static 'vector :x (meters 0.27) :y (meters -0.04) :z (meters 0.13) :w 0.0))
 
 (define *fisher-archipelago-group-offset-game*
-  ;; Shared orbit center: keep the ring through the middle of the fish.
   (new 'static 'vector :y (meters 0.16) :w 0.0))
 (define *fisher-archipelago-group-offset-catch*
   (new 'static 'vector :y (meters 0.16) :w 0.0))
@@ -3249,8 +3234,6 @@
 (define *fisher-platformius-group-offset-catch*
   (new 'static 'vector :y (meters 1.15) :w 0.0))
 
-;; Catalogue previews use screen-space bones with native PC MERC materials.
-;; Never force PRIS/generic texture residency here; the fish keeps its MERC material bindings.
 
 (defun fisher-update-rare-attachment-transform! ((self manipy))
   (let ((parent-proc (ppointer->process (-> self parent)))
@@ -3331,7 +3314,6 @@
   (none))
 
 (defbehavior fisher-archipelago-orb-group-trans manipy ()
-  ;; The hidden parent is only the center of the ring. Never rotate it.
   (fisher-update-rare-attachment-transform! self)
   (none))
 
@@ -3369,9 +3351,6 @@
           (base-quat (new 'stack-no-clear 'quaternion))
           (self-spin (new 'stack-no-clear 'quaternion)))
 
-        ;; Recreate the original Archipelagoldfish ring motion, but apply it
-        ;; ONLY to the six orb POSITIONS.  Z spins the ring around the fish;
-        ;; X continuously rolls the whole orbit plane around/down through 3D.
         (quaternion-axis-angle! x-quat 1.0 0.0 0.0 (* tick 32.768))
         (quaternion-axis-angle! z-quat 0.0 0.0 1.0 (* tick 49.152))
         (quaternion*! ring-quat x-quat z-quat)
@@ -3379,8 +3358,6 @@
         (vector-rotate*! local-ring-offset offset ring-mat)
         (set! (-> local-ring-offset w) 0.0)
 
-        ;; Carry that moving ring with the fish/group without making the orb
-        ;; model inherit the ring's pitch/roll.
         (quaternion->matrix parent-mat (-> parent-drawable root quat))
         (vector-rotate*! world-ring-offset local-ring-offset parent-mat)
         (set! (-> world-ring-offset w) 0.0)
@@ -3391,8 +3368,6 @@
           world-ring-offset)
         (set! (-> self root trans w) 1.0)
 
-        ;; Orientation remains upright relative to the fish.  The only
-        ;; individual-orb rotation is its own vertical-axis spin.
         (quaternion-copy! base-quat (-> parent-drawable root quat))
         (quaternion-axis-angle!
           self-spin
@@ -3526,9 +3501,6 @@
 (defbehavior fisher-platformius-platform-trans manipy ()
   (fisher-update-rare-attachment-transform! self)
 
-  ;; Catalogue attachments use HUD coordinates, which are not valid world-space
-  ;; positions for the 3D sparticle system. The catalogue draws the equivalent
-  ;; Platformius sparks in its preview panel instead.
   (when
     (and
       (!= (-> self draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!)
@@ -3728,10 +3700,6 @@
     (scale float)
     (attachment-name string))
 
-  ;; Rare-fish attachments normally live in world-space meters. Catalogue
-  ;; previews use HUD-MERC perspective screen-space. The model is placed at
-  ;; 8x the old generic-HUD depth, so the old 0.014 child conversion becomes
-  ;; 0.112 to preserve the same apparent attachment size and offsets.
   (let* ((catalog-hud?
           (= (-> fish-proc draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!))
       (hud-x (* 0.112 (-> *video-parms* relative-x-scale)))
@@ -4051,9 +4019,6 @@
 
 
 (defun fisher-display-skeleton-for ((species int) (suffix int))
-  ;; Single source of truth for the model shown by both the real catch/loot
-  ;; window and the fish catalogue. Rare suffixes deliberately replace the
-  ;; base species skeleton exactly as the original catch-display code did.
   (cond
     ((or (= suffix 7) (= suffix 11) (= suffix 14) (= suffix 15) (= suffix 16))
       *catch-fishb-sgc*)
@@ -4077,9 +4042,6 @@
     (fish-proc manipy)
     (catch-display? symbol))
 
-  ;; Shared appearance path for live/catch fish and catalogue previews.
-  ;; This is the loot-window appearance code, with the fish metadata passed
-  ;; explicitly so the geologist catalogue can use it without a fisher-game.
   (let* ((info
         (fisher-species-info-for species))
 
@@ -5448,27 +5410,16 @@
   (none))
 
 (defun fisher-fish-lure-sense-range ((self fisher-game) (slot int))
-  (if
-    (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
-    ;; Four-meter frontal sensing cone.  Its origin is shifted so the rear half
-    ;; overlaps the front of the burn body and the forward half protrudes out.
-    (meters 4.00)
-    (meters 5.0)))
+  (meters 5.0))
 
 (defun fisher-fish-lure-sense-origin-offset ((self fisher-game) (slot int))
   (if
     (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
-    ;; The serpent burn body ends at 7.50m forward.  Keep the 4m sensing cone
-    ;; centered on that front edge: 2m overlaps the body and 2m pokes out.
-    (meters 5.50)
+    (meters 7.75)
     0.0))
 
 (defun fisher-fish-lure-sense-half-angle ((self fisher-game) (slot int))
-  (if
-    (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
-    ;; Narrow frontal cone: side/top approaches should not hook this fish.
-    (degrees 16.0)
-    (degrees 35.0)))
+  (degrees 35.0))
 
 (defun fisher-fish-lure-sense-dot-min ((self fisher-game) (slot int))
   (cos (fisher-fish-lure-sense-half-angle self slot)))
@@ -5493,8 +5444,6 @@
       (if
         (= (fisher-fish-species self slot)
            (the-as int (fisher-species magma-serpent)))
-        ;; Match the cone to the serpent's ACTUAL rendered facing, including
-        ;; its slow turn, instead of its eventual logical direction.
         (let ((rot (new 'stack-no-clear 'matrix)))
           (quaternion->matrix rot (-> fish-proc root quat))
           (vector-copy! forward (-> rot vector 2)))
@@ -5540,8 +5489,6 @@
       (sense-origin (new 'stack-no-clear 'vector))
       (distance 0.0)
       (horizontal-distance 0.0)
-      (vertical-distance 0.0)
-      (front-distance 0.0)
       (facing-dot 0.0)
       (sense-range (fisher-fish-lure-sense-range self slot))
       (origin-offset (fisher-fish-lure-sense-origin-offset self slot))
@@ -5550,9 +5497,6 @@
     (if
       (= (fisher-fish-species self slot)
          (the-as int (fisher-species magma-serpent)))
-      ;; The bite cone must follow the head the player can actually see.  The
-      ;; old logical playfield direction could disagree while the serpent was
-      ;; turning, making a visually-correct lure position fail the test.
       (let ((rot (new 'stack-no-clear 'matrix)))
         (quaternion->matrix rot (-> fish-proc root quat))
         (vector-copy! forward (-> rot vector 2)))
@@ -5570,7 +5514,6 @@
 
     (singlefish-vector-sub-safe! to-lure (-> self lure-pos) sense-origin)
     (set! distance (singlefish-vector-length-safe to-lure))
-    (set! vertical-distance (fabs (-> to-lure y)))
 
     (when
       (and
@@ -5582,7 +5525,6 @@
     (set! (-> to-lure y) 0.0)
     (set! (-> to-lure w) 0.0)
     (set! horizontal-distance (singlefish-vector-length-safe to-lure))
-    (set! front-distance (vector-dot forward to-lure))
 
     (when (> horizontal-distance (meters 0.001))
       (singlefish-vector-normalize-safe! to-lure 1.0))
@@ -5592,21 +5534,7 @@
     (and
       (<= distance sense-range)
       (> horizontal-distance (meters 0.001))
-      (>= facing-dot sense-dot-min)
-      ;; Magma Serpent can only bite from the mouth-level frontal lane.  The
-      ;; lure cannot sit over the long body/top side and still trigger a hook.
-      (or
-        (!= (fisher-fish-species self slot)
-            (the-as int (fisher-species magma-serpent)))
-        (and
-          ;; The rear half of the debug cone is intentionally embedded in the
-          ;; burn volume, but it must NOT count as a bite.  Only the half that
-          ;; actually protrudes in front of the mouth can trigger/hold '?'.
-          ;; 5.50m cone origin + 2.00m = the 7.50m burn-body front edge.
-          ;; The 7.75m mouth target stays safely inside this valid half while
-          ;; the serpent closes the last few centimeters to the hook.
-          (>= front-distance (meters 2.00))
-          (<= vertical-distance (meters 0.60)))))))
+      (>= facing-dot sense-dot-min))))
 
 (defun fisher-move-manipy-toward!
   ((fish-proc manipy) (target vector) (speed float))
@@ -6616,8 +6544,6 @@
     (when
       (and
         (not (paused?))
-        ;; The geologist owns Circle while her dialogue/catalogue owns Jak.
-        ;; Do not show or accept the fisherman's talk prompt at the same time.
         (or
           (not *fisher-geologist*)
           (not (-> *fisher-geologist* 0 dialogue-grabbed?)))
@@ -6829,23 +6755,17 @@
 
   :enter
   (behavior ()
-    ;; A normal dialogue exit deliberately leaves Jak grabbed.  If idle was
-    ;; entered for any other reason, retain the old immediate-release behavior.
     (when (not (-> self dialogue-release-pending?))
       (fisher-man-release-jak! self)))
 
   :code
   (behavior ()
-    ;; cpad-clear! may consume X for the transition frame.  Wait for one fresh
-    ;; controller frame before deciding whether the player has actually let go.
     (when (-> self dialogue-release-pending?)
       (when *target*
         (process-grab? *target*))
       (suspend))
 
     (loop
-      ;; Keep Jak grabbed as long as the same X press that closed dialogue is
-      ;; physically held. Release him on the first frame where X is really up.
       (when (-> self dialogue-release-pending?)
         (cond
           ((and *target* (cpad-hold? 0 x))
@@ -6938,8 +6858,6 @@
 
   :exit
   (behavior ()
-    ;; Normal dialogue exits set dialogue-release-pending? before going idle.
-    ;; Keep Jak grabbed in that case; kill/forced exits still release normally.
     (cond
       ((-> self dialogue-release-pending?)
         (when *target*
@@ -7144,21 +7062,12 @@
 
 (define *fisher-geologist-bg-color* (new 'static 'rgba :r #x00 :g #x00 :b #x00 :a #xff))
 
-;; Keep rare child models alive while the catalogue owns a preview. The root
-;; fish is first built exactly like a catch-display fish, then the completed
-;; MERC tree is converted to the foreground HUD renderer below.
 (define *fisher-catalog-world-preview-active?* #f)
 
-;; The catalogue uses OpenGOAL's foreground MERC HUD renderer.  0.014 is the
-;; world-model -> 512x448 HUD scale that puts an ordinary catch-display fish
-;; in the same visual size range as the game's 3D HUD icons.  A uniform fit
-;; multiplier is applied only when a fish's authored catch proportions would
-;; otherwise exceed the preview window.
 (define *fisher-catalog-hud-unit-scale* 0.14)
 (define *fisher-catalog-hud-fit-scale* 1.0)
 (define *fisher-catalog-attachment-spawn-scale* 1.0)
 
-;; Geologist dialogue uses the same buffered typewriter presentation as the fisherman.
 (define *fisher-geologist-dialogue-buffer-0*
   (new 'global 'string 256 (the string #f)))
 
@@ -7235,14 +7144,6 @@
     ((= prefix 5) (task-status need-reward-speech))
     (else (task-status need-resolution))))
 
-;; Gatekeeper Cell Shark catalogue completion is reward-based, not prefix-based.
-;; Six stars are used:
-;;   0 Fire Canyon completion cell
-;;   1 Mountain Pass completion cell
-;;   2 Mountain Pass scout-fly cell
-;;   3 Lava Tube completion cell
-;;   4 Lava Tube scout-fly cell
-;;   5 Citadel scout-fly cell
 (defun fisher-catalog-gatekeeper-star-for-task ((task int))
   (cond
     ((= task (the-as int (game-task firecanyon-end))) 0)
@@ -7267,16 +7168,9 @@
   (let ((reward-task (fisher-catalog-gatekeeper-task-for-star star)))
     (or
       *fisher-in-debug?*
-      ;; This makes existing saves migrate naturally: these reward tasks can
-      ;; only be completed through the corresponding fishing reward in this
-      ;; mod, so a completed task is a valid caught star.
       (and
         (> (the int reward-task) 1)
         (task-complete? *game-info* reward-task))
-      ;; Stars 1-5 did not exist in the old one-state Gatekeeper catalogue, so
-      ;; their new catalogue bits are unambiguous.  The old `unknown` bit is
-      ;; deliberately not trusted by itself for star 0 because older versions
-      ;; used it for ANY Gatekeeper catch.
       (and
         (> star 0)
         (< star 6)
@@ -7300,9 +7194,6 @@
   (none))
 
 (defun fisher-catalog-base-unique? ((species int))
-  ;; Scout Fly, Magma Serpent, Megaloviathan, and Nuclear Bombfish have one
-  ;; catalogue state. Gatekeeper Cell Shark is handled separately with six
-  ;; reward stars.
   (or
     (= species 4)
     (= species (the-as int (fisher-species magma-serpent)))
@@ -7315,8 +7206,6 @@
     (fisher-catalog-base-unique? row)))
 
 (defun fisher-catalog-register-catch! ((species int) (suffix int))
-  ;; Each normal fish owns seven permanent cstages (one per prefix/star).
-  ;; Only autosave when this catch closes a cstage that was not already saved.
   (cond
     ((= species (the-as int (fisher-species fire-canyon-cellfish)))
       (none))
@@ -7394,9 +7283,6 @@
 
 (defun fisher-catalog-row-name ((row int))
   (cond
-    ;; The three progression cell sharks (Fire Canyon, Mountain Pass, Lava
-    ;; Tube) share this species/catalogue row, so give the catalogue a neutral
-    ;; name instead of calling every one a Fire Canyon fish.
     ((= row (the-as int (fisher-species fire-canyon-cellfish)))
       "GATEKEEPER CELL SHARK")
     ((< row 24)
@@ -7428,9 +7314,6 @@
     (else "???")))
 
 (defun fisher-catalog-row-zone ((row int))
-  ;; Use the same location-id that the fish has when it is shown in the real
-  ;; catch/loot window.  This matters for lava, snow, dark-eco and final-boss
-  ;; appearance overrides.
   (cond
     ((or (= row 0) (= row 1) (= row 24))
       (the-as int (fisher-zone sandover-dock)))
@@ -7475,50 +7358,31 @@
     (fisher-display-skeleton-for species suffix)))
 
 (defun fisher-catalog-background-color! ((row int) (dst rgba))
-  ;; Give each fishing area its own preview-panel color.  Rare fish inherit
-  ;; the area listed by fisher-catalog-row-location rather than being grouped
-  ;; into one generic water/lava color.
   (cond
-    ;; Sandover Village waters
     ((or (= row 0) (= row 1) (= row 24))
       (set! (-> dst r) 58) (set! (-> dst g) 126) (set! (-> dst b) 154))
-    ;; Forbidden Jungle
     ((or (= row 2) (= row 3) (= row 25))
       (set! (-> dst r) 48) (set! (-> dst g) 105) (set! (-> dst b) 72))
-    ;; Sentinel Beach
     ((= row 26)
       (set! (-> dst r) 74) (set! (-> dst g) 145) (set! (-> dst b) 176))
-    ;; Misty Island
     ((or (= row 5) (= row 27))
       (set! (-> dst r) 43) (set! (-> dst g) 88) (set! (-> dst b) 76))
-    ;; Fish that may be found across fishing areas
     ((= row 4)
       (set! (-> dst r) 66) (set! (-> dst g) 112) (set! (-> dst b) 128))
-    ;; Rock Village waters
     ((or (= row 6) (= row 7) (= row 8) (= row 9) (= row 28))
       (set! (-> dst r) 32) (set! (-> dst g) 103) (set! (-> dst b) 120))
-    ;; Lost Precursor City
     ((= row 29)
       (set! (-> dst r) 92) (set! (-> dst g) 151) (set! (-> dst b) 126))
-    ;; Boggy Swamp
     ((or (= row 10) (= row 11) (= row 12) (= row 30))
       (set! (-> dst r) 71) (set! (-> dst g) 91) (set! (-> dst b) 45))
-    ;; Volcanic Crater
     ((or (= row 13) (= row 14) (= row 15) (= row 31))
       (set! (-> dst r) 151) (set! (-> dst g) 61) (set! (-> dst b) 24))
-    ;; Snowy Mountain
     ((or (= row 16) (= row 17) (= row 18) (= row 32))
       (set! (-> dst r) 166) (set! (-> dst g) 201) (set! (-> dst b) 219))
-    ;; Spider Cave
     ((or (= row 19) (= row 20) (= row 21) (= row 22) (= row 33))
       (set! (-> dst r) 54) (set! (-> dst g) 48) (set! (-> dst b) 80))
-    ;; Final boss arena / Nuclear Bombfish
     (else
       (set! (-> dst r) 126) (set! (-> dst g) 45) (set! (-> dst b) 24)))
-  ;; This panel is drawn in the sprite bucket after the normal world/MERC
-  ;; preview model. Keep it genuinely translucent so it tints the preview
-  ;; area without painting over the fish. Jak 1 sprite alpha uses the GS-style
-  ;; 0..128 range for normal blending; #x38 is intentionally light.
   (set! (-> dst a) #x38)
   dst)
 
@@ -7622,9 +7486,6 @@
           scale))))
   (none))
 
-;; The catalogue uses the same large Jak 1 font face, but is placed in the
-;; regular sprite bucket so the 3D catalogue fish can render in front of it.
-;; This intentionally does NOT use the debug bucket.
 (defun fisher-geologist-draw-catalog-text
   ((text string) (x int) (y int) (scale float) (selected? symbol) (middle? symbol))
   (clear matt-str)
@@ -7682,8 +7543,6 @@
           (if filled?
             (new 'static 'rgba :r #xf0 :g #x90 :b #x20 :a #xff)
             (new 'static 'rgba :r #x78 :g #x58 :b #x38 :a #xe8))))
-      ;; Symmetric five-point pixel star.  Keep the lower two points broad
-      ;; and separated so the bottom reads as star legs instead of an arrow.
       (draw-sprite2d-xy buf (+ x 6) y 1 1 color)
       (draw-sprite2d-xy buf (+ x 5) (+ y 1) 3 2 color)
       (draw-sprite2d-xy buf (+ x 4) (+ y 3) 5 1 color)
@@ -7700,7 +7559,6 @@
   (none))
 
 (defun fisher-geologist-draw-dialogue! ((self fisher-geologist))
-  ;; Match the fisherman dialogue box dimensions and line spacing exactly.
   (with-dma-buffer-add-bucket
     ((buf (-> (current-frame) global-buf))
       (bucket-id subtitle))
@@ -7727,13 +7585,6 @@
   (none))
 
 
-;; Catalogue model renderer: use the HUD/screen-space bone transform, but submit
-;; the actual MERC effects through pc-merc-draw-request instead of generic-merc.
-;; draw-bones-hud forces every effect through mercneric, which is why a fish can
-;; be visible yet sample unrelated level textures.  The stock draw-bones-hud-merc
-;; has the right matrix path, but leaves ordinary non-envmap effects marked as
-;; mercneric; pc-merc-draw-request then excludes them.  This copy fixes that one
-;; split: every normal effect is enabled for native PC MERC.
 (defun fisher-draw-bones-catalog-hud-merc!
   ((draw draw-control) (dma-buf dma-buffer))
   (local-vars
@@ -7752,7 +7603,6 @@
         (mat-data (the object (&+ dma-start 64)))
         (spr-work (scratchpad-object terrain-context)))
 
-      ;; Same screen-space matrix setup as draw-bones-hud/draw-bones-hud-merc.
       (let ((mat-aligned (logand (the int mat-data) 48)))
         (when (nonzero? mat-aligned)
           (set! mat-data
@@ -7772,7 +7622,6 @@
             (t5-0 (-> bone-mem work regs bone-ptr))
             (t6-1 (-> bone-mem work regs num-bones))
             (t7-0 t1-6))
-          ;; bncfl01 is the important HUD/screen-space bone calculation flag.
           (set! (-> t7-0 flags) (bone-calc-flags bncfl01))
           (set! (-> t7-0 num-bones) t6-1)
           (set! (-> t7-0 matrix-area) (the (inline-array matrix) t2-0))
@@ -7797,9 +7646,6 @@
         (when (= (-> draw data-format) 1)
           (let ((mgeo (-> draw lod-set lod 0 geo)))
             (dotimes (effect-idx (the-as int (-> mgeo header effect-count)))
-              ;; Normal draw-bones clears this state before choosing MERC vs
-              ;; mercneric. Do the same so another foreground object cannot
-              ;; leak fade/alpha state into the catalogue fish.
               (set!
                 (-> *merc-bucket-info* effect effect-idx color-fade)
                 (new 'static 'rgba :r 0 :g 0 :b 0 :a 0))
@@ -7810,8 +7656,6 @@
                 (-> *merc-bucket-info* effect effect-idx ignore-alpha)
                 (the-as uint 0))
 
-              ;; Keep the HUD merc envmap behavior, but still leave the effect
-              ;; enabled for pc-merc-draw-request.
               (when (nonzero? (-> mgeo effect effect-idx envmap-usage))
                 (set!
                   (-> *merc-bucket-info* effect effect-idx color-fade)
@@ -7831,7 +7675,6 @@
                 (the (pointer float) 0)))
             (set! a2-2 (-> buf base))))
 
-        ;; Same DMA alignment/link tail as the engine HUD bone renderer.
         (let ((a0-17 (logand (the int a2-2) 48)))
           (when (nonzero? a0-17)
             (set! at-2 #x20000000)
@@ -7864,9 +7707,6 @@
         (-> draw status)
         (draw-status hidden no-anim no-skeleton-update)))
 
-    ;; Keep the stable HUD light rig, but copy it both to the scratchpad (the
-    ;; usual HUD convention) and directly to merc-bucket-info because native
-    ;; pc-merc-draw-request reads its lights from there.
     (let ((vu-lgt (the-as vu-lights (+ 64 (scratchpad-object int))))
         (merc-lgt (-> *merc-bucket-info* light))
         (lgt *hud-pc-lights*)
@@ -7876,10 +7716,6 @@
       (set! (-> vu-lgt direction 1 quad) (-> lgt direction 1 quad))
       (set! (-> vu-lgt direction 2 quad) (-> lgt direction 2 quad))
 
-      ;; Match dma-add-process-drawable's appearance math: directional light
-      ;; colors are multiplied by draw.color-mult, while ambient additionally
-      ;; receives draw.color-emissive.  fisher-apply-fish-appearance! writes the
-      ;; healthy/rare fish tint into exactly those fields.
       (set-vector!
         (-> vu-lgt color 0)
         (* (-> lgt color 0 x) (-> mult x))
@@ -7905,7 +7741,6 @@
         (+ (* (-> lgt ambient z) (-> mult z)) (-> emissive z))
         (+ (* (-> lgt ambient w) (-> mult w)) (-> emissive w)))
 
-      ;; Native pc-merc-draw-request reads this copy, not the scratchpad one.
       (set! (-> merc-lgt direction 0 quad) (-> vu-lgt direction 0 quad))
       (set! (-> merc-lgt direction 1 quad) (-> vu-lgt direction 1 quad))
       (set! (-> merc-lgt direction 2 quad) (-> vu-lgt direction 2 quad))
@@ -7926,9 +7761,6 @@
   (none))
 
 (defun fisher-geologist-style-model! ((row int) (fish-proc manipy))
-  ;; This deliberately calls the SAME appearance function used by
-  ;; fisher-spawn-catch-display-fish!.  Normal catalogue entries are forced to
-  ;; suffix 2 (HEALTHY); unique entries keep their real rare suffix.
   (let* ((species (fisher-catalog-row-species row))
       (row-suffix (fisher-catalog-row-suffix row))
       (suffix (if (< row-suffix 0) 2 row-suffix))
@@ -7952,15 +7784,9 @@
       fish-proc
       #t)
 
-    ;; Catalogue-only Magma Serpent proportion: stretch the long axis before
-    ;; fitting it. The larger envelope below compensates so its body thickness
-    ;; stays about the same while its visible length grows by roughly 23%.
     (when (= species (the-as int (fisher-species magma-serpent)))
       (*! (-> fish-proc root scale z) 1.25))
 
-    ;; The catch code above leaves the model in its exact loot-window scale.
-    ;; Compute one UNIFORM fit multiplier so unusually large/long fish remain
-    ;; inside the catalogue window without changing their proportions.
     (let ((largest
           (fmax
             (abs (-> fish-proc root scale x))
@@ -7968,19 +7794,12 @@
               (abs (-> fish-proc root scale y))
               (abs (-> fish-proc root scale z))))))
       (set! *fisher-catalog-hud-fit-scale*
-        ;; Normalize EVERY catalogue model tree to a fixed presentation envelope.
-        ;; Magma Serpent is extremely long/thin (its Z scale dominates), so the
-        ;; same max-axis envelope makes its body look much smaller than the other
-        ;; fish. Give only that species a larger fixed envelope; children still
-        ;; inherit the exact same uniform multiplier as their parent.
         (if
           (> largest 0.0001)
           (/
             (cond
               ((= species (the-as int (fisher-species magma-serpent)))
                 0.38)
-              ;; Keep the Megaloviathan visibly enormous instead of normalizing
-              ;; it down to the same envelope as ordinary catalogue fish.
               ((= species (the-as int (fisher-species megaloviathan)))
                 0.36)
               (else
@@ -7992,10 +7811,6 @@
 
 (defun fisher-catalog-convert-manipy-tree-to-hud!
   ((model manipy) (unit-scale float))
-  ;; Convert the already-built catch-display tree (fish + real manipy children)
-  ;; to the catalogue screen-space coordinate system. Materials stay on
-  ;; the model; only transform units and the custom native-MERC DMA function
-  ;; change.
   (let* ((sx (-> model root scale x))
       (sy (-> model root scale y))
       (sz (-> model root scale z))
@@ -8006,18 +7821,11 @@
 
     (set-vector!
       (-> model root scale)
-      ;; Preserve the catalogue model's 4:3 proportions on every display.
-      ;; relative-x-scale changes with widescreen and was being baked directly
-      ;; into X/Z, making the fish narrower on 16:9.  Use the display's
-      ;; vertical HUD scale for the whole model envelope instead; keep the
-      ;; existing 512x448 Y correction that makes the 4:3 catalogue look right.
       (* sx unit-scale (-> *video-parms* relative-y-scale))
       (* sy unit-scale aspect (-> *video-parms* relative-y-scale))
       (* sz unit-scale (-> *video-parms* relative-y-scale))
       1.0)
 
-    ;; transv is the authored local attachment offset.  Preserve W because
-    ;; several attachment behaviors store animation seeds there.
     (set! (-> model root transv x) (* tx unit-scale))
     (set! (-> model root transv y) (* ty unit-scale aspect))
     (set! (-> model root transv z) (* tz unit-scale))
@@ -8026,10 +7834,6 @@
       (-> model draw dma-add-func)
       fisher-dma-add-process-drawable-catalog-hud-merc!)
 
-    ;; Match hud-pc-make-icon's process behavior as well as its renderer.
-    ;; The catalogue can be entered while normal gameplay process masks are
-    ;; changing, so keep this model on the same mask setup as built-in 3D HUD
-    ;; MERC icons.
     (logior! (-> model mask) (process-mask pause))
     (logclear! (-> model mask) (process-mask menu progress))
 
@@ -8037,9 +7841,6 @@
     (logclear! (-> model draw status) (draw-status hidden no-anim no-skeleton-update))
     (send-event model 'max-vis-dist (meters 999999.0)))
 
-  ;; Rare fish can have nested manipy trees (orb groups, tetromino pieces,
-  ;; Platformius platforms, Snowy Mountain crystals). Convert every one so the
-  ;; catalogue is literally the same model tree as the catch display.
   (let ((child (-> model child)))
     (while child
       (let ((child-proc (ppointer->process child)))
@@ -8064,8 +7865,6 @@
   (none))
 
 (defun fisher-geologist-update-model-rotation! ((self fisher-geologist))
-  ;; Catalogue preview rotates left/right only.  Vertical right-stick input is
-  ;; intentionally ignored so the fish always stays upright.
   (let* ((stick-x (the int (-> *cpad-list* cpads 0 rightx)))
       (step (* (degrees 110.0) (-> *display* seconds-per-frame))))
     (cond
@@ -8074,19 +7873,12 @@
   (none))
 
 (defun fisher-geologist-position-model! ((self fisher-geologist))
-  ;; draw-bones-hud uses logical 512x448 HUD coordinates directly.  Do not
-  ;; convert this back into a world/camera position: that was the reason the
-  ;; previous catalogue model could be valid yet never appear in the panel.
   (when (-> self catalog-model)
     (let ((fish-proc
           (the-as manipy (ppointer->process (-> self catalog-model)))))
       (when fish-proc
         (let* ((species (fisher-catalog-row-species (-> self catalog-index)))
             (suffix (fisher-catalog-row-suffix (-> self catalog-index)))
-            ;; sharkey-sgc is authored from the TOP of the model, while the fish
-            ;; skeletons are authored from the underside. Give every catalogue
-            ;; model that actually uses sharkey-sgc the same upward Y correction
-            ;; so its visual center lands on the normal fish preview center.
             (shark-model?
               (=
                 (fisher-catalog-row-skeleton (-> self catalog-index))
@@ -8096,11 +7888,6 @@
             (yaw-quat (new 'stack-no-clear 'quaternion))
             (flip-quat (new 'stack-no-clear 'quaternion)))
 
-          ;; The 4:3 catalogue position is already correct.  The native HUD-MERC
-          ;; path does not add the horizontal centering offset that normal HUD
-          ;; pieces receive on widescreen, so add only that missing 16:9 shift.
-          ;; 85px is half of the extra logical width between centered 4:3 and
-          ;; 16:9 on the 512-wide HUD canvas.
           (set!
             (-> fish-proc root trans x)
             (+
@@ -8120,9 +7907,6 @@
             (draw-status hidden no-anim no-skeleton-update))
           (set! (-> fish-proc draw force-lod) 0)
 
-          ;; Same base orientation as the loot fish (identity), with only the
-          ;; user's requested left/right catalogue yaw added.  Screaming Fish's
-          ;; catch-display 180-degree correction is preserved.
           (quaternion-axis-angle!
             yaw-quat 0.0 1.0 0.0 (-> self catalog-yaw))
           (cond
@@ -8164,8 +7948,6 @@
             (set! (-> self catalog-model) model)
             (let ((fish-proc (the-as manipy (ppointer->process model))))
               (when fish-proc
-                ;; Match fisher-spawn-catch-display-fish! before doing anything
-                ;; catalogue-specific.
                 (send-event fish-proc 'anim-mode 'loop)
                 (fisher-randomize-manipy-anim-frame! fish-proc)
                 (send-event fish-proc 'max-vis-dist (meters 999999.0))
@@ -8178,8 +7960,6 @@
                   (-> self catalog-index)
                   fish-proc)
 
-                ;; Build the SAME child model tree as the catch/loot window while
-                ;; everything is still in ordinary catch-display units.
                 (let ((suffix
                       (fisher-catalog-row-suffix (-> self catalog-index)))
                     (species
@@ -8197,8 +7977,6 @@
                     (fisher-spawn-snow-ice-crystal!
                       fish-proc species #t)))
 
-                ;; Only after the exact loot model is complete do we move the
-                ;; whole tree to the MERC foreground HUD renderer.
                 (fisher-catalog-convert-manipy-tree-to-hud!
                   fish-proc
                   (*
@@ -8208,62 +7986,132 @@
   (fisher-geologist-position-model! self)
   (none))
 
+(defun fisher-geologist-init-catalog-particles! ((self fisher-geologist))
+  (set!
+    (-> self catalog-gatekeeper-part)
+    (create-launch-control (-> *part-group-id-table* 3601) self))
+  (set!
+    (-> self catalog-magma-part)
+    (create-launch-control (-> *part-group-id-table* 3602) self))
+  (set!
+    (-> self catalog-forgotten-part)
+    (create-launch-control (-> *part-group-id-table* 3603) self))
+  (set!
+    (-> self catalog-platformius-part)
+    (create-launch-control (-> *part-group-id-table* 3604) self))
+
+  (when (nonzero? (-> self catalog-gatekeeper-part))
+    (set! (-> self catalog-gatekeeper-part matrix) -1))
+  (when (nonzero? (-> self catalog-magma-part))
+    (set! (-> self catalog-magma-part matrix) -1))
+  (when (nonzero? (-> self catalog-forgotten-part))
+    (set! (-> self catalog-forgotten-part matrix) -1))
+  (when (nonzero? (-> self catalog-platformius-part))
+    (set! (-> self catalog-platformius-part matrix) -1))
+
+  (set! (-> self catalog-particle-row) -1)
+  (none))
+
+(defun fisher-geologist-stop-catalog-particles! ((self fisher-geologist))
+  (when (nonzero? (-> self catalog-gatekeeper-part))
+    (kill-particles (-> self catalog-gatekeeper-part)))
+  (when (nonzero? (-> self catalog-magma-part))
+    (kill-particles (-> self catalog-magma-part)))
+  (when (nonzero? (-> self catalog-forgotten-part))
+    (kill-particles (-> self catalog-forgotten-part)))
+  (when (nonzero? (-> self catalog-platformius-part))
+    (kill-particles (-> self catalog-platformius-part)))
+  (set! (-> self catalog-particle-row) -1)
+  (none))
+
+(defun fisher-geologist-free-catalog-particles! ((self fisher-geologist))
+  (when (nonzero? (-> self catalog-gatekeeper-part))
+    (kill-and-free-particles (-> self catalog-gatekeeper-part))
+    (set! (-> self catalog-gatekeeper-part) (the-as sparticle-launch-control 0)))
+  (when (nonzero? (-> self catalog-magma-part))
+    (kill-and-free-particles (-> self catalog-magma-part))
+    (set! (-> self catalog-magma-part) (the-as sparticle-launch-control 0)))
+  (when (nonzero? (-> self catalog-forgotten-part))
+    (kill-and-free-particles (-> self catalog-forgotten-part))
+    (set! (-> self catalog-forgotten-part) (the-as sparticle-launch-control 0)))
+  (when (nonzero? (-> self catalog-platformius-part))
+    (kill-and-free-particles (-> self catalog-platformius-part))
+    (set! (-> self catalog-platformius-part) (the-as sparticle-launch-control 0)))
+  (none))
+
+(defun fisher-catalog-spawn-hud-particles!
+  ((control sparticle-launch-control)
+    (screen-x float)
+    (screen-y float)
+    (depth float))
+
+  (when control
+    (when (<= (-> control matrix) 0)
+      (set! (-> control matrix) (sprite-allocate-user-hvdf)))
+
+    (when (> (-> control matrix) 0)
+      (let ((pos-x (- screen-x 256.0))
+          (pos-y
+            (*
+              0.5
+              (-
+                (* screen-y (-> *video-parms* relative-y-scale))
+                (the float (-> *video-parms* screen-sy))))))
+
+        (set-vector!
+          (sprite-get-user-hvdf (-> control matrix))
+          (the float (+ (the int pos-x) 2048))
+          (the float (+ (the int pos-y) 2048))
+          (- (-> *math-camera* hvdf-off z) (* 1024.0 depth))
+          (-> *math-camera* hvdf-off w))
+
+        (spawn control *null-vector*))))
+
+  (none))
+
 (defun fisher-geologist-draw-rare-effects! ((self fisher-geologist))
-  ;; The catalogue preview should carry the persistent visual effects that are
-  ;; part of the fish itself, not just the bare skeleton. Attack/projectile
-  ;; effects are deliberately excluded.
   (when (-> self catalog-model)
     (let* ((row (-> self catalog-index))
         (species (fisher-catalog-row-species row))
-        (suffix (fisher-catalog-row-suffix row))
-        (fish-proc
-          (the-as manipy (ppointer->process (-> self catalog-model)))))
-      (when fish-proc
-        (let ((particle-pos (-> fish-proc root trans)))
-          (cond
-            ;; Gatekeeper Cell Shark: same reddish-orange Power Cell aura used
-            ;; by its live carrier form.
-            ((= species (the-as int (fisher-species fire-canyon-cellfish)))
-              (when (zero? (mod (current-time) 3))
-                (launch-particles
-                  :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3576)
-                  particle-pos)))
+        (suffix (fisher-catalog-row-suffix row)))
 
-            ;; Magma Serpent: persistent body flames/smoke. These are static
-            ;; catalogue copies of the live serpent's lava puff modes 4 and 5.
-            ((= species (the-as int (fisher-species magma-serpent)))
-              (when (zero? (mod (current-time) 3))
-                (launch-particles
-                  :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3593)
-                  particle-pos)
-                (launch-particles
-                  :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3594)
-                  particle-pos)))
+      (when (!= row (-> self catalog-particle-row))
+        (fisher-geologist-stop-catalog-particles! self)
+        (set! (-> self catalog-particle-row) row))
 
-            ;; Forgotten Fish: fisher.gc's bad-fish recipe (bigpuff + lakedrop),
-            ;; enlarged so the cloud is at least as large as the fish.
-            ((= suffix 8)
-              (when (zero? (mod (current-time) 4))
-                (launch-particles
-                  :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3590)
-                  particle-pos)
-                (launch-particles
-                  :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3592)
-                  particle-pos)))
+      (cond
+        ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+          (fisher-catalog-spawn-hud-particles!
+            (-> self catalog-gatekeeper-part)
+            362.0
+            79.0
+            1.0))
 
-            ;; Platformius' platform child suppresses world-space sparks when
-            ;; converted to HUD-MERC, so submit its equivalent catalogue spark here.
-            ((= suffix 15)
-              (when (zero? (mod (current-time) 6))
-                (launch-particles
-                  :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3569)
-                  particle-pos))))))))
+        ((= species (the-as int (fisher-species magma-serpent)))
+          (fisher-catalog-spawn-hud-particles!
+            (-> self catalog-magma-part)
+            362.0
+            79.0
+            1.0))
+
+        ((= suffix 8)
+          (fisher-catalog-spawn-hud-particles!
+            (-> self catalog-forgotten-part)
+            362.0
+            79.0
+            1.0))
+
+        ((= suffix 15)
+          (fisher-catalog-spawn-hud-particles!
+            (-> self catalog-platformius-part)
+            362.0
+            79.0
+            1.0))
+
+        (else
+          (when (!= (-> self catalog-particle-row) -1)
+            (fisher-geologist-stop-catalog-particles! self))))))
+
   (none))
 
 (defun fisher-geologist-draw-catalog! ((self fisher-geologist))
@@ -8273,48 +8121,31 @@
       (discovered? (fisher-catalog-row-discovered? selected)))
     (fisher-catalog-background-color! selected *fisher-geologist-bg-color*)
 
-    ;; The preview fish stays on the normal world/MERC path, exactly like the
-    ;; catch/loot-window fish.  Do NOT put ordinary sprite DMA into renderer-
-    ;; specific buckets such as `shadow`: the PC ShadowRenderer expects its own
-    ;; STCYCL/UNPACK VIF protocol and will assert if a sprite chain is inserted.
-    ;;
-    ;; Instead, compose this exactly like the loot window: the normal 3D fish is
-    ;; drawn first, then this translucent area-color card and the rest of the UI
-    ;; are drawn later in the normal sprite bucket.
     (with-dma-buffer-add-bucket
       ((buf (-> (current-frame) global-buf))
         (bucket-id sprite))
-      ;; Translucent preview color.  Because the world/MERC fish was submitted
-      ;; earlier, it remains visible through this card while keeping its normal
-      ;; materials/textures.
-      ;; Outer frame.
       (draw-sprite2d-xy buf 18 9 476 29 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
       (draw-sprite2d-xy buf 18 120 476 94 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
       (draw-sprite2d-xy buf 18 38 268 82 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
       (draw-sprite2d-xy buf 438 38 56 82 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xf4))
 
-      ;; Brown inset.
       (draw-sprite2d-xy buf 22 13 468 25 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
       (draw-sprite2d-xy buf 22 120 468 90 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
       (draw-sprite2d-xy buf 22 38 264 82 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
       (draw-sprite2d-xy buf 438 38 52 82 (new 'static 'rgba :r #x48 :g #x28 :b #x10 :a #xee))
 
-      ;; Inner dark panel.
       (draw-sprite2d-xy buf 26 17 460 21 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
       (draw-sprite2d-xy buf 26 120 460 86 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
       (draw-sprite2d-xy buf 26 38 260 82 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
       (draw-sprite2d-xy buf 438 38 48 82 (new 'static 'rgba :r #x12 :g #x12 :b #x12 :a #xf2))
 
-      ;; List panel.
       (draw-sprite2d-xy buf 31 31 202 163 (new 'static 'rgba :r #x24 :g #x18 :b #x10 :a #xe8))
 
-      ;; Right details panel, carved around the preview.
       (draw-sprite2d-xy buf 238 31 241 7 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
       (draw-sprite2d-xy buf 238 120 241 74 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
       (draw-sprite2d-xy buf 238 38 48 82 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
       (draw-sprite2d-xy buf 438 38 41 82 (new 'static 'rgba :r #x18 :g #x12 :b #x0c :a #xe8))
 
-      ;; Preview border draws after the model and masks the edges cleanly.
       (draw-sprite2d-xy buf 286 38 152 4 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
       (draw-sprite2d-xy buf 286 116 152 4 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
       (draw-sprite2d-xy buf 286 42 4 74 (new 'static 'rgba :r #x08 :g #x08 :b #x08 :a #xff))
@@ -8325,7 +8156,6 @@
     (when discovered?
       (fisher-geologist-draw-rare-effects! self))
 
-    ;; Large Jak 1 font, scaled down for this denser menu.
     (fisher-geologist-draw-catalog-text "FISH CATALOGUE" 132 22 0.26 #f #t)
     (clear *fish-ui-str*)
     (format *fish-ui-str* "DISCOVERED ~D/~D" (fisher-catalog-discovered-count) *fisher-catalog-row-count*)
@@ -8344,8 +8174,6 @@
             (= row selected)
             #f)
 
-          ;; Show prefix completion on the right edge of each option region.
-          ;; Unique fish have one catalogue state rather than seven prefixes.
           (clear *fish-ui-str*)
           (cond
             ((= row (the-as int (fisher-species fire-canyon-cellfish)))
@@ -8474,6 +8302,36 @@
 (defmethod process-taskable-method-38 ((this fisher-geologist)) (none))
 (defmethod process-taskable-method-43 ((this fisher-geologist)) #f)
 
+(defmethod relocate ((this fisher-geologist) (offset int))
+  (when (nonzero? (-> this catalog-gatekeeper-part))
+    (set!
+      (-> this catalog-gatekeeper-part)
+      (the-as sparticle-launch-control
+        (&+ (the-as pointer (-> this catalog-gatekeeper-part)) offset))))
+  (when (nonzero? (-> this catalog-magma-part))
+    (set!
+      (-> this catalog-magma-part)
+      (the-as sparticle-launch-control
+        (&+ (the-as pointer (-> this catalog-magma-part)) offset))))
+  (when (nonzero? (-> this catalog-forgotten-part))
+    (set!
+      (-> this catalog-forgotten-part)
+      (the-as sparticle-launch-control
+        (&+ (the-as pointer (-> this catalog-forgotten-part)) offset))))
+  (when (nonzero? (-> this catalog-platformius-part))
+    (set!
+      (-> this catalog-platformius-part)
+      (the-as sparticle-launch-control
+        (&+ (the-as pointer (-> this catalog-platformius-part)) offset))))
+
+  (the-as fisher-geologist
+    ((method-of-type process-taskable relocate) this offset)))
+
+(defmethod deactivate ((this fisher-geologist))
+  (fisher-geologist-free-catalog-particles! this)
+  ((method-of-type process-taskable deactivate) this)
+  (none))
+
 (defbehavior fisher-geologist-init-by-other fisher-geologist ((spawn-pos vector) (level-name symbol))
   (set! (-> self level-name) level-name)
   (set! (-> self dialogue-page) 0)
@@ -8486,8 +8344,14 @@
   (set! (-> self catalog-yaw) (degrees 90.0))
   (set! (-> self catalog-pitch) 0.0)
   (set! (-> self catalog-saved-camera-read-analog) #t)
+  (set! (-> self catalog-particle-row) -1)
+  (set! (-> self catalog-gatekeeper-part) (the-as sparticle-launch-control 0))
+  (set! (-> self catalog-magma-part) (the-as sparticle-launch-control 0))
+  (set! (-> self catalog-forgotten-part) (the-as sparticle-launch-control 0))
+  (set! (-> self catalog-platformius-part) (the-as sparticle-launch-control 0))
   (logclear! (-> self mask) (process-mask actor-pause))
   (fisher-geologist-initialize-taskable! self)
+  (fisher-geologist-init-catalog-particles! self)
   (fisher-geologist-initialize-collision! self)
   (initialize-skeleton self *geologist-sgc* '())
   (logior! (-> self skel status) (janim-status eye))
@@ -8513,6 +8377,7 @@
   :enter
   (behavior ()
     (set! *fisher-catalog-world-preview-active?* #f)
+    (fisher-geologist-stop-catalog-particles! self)
     (fisher-geologist-remove-model! self)
     (fisher-geologist-release-jak! self))
   :code
@@ -8523,8 +8388,6 @@
         (when
           (and
             (not (paused?))
-            ;; The fisherman owns Circle while his dialogue owns Jak.  Do not
-            ;; show or accept the geologist prompt at the same time.
             (or
               (not *fisher-man*)
               (not (-> *fisher-man* 0 dialogue-grabbed?)))
@@ -8555,8 +8418,6 @@
     (ja-no-eval :group! geologist-idle-ja :num! (seek!) :frame-num 0.0))
   :exit
   (behavior ()
-    ;; Dialogue may transition directly into the catalogue. Keep Jak grabbed
-    ;; across that state transition; idle/kill paths still release him.
     (none))
   :code
   (behavior ()
@@ -8606,12 +8467,10 @@
 (defstate fisher-geologist-catalog (fisher-geologist)
   :enter
   (behavior ()
-    ;; Catalogue owns Jak for its entire lifetime.  Save camera-stick state,
-    ;; then disable normal camera analog input so the right stick controls only
-    ;; the preview fish.
     (set! (-> self catalog-saved-camera-read-analog) *camera-read-analog*)
     (set! *camera-read-analog* #f)
     (set! *fisher-catalog-world-preview-active?* #t)
+    (fisher-geologist-stop-catalog-particles! self)
     (when *target*
       (process-grab? *target*)
       (set! (-> self dialogue-grabbed?) #t))
@@ -8622,14 +8481,12 @@
   (behavior ()
     (set! *camera-read-analog* (-> self catalog-saved-camera-read-analog))
     (set! *fisher-catalog-world-preview-active?* #f)
+    (fisher-geologist-stop-catalog-particles! self)
     (fisher-geologist-remove-model! self)
     (fisher-geologist-release-jak! self))
   :code
   (behavior ()
     (loop
-      ;; Reassert both locks every frame.  If another process releases Jak or
-      ;; re-enables camera analog while this menu is open, catalogue takes
-      ;; ownership back immediately.
       (set! *camera-read-analog* #f)
       (set! *fisher-catalog-world-preview-active?* #t)
       (when *target*

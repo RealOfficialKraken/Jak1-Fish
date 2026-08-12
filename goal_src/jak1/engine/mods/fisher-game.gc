@@ -197,8 +197,6 @@
 (define *fisher-zoomer-unlock-window-active?* #f)
 (define *fisher-zoomer-unlock-window-task* 0)
 (define *fisher-session-active?* #f)
-;; Debug/free-camera toggle for an active fishing cast.  This is intentionally
-;; user-controlled so it can be flipped from the REPL while the line is out.
 (define *fisher-camera-unlock* #f)
 (define *fisher-camera-free-active?* #f)
 (define *fisher-button-world-down*
@@ -4056,6 +4054,241 @@
 
   (none))
 
+(defun fisher-orb-level-index ((self fisher-game))
+  (let ((raw-index
+        (case (-> self location-id)
+          ((0) 1)
+          ((1) 3)
+          ((2) 0)
+          ((3) 2)
+          ((4) 5)
+          ((5) 7)
+          ((6) 8)
+          ((7) 10)
+          ((8) 13)
+          ((9) 14)
+          ((10) 15)
+          ((11) 20)
+          (else -1))))
+
+    (when
+      (and
+        (>= raw-index 0)
+        (< raw-index (length *level-task-data-remap*)))
+
+      (return
+        (the int
+          (-> *level-task-data-remap* raw-index)))))
+
+  -1)
+
+(defun fisher-credit-level-orbs! ((level-index int) (amount int))
+  (when
+    (and
+      (>= level-index 0)
+      (> amount 0))
+
+    (let* ((max-orbs
+          (-> (get-game-count level-index) money-count))
+
+        (current-orbs
+          (-> *game-info* money-per-level level-index))
+
+        (credit
+          (min
+            amount
+            (max
+              0
+              (- max-orbs current-orbs)))))
+
+      (when (> credit 0)
+        (+!
+          (-> *game-info* money-per-level level-index)
+          credit)
+
+        (+!
+          (-> *game-info* money-total)
+          (the float credit))
+
+        (when
+          (=
+            (-> *game-info* money-per-level level-index)
+            max-orbs)
+
+          (activate-orb-all level-index)))
+
+      (return credit)))
+
+  0)
+
+(defun fisher-award-catch-orbs! ((self fisher-game) (amount int))
+  (when *target*
+    (send-event
+      *target*
+      'get-pickup
+      (pickup-type money)
+      (the float amount)))
+
+  (when (> amount 0)
+    (let ((level-index
+          (fisher-orb-level-index self)))
+
+      (when (>= level-index 0)
+        (fisher-credit-level-orbs!
+          level-index
+          amount))
+
+      (case (-> self location-id)
+        ((0)
+          (when (> (length *level-task-data-remap*) 0)
+            (fisher-credit-level-orbs!
+              (the int (-> *level-task-data-remap* 0))
+              amount)))
+
+        ((5)
+          (when (> (length *level-task-data-remap*) 6)
+            (fisher-credit-level-orbs!
+              (the int (-> *level-task-data-remap* 6))
+              amount))
+          (when (> (length *level-task-data-remap*) 11)
+            (fisher-credit-level-orbs!
+              (the int (-> *level-task-data-remap* 11))
+              amount)))
+
+        ((8)
+          (when (> (length *level-task-data-remap*) 12)
+            (fisher-credit-level-orbs!
+              (the int (-> *level-task-data-remap* 12))
+              amount))
+          (when (> (length *level-task-data-remap*) 19)
+            (fisher-credit-level-orbs!
+              (the int (-> *level-task-data-remap* 19))
+              amount)))
+
+        ((10)
+          (when (> (length *level-task-data-remap*) 18)
+            (fisher-credit-level-orbs!
+              (the int (-> *level-task-data-remap* 18))
+              amount))))))
+
+  (none))
+
+(defun fisher-catch-area-orbs-complete? ((self fisher-game))
+  (let ((level-index
+        (fisher-orb-level-index self))
+      (catch-orbs
+        (max
+          0
+          (-> self caught-orb-value))))
+
+    (when (>= level-index 0)
+      (let ((max-orbs
+            (-> (get-game-count level-index) money-count)))
+        (when
+          (and
+            (> max-orbs 0)
+            (>=
+              (+
+                (-> *game-info* money-per-level level-index)
+                catch-orbs)
+              max-orbs))
+          (return #t))))
+
+    (case (-> self location-id)
+      ((0)
+        (when (> (length *level-task-data-remap*) 0)
+          (let* ((extra-index
+                (the int (-> *level-task-data-remap* 0)))
+              (max-orbs
+                (-> (get-game-count extra-index) money-count)))
+            (when
+              (and
+                (> max-orbs 0)
+                (>=
+                  (+
+                    (-> *game-info* money-per-level extra-index)
+                    catch-orbs)
+                  max-orbs))
+              (return #t)))))
+
+      ((5)
+        (when (> (length *level-task-data-remap*) 6)
+          (let* ((extra-index
+                (the int (-> *level-task-data-remap* 6)))
+              (max-orbs
+                (-> (get-game-count extra-index) money-count)))
+            (when
+              (and
+                (> max-orbs 0)
+                (>=
+                  (+
+                    (-> *game-info* money-per-level extra-index)
+                    catch-orbs)
+                  max-orbs))
+              (return #t))))
+        (when (> (length *level-task-data-remap*) 11)
+          (let* ((extra-index
+                (the int (-> *level-task-data-remap* 11)))
+              (max-orbs
+                (-> (get-game-count extra-index) money-count)))
+            (when
+              (and
+                (> max-orbs 0)
+                (>=
+                  (+
+                    (-> *game-info* money-per-level extra-index)
+                    catch-orbs)
+                  max-orbs))
+              (return #t)))))
+
+      ((8)
+        (when (> (length *level-task-data-remap*) 12)
+          (let* ((extra-index
+                (the int (-> *level-task-data-remap* 12)))
+              (max-orbs
+                (-> (get-game-count extra-index) money-count)))
+            (when
+              (and
+                (> max-orbs 0)
+                (>=
+                  (+
+                    (-> *game-info* money-per-level extra-index)
+                    catch-orbs)
+                  max-orbs))
+              (return #t))))
+        (when (> (length *level-task-data-remap*) 19)
+          (let* ((extra-index
+                (the int (-> *level-task-data-remap* 19)))
+              (max-orbs
+                (-> (get-game-count extra-index) money-count)))
+            (when
+              (and
+                (> max-orbs 0)
+                (>=
+                  (+
+                    (-> *game-info* money-per-level extra-index)
+                    catch-orbs)
+                  max-orbs))
+              (return #t)))))
+
+      ((10)
+        (when (> (length *level-task-data-remap*) 18)
+          (let* ((extra-index
+                (the int (-> *level-task-data-remap* 18)))
+              (max-orbs
+                (-> (get-game-count extra-index) money-count)))
+            (when
+              (and
+                (> max-orbs 0)
+                (>=
+                  (+
+                    (-> *game-info* money-per-level extra-index)
+                    catch-orbs)
+                  max-orbs))
+              (return #t))))))
+
+  #f))
+
 (defun singlefish-sell! ((self singlefish-base))
   (let ((owner
         (the-as fisher-game
@@ -4064,12 +4297,9 @@
       (xp-start
         (new 'stack-no-clear 'vector)))
 
-    (when *target*
-      (send-event
-        *target*
-        'get-pickup
-        (pickup-type money)
-        (the float (-> self orb-value))))
+    (fisher-award-catch-orbs!
+      owner
+      (-> self orb-value))
 
     (vector-copy! xp-start (-> self root trans))
     (set! (-> xp-start w) 1.0)
@@ -4470,12 +4700,9 @@
       (let ((carrier?
             (> (-> self caught-power-cell-task) 1)))
 
-        (when *target*
-          (send-event
-            *target*
-            'get-pickup
-            (pickup-type money)
-            (the float (-> self caught-orb-value))))
+        (fisher-award-catch-orbs!
+          self
+          (-> self caught-orb-value))
 
         (let ((slot
               (-> self hooked-fish-slot))
@@ -4784,9 +5011,6 @@
     ((=
         (fisher-fish-species self (-> self hooked-fish-slot))
         (the-as int (fisher-species magma-serpent)))
-      ;; Match the actual catch point to the front edge of the serpent body.
-      ;; This also keeps the lure inside the valid front half of its sensing
-      ;; cone all the way through the slow approach instead of losing '?'.
       (meters 7.75))
 
     (else
@@ -5767,10 +5991,10 @@
   (let ((x (the int (-> *cpad-list* cpads 0 rightx)))
         (y (the int (-> *cpad-list* cpads 0 righty))))
     (cond
-      ((and (>= x 190) (>= y 76) (<= y 180)) 0) ; right
-      ((and (>= y 190) (>= x 76) (<= x 180)) 1) ; down
-      ((and (<= x 66)  (>= y 76) (<= y 180)) 2) ; left
-      ((and (<= y 66)  (>= x 76) (<= x 180)) 3) ; up
+      ((and (>= x 190) (>= y 76) (<= y 180)) 0)
+      ((and (>= y 190) (>= x 76) (<= x 180)) 1)
+      ((and (<= x 66)  (>= y 76) (<= y 180)) 2)
+      ((and (<= y 66)  (>= x 76) (<= x 180)) 3)
       (else -1))))
 
 (defun fisher-finalboss-current-target-depth ((self fisher-game))
@@ -6949,9 +7173,6 @@
       (fisher-megaloviathan-center! fish-proc mega-center)
       (fisher-megaloviathan-face-point! self slot fish-proc mega-face)
 
-      ;; The hook-corruption hitbox belongs to the Megaloviathan's BODY, not
-      ;; only the point directly in front of its face.  Build the matching rear
-      ;; point so the hook can collide with the whole monster while it patrols.
       (singlefish-vector-add-scaled-safe!
         mega-back
         mega-center
@@ -6993,8 +7214,6 @@
               (set! (-> self hooked-fish-poison-dps) 0.0)
               (set! (-> self hooked-fish-slot) slot)
               (fisher-begin-hook-transition! self fish-proc hook-pos)
-              ;; Give the Megaloviathan the same full reaction window as an
-              ;; ordinary fish instead of the old near-instant 0.28 seconds.
               (set! (-> self fish-hook-time) 1.15)
               (set! (-> self fish-scare-on-arrival?) #f)
               (set! (-> self lure-stop-active?) #f)
@@ -7079,136 +7298,68 @@
                   (let ((magma-serpent?
                         (=
                           (fisher-fish-species self slot)
-                          (the-as int (fisher-species magma-serpent))))
+                          (the-as int (fisher-species magma-serpent)))))
 
-                      (serpent-approach-valid? #t))
+                    (+!
+                      (-> self fish-approach-speed)
+                      (*
+                        (if magma-serpent? 3.50 *fisher-approach-acceleration*)
+                        dt))
 
-                    ;; Do NOT re-run the serpent's narrow acquisition cone while
-                    ;; it is already committed to the visible "?" approach.
-                    ;; Moving the serpent changes the cone origin every frame,
-                    ;; so the acquisition test could flicker false for one frame
-                    ;; and silently reset the fish back to its stored idle slot.
-                    ;;
-                    ;; Instead, hold the approach with a mouth-relative corridor:
-                    ;; the lure still has to remain directly in front of the mouth
-                    ;; and near mouth height, but the test has enough hysteresis
-                    ;; that the serpent's own movement cannot invalidate it.
-                    (when magma-serpent?
-                      (let ((serpent-forward (new 'stack-no-clear 'vector))
-                          (serpent-mouth (new 'stack-no-clear 'vector))
-                          (to-lure (new 'stack-no-clear 'vector))
-                          (serpent-side (new 'stack-no-clear 'vector))
-                          (mouth-front 0.0)
-                          (mouth-side 0.0)
-                          (mouth-vertical 0.0))
+                    (let ((approach-target (new 'stack-no-clear 'vector))
+                        (serpent-forward (new 'stack-no-clear 'vector)))
 
+                      (vector-copy! approach-target hook-target)
+
+                      (when magma-serpent?
                         (fisher-lava-fish-forward! fish-proc serpent-forward)
-
                         (singlefish-vector-add-scaled-safe!
-                          serpent-mouth
-                          (-> fish-proc root trans)
+                          approach-target
+                          hook-target
                           serpent-forward
-                          (meters 7.75))
+                          (meters -7.75)))
 
-                        (singlefish-vector-sub-safe!
-                          to-lure
-                          (-> self lure-pos)
-                          serpent-mouth)
-
-                        (set! (-> serpent-side x) (-> serpent-forward z))
-                        (set! (-> serpent-side y) 0.0)
-                        (set! (-> serpent-side z) (- (-> serpent-forward x)))
-                        (set! (-> serpent-side w) 0.0)
-
-                        (set! mouth-front (vector-dot to-lure serpent-forward))
-                        (set! mouth-side (fabs (vector-dot to-lure serpent-side)))
-                        (set! mouth-vertical (fabs (-> to-lure y)))
-
-                        (set!
-                          serpent-approach-valid?
-                          (and
-                            ;; Small rear allowance prevents threshold jitter as
-                            ;; the mouth reaches the lure, but the lure cannot be
-                            ;; held over the serpent's body.
-                            (>= mouth-front (meters -0.40))
-                            (<= mouth-front (meters 2.50))
-                            (<= mouth-side (meters 1.35))
-                            ;; Keep the catch mouth-level: not above or below.
-                            (<= mouth-vertical (meters 0.70))))))
-
-                    (cond
-                      ((and magma-serpent? (not serpent-approach-valid?))
-                        ;; Use the real scared-off path instead of silently
-                        ;; returning to free.  This synchronizes the logical fish
-                        ;; slot to the serpent's CURRENT position, so there is no
-                        ;; teleport, and it displays the expected SCARED OFF text.
-                        (fisher-fish-scared-off! self slot))
-
-                      (else
-                        (+!
-                          (-> self fish-approach-speed)
-                          (*
-                            (if magma-serpent? 3.50 *fisher-approach-acceleration*)
-                            dt))
-
-                        (let ((approach-target (new 'stack-no-clear 'vector))
-                            (serpent-forward (new 'stack-no-clear 'vector)))
-
-                          (vector-copy! approach-target hook-target)
-
-                          (when magma-serpent?
-                            ;; Move the serpent's MOUTH toward the lure, not its
-                            ;; center/root.  This is what makes the long fish
-                            ;; visibly creep into the lure instead of swallowing
-                            ;; it with its body.
-                            (fisher-lava-fish-forward! fish-proc serpent-forward)
-                            (singlefish-vector-add-scaled-safe!
+                      (let ((remaining
+                            (fisher-move-manipy-toward!
+                              fish-proc
                               approach-target
-                              hook-target
-                              serpent-forward
-                              (meters -7.75)))
+                              (meters (-> self fish-approach-speed)))))
 
-                          (let ((remaining
-                                (fisher-move-manipy-toward!
-                                  fish-proc
-                                  approach-target
-                                  (meters (-> self fish-approach-speed)))))
+                        (when
+                          (<= remaining (meters 0.20))
 
-                            (when
-                              (<= remaining (meters 0.20))
+                          (fisher-begin-hook-transition! self fish-proc hook-target)
 
-                              (fisher-begin-hook-transition! self fish-proc hook-target)
+                          (cond
+                            ((-> self fish-scare-on-arrival?)
+                              (set! (-> self fish-scare-on-arrival?) #f)
 
-                              (cond
-                                ((-> self fish-scare-on-arrival?)
-                                  (set! (-> self fish-scare-on-arrival?) #f)
+                              (fisher-fish-scared-off!
+                                self
+                                slot))
 
-                                  (fisher-fish-scared-off!
-                                    self
-                                    slot))
+                            (else
+                              (set!
+                                (-> self fish-hook-time)
+                                (if
+                                  (=
+                                    (-> self location-id)
+                                    (the-as int (fisher-zone maincave-dark-eco)))
+                                  0.28
+                                  (if
+                                    (fisher-species-snap-on-bite?
+                                      (fisher-fish-species self slot))
+                                    0.45
+                                    1.15)))
 
-                                (else
-                                  (set!
-                                    (-> self fish-hook-time)
-                                    (if
-                                      (=
-                                        (-> self location-id)
-                                        (the-as int (fisher-zone maincave-dark-eco)))
-                                      0.28
-                                      (if
-                                        (fisher-species-snap-on-bite?
-                                          (fisher-fish-species self slot))
-                                        0.45
-                                        1.15)))
+                              (fisher-play-fish-bite-sound!)
 
-                                  (fisher-play-fish-bite-sound!)
+                              (set! (-> self lure-sink-active?) #f)
+                              (set! (-> self lure-sink-time) 0.0)
 
-                                  (set! (-> self lure-sink-active?) #f)
-                                  (set! (-> self lure-sink-time) 0.0)
-
-                                  (set!
-                                    (-> self fish-state)
-                                    'hook-window))))))))))
+                              (set!
+                                (-> self fish-state)
+                                'hook-window))))))))
 
                 ((= (-> self fish-state) 'hook-window)
                   (fisher-hook-target! self hook-target)
@@ -7430,8 +7581,6 @@
                     (=
                       (fisher-fish-species self slot)
                       (the-as int (fisher-species magma-serpent)))
-                    ;; Idle/patrol motion stays slow, but once the serpent
-                    ;; shows "?" it should commit and close the final gap quickly.
                     (rand-vu-float-range 4.75 5.50)
                     (rand-vu-float-range
                       *fisher-approach-speed-min*
@@ -7460,90 +7609,9 @@
 
   (none))
 
-(defun fisher-world-to-screen!
-  ((self fisher-game) (world-pos vector) (screen-pos vector))
-
-  (when
-    (and
-      *camera*
-      (> (-> *camera* num-slaves) 0))
-
-    (let ((cam-slave (-> *camera* slave 0 0))
-        (relative (new 'stack-no-clear 'vector))
-        (forward (new 'stack-no-clear 'vector))
-        (projected (new 'stack 'vector4w-2))
-        (point (new 'stack-no-clear 'vector))
-        (depth 0.0))
-
-      (vector-copy! point world-pos)
-      (set! (-> point w) 1.0)
-
-      (vector-! relative point (-> cam-slave trans))
-      (vector-copy! forward (-> cam-slave tracking inv-mat vector 2))
-      (set! (-> forward w) 0.0)
-      (singlefish-vector-normalize-safe! forward 1.0)
-      (set! depth (vector-dot relative forward))
-
-      (when (> depth (meters 0.10))
-        (transform-point-qword!
-          (-> projected vector 0)
-          point)
-
-        (set! (-> screen-pos x)
-          (+
-            256.0
-            (/ (- (the float (-> projected vector 0 x)) 32768.0) 64.0)))
-        (set! (-> screen-pos y)
-          (+
-            224.0
-            (/ (- (the float (-> projected vector 0 y)) 32768.0) 64.0)))
-        (set! (-> screen-pos z) depth)
-        (set! (-> screen-pos w) 1.0)
-        (return #t))))
-
-  #f)
-
-(defun fisher-draw-approaching-question! ((self fisher-game))
-  (when
-    (and
-      (= (-> self fish-state) 'approaching)
-      (>= (-> self hooked-fish-slot) 0)
-      (-> self camera-underwater?))
-
-    (let ((fish (fisher-fish-pointer self (-> self hooked-fish-slot))))
-      (when (and fish (-> fish 0 self))
-        (let ((head-pos (new 'stack-no-clear 'vector))
-            (screen-pos (new 'stack-no-clear 'vector)))
-
-          (vector-copy!
-            head-pos
-            (-> (the-as manipy (-> fish 0 self)) root trans))
-
-          (+! (-> head-pos y) (meters 0.72))
-          (set! (-> head-pos w) 1.0)
-
-          (when (fisher-world-to-screen! self head-pos screen-pos)
-            (let ((screen-x (the int (-> screen-pos x)))
-                (screen-y (the int (-> screen-pos y))))
-              (when
-                (and
-                  (> screen-x -32)
-                  (< screen-x 544)
-                  (> screen-y -32)
-                  (< screen-y 440))
-                (draw-fisher-large-font-scaled
-                  "?"
-                  screen-x
-                  screen-y
-                  0.72))))))))
-
-  (none))
-
 (defun fisher-update-all-fish-debug! ((self fisher-game))
-  (dotimes (i *fisher-max-fish-slots*) (fisher-update-gameplay-fish-one! self i (fisher-fish-pointer self i)))
-
-  (fisher-draw-approaching-question! self)
-
+  (dotimes (i *fisher-max-fish-slots*)
+    (fisher-update-gameplay-fish-one! self i (fisher-fish-pointer self i)))
   (none))
 
 (defun singlefish-end-session! ((self fisher-game))
@@ -8523,8 +8591,6 @@
 )
 
 (defun fisher-camera-follow-lure! ((self fisher-game))
-  ;; When the explicit fishing freecam is active, cam-free-floating owns the
-  ;; camera slave.  Do not overwrite its position/orientation here.
   (when
     (and
       (not *fisher-camera-free-active?*)
@@ -8707,9 +8773,6 @@
 )
 
 (defun fisher-camera-unlock-eligible? ((self fisher-game))
-  ;; Only hand camera ownership to the debug free camera while the fishing
-  ;; line is physically out.  Catch/reward UI and lure-loss return cameras
-  ;; keep their normal authored behavior.
   (and
     *fisher-camera-unlock*
     (-> self casted?)
@@ -8721,9 +8784,6 @@
 (defun fisher-update-camera-unlock! ((self fisher-game))
   (let ((want-freecam (fisher-camera-unlock-eligible? self)))
     (cond
-      ;; Enter the engine's native free-floating camera exactly once.  Sending
-      ;; change-state every frame would keep reinitializing it and prevent
-      ;; movement from accumulating.
       ((and want-freecam (not *fisher-camera-free-active?*))
         (set! *fisher-camera-free-active?* #t)
         (set! *camera-read-analog* #t)
@@ -8731,8 +8791,6 @@
         (when *camera*
           (send-event *camera* 'change-state cam-free-floating 0)))
 
-      ;; Turning the toggle off, losing/resetting the line, or entering a modal
-      ;; catch state returns ownership to the fishing camera immediately.
       ((and (not want-freecam) *fisher-camera-free-active?*)
         (set! *fisher-camera-free-active?* #f)
         (set! *camera-read-analog* #f)
@@ -8751,8 +8809,6 @@
           ((= (-> self camera-state) 'before-cast)
             (fisher-camera-before-cast! self))))
 
-      ;; fisher-maintain-player-control! intentionally disables normal camera
-      ;; analog every frame, so reassert it while freecam owns the camera.
       (want-freecam
         (set! *camera-read-analog* #t)
         (set! *external-cam-mode* #f))))
@@ -9125,15 +9181,9 @@
     ((= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish)))
       (format *fish-ui-str* "NUCLEAR BOMBFISH"))
 
-    ;; Magma Serpent is unique. Its internal suffix is fixed to HEALTHY only so
-    ;; the normal appearance code has a safe neutral tier; never expose that as
-    ;; a visible prefix to the player.
     ((= (-> self caught-fish-species) (the-as int (fisher-species magma-serpent)))
       (format *fish-ui-str* "MAGMA SERPENT"))
 
-    ;; Megaloviathan is unique. Its internal suffix is fixed to HEALTHY only so
-    ;; the normal appearance code has a safe neutral tier; never expose that as
-    ;; a visible prefix to the player.
     ((= (-> self caught-fish-species) (the-as int (fisher-species megaloviathan)))
       (format *fish-ui-str* "MEGALOVIATHAN"))
 
@@ -9219,9 +9269,6 @@
         (= (-> self fish-state) 'catch-display)
         (= (-> self fish-state) 'catch-exit))
     (let ((menu-offset (- (the int (-> self catch-menu-offset)) 20)))
-      ;; Keep the Nuclear Bombfish's first loot window the same height as a
-      ;; normal non-carrier catch window.  The later rare-fish popup is separate
-      ;; and intentionally remains unchanged.
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
         (draw-sprite2d-xy buf 82 (+ 84 menu-offset) 348 104
@@ -9259,8 +9306,17 @@
         (carrier?
           (> (-> self caught-power-cell-task) 1))
 
+        (all-orbs?
+          (and
+            (!=
+              (-> self caught-fish-species)
+              4)
+            (fisher-catch-area-orbs-complete? self)))
+
         (panel-height
-          (if carrier? 126 104)))
+          (+
+            (if carrier? 126 104)
+            (if all-orbs? 20 0))))
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
@@ -9341,11 +9397,20 @@
             (+ 150 menu-offset)
             0.48)
 
+          (when all-orbs?
+            (draw-fisher-large-font-scaled
+              "ALL ORBS COLLECTED IN THIS AREA!"
+              256
+              (+ 170 menu-offset)
+              0.40))
+
           (when carrier?
             (draw-fisher-large-font-scaled
               "THE FISH HAD SWALLOWED A POWERCELL!"
               256
-              (+ 170 menu-offset)
+              (+
+                (if all-orbs? 190 170)
+                menu-offset)
               0.40))))
 
       (clear *fish-ui-str*)
@@ -9353,7 +9418,11 @@
       (draw-fisher-large-font-scaled
         *fish-ui-str*
         256
-        (+ (if carrier? 191 167) menu-offset)
+        (+
+          (+
+            (if carrier? 191 167)
+            (if all-orbs? 20 0))
+          menu-offset)
         0.52)))
     ))
 
@@ -10520,11 +10589,6 @@
   (none))
 
 (defun fisher-incinerate-lure! ((self fisher-game))
-  ;; Once a Magma Serpent has committed to the lure (the visible "?" state),
-  ;; its burn/incineration volume is disabled completely until that approach
-  ;; ends.  This guard lives here at the final destruction point so neither
-  ;; the serpent body hitbox nor a lava/fire path can destroy the lure while
-  ;; the serpent is actively closing in for the bite.
   (when
     (and
       (-> self casted?)
@@ -10605,9 +10669,6 @@
     (fisher-hook-target! self hook-pos)
     (fisher-lava-fish-forward! fish-proc forward)
 
-    ;; Keep the incineration volume on the serpent's body, not its mouth.
-    ;; Shorten the front again so the player has a clearly separated safe lane
-    ;; immediately in front of the long head where the bite cone lives.
     (singlefish-vector-add-scaled-safe!
       relative (-> fish-proc root trans) forward (meters 3.75))
     (vector-! relative hook-pos relative)
@@ -10622,8 +10683,6 @@
     (set! vertical (fabs (-> relative y)))
 
     (and
-      ;; 3.75 +/- 3.75 => root through 7.50m forward.  The gameplay mouth is
-      ;; at ~9.75m, leaving more than two meters of clean space before the cone.
       (<= along (meters 3.75))
       (<= across (meters 1.95))
       (<= vertical (meters 1.75)))))
@@ -10691,9 +10750,6 @@
               (-> fish 0 self)
               (= (fisher-fish-species self slot)
                 (the-as int (fisher-species magma-serpent)))
-              ;; This function runs BEFORE the normal fish sensing update.
-              ;; Give the valid mouth cone priority so a correctly-positioned
-              ;; lure survives long enough for the serpent to enter '?' / approach.
               (not
                 (fisher-manipy-can-sense-lure?
                   self slot (the-as manipy (-> fish 0 self))))
@@ -11796,8 +11852,6 @@
     (suspend)
     (suspend))
 
-  ;; The cell is now actually awarded and the zoomer gate can open. Show the
-  ;; transport notice only for the three specific progression cells.
   (fisher-open-zoomer-unlock-window! task)
 
   (set! *fisher-power-cell-camera-active?* #f)

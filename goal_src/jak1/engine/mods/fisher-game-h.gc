@@ -110,7 +110,6 @@
 
 (define *main-menu-bubble-time* 0.0)
 
-;; 23 real fish species (everything except scout-fly) + 4 menu rare fish.
 (define *main-menu-fish-type-count* 27)
 
 (define *main-menu-fish-target-count* 11)
@@ -243,7 +242,12 @@
     (catalog-model-row   int)
     (catalog-yaw         float)
     (catalog-pitch       float)
-    (catalog-saved-camera-read-analog symbol))
+    (catalog-saved-camera-read-analog symbol)
+    (catalog-particle-row int)
+    (catalog-gatekeeper-part sparticle-launch-control)
+    (catalog-magma-part sparticle-launch-control)
+    (catalog-forgotten-part sparticle-launch-control)
+    (catalog-platformius-part sparticle-launch-control))
   (:states
     fisher-geologist-idle
     fisher-geologist-dialogue
@@ -744,6 +748,10 @@
 (define-extern *fisher-session-active?* symbol)
 (define-extern *fisher-camera-unlock* symbol)
 (define-extern *fisher-camera-free-active?* symbol)
+(defun-extern fisher-orb-level-index fisher-game int)
+(defun-extern fisher-credit-level-orbs! int int int)
+(defun-extern fisher-award-catch-orbs! fisher-game int none)
+(defun-extern fisher-catch-area-orbs-complete? fisher-game symbol)
 (defun-extern fisher-camera-unlock-eligible? fisher-game symbol)
 (defun-extern fisher-update-camera-unlock! fisher-game none)
 (defun-extern fisher-finalboss-zone? fisher-game symbol)
@@ -1023,9 +1031,6 @@
 (defun-extern singlefish-vector-reset-safe! vector vector)
 (defun-extern singlefish-vector-scale-safe! vector vector float vector)
 (defun-extern singlefish-vector-sub-safe! vector vector vector vector)
-;; Fish catalogue / geologist shared declarations.  These are implemented in
-;; fish-spawnings.gc, but several are referenced earlier in that file and/or
-;; from other mod files, so keep the header authoritative for forward refs.
 (define-extern *fisher-catalog-world-preview-active?* symbol)
 (define-extern *fisher-catalog-attachment-spawn-scale* float)
 (define *fisher-geologist-dialogue-lines*
@@ -1092,6 +1097,10 @@
 (defun-extern fisher-geologist-update-model-rotation! fisher-geologist none)
 (defun-extern fisher-geologist-position-model! fisher-geologist none)
 (defun-extern fisher-geologist-refresh-model! fisher-geologist none)
+(defun-extern fisher-geologist-init-catalog-particles! fisher-geologist none)
+(defun-extern fisher-geologist-stop-catalog-particles! fisher-geologist none)
+(defun-extern fisher-geologist-free-catalog-particles! fisher-geologist none)
+(defun-extern fisher-catalog-spawn-hud-particles! sparticle-launch-control float float float none)
 (defun-extern fisher-geologist-draw-rare-effects! fisher-geologist none)
 (defun-extern fisher-geologist-draw-catalog! fisher-geologist none)
 (defun-extern fisher-geologist-near-jak? fisher-geologist basic)
