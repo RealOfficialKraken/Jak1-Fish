@@ -5954,14 +5954,14 @@
     "TO CATCH SOME FISH IN THAT AREA!"
     ""
 
+    "THE SPOT BE RIGHT IN FRONT OF A WATER FALL."
+    ""
+    ""
+    ""
+
     "BRING ME BACK 10 PRECURSOR ORBS,"
     "AND I'LL GIVE YE ALL 4 OF ME"
     "POWER CELLS."
-    ""
-
-    "WHAT ARE YA WAITIN' FER?"
-    ""
-    ""
     ""))
 
 (define *fisher-man-orb-complete-dialogue-lines*
