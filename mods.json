@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "sourceName": "KrakenMods",
-  "lastUpdated": "2026-08-12T03:47:00Z",
+  "lastUpdated": "2026-08-12T05:58:00Z",
   "mods": {
     "the-fishing-legacy": {
       "displayName": "The Fishing Legacy",
@@ -21,7 +21,7 @@
       "versions": [
         {
           "version": "1.0.2",
-          "publishedDate": "2026-08-12T03:46:00Z",
+          "publishedDate": "2026-08-12T05:54:00Z",
           "supportedGames": [
             "jak1"
           ],
