@@ -194,7 +194,13 @@
 (define *fisher-level-up-window-offset* 150.0)
 (define *fisher-power-cell-reward-active?* #f)
 (define *fisher-power-cell-camera-active?* #f)
+(define *fisher-zoomer-unlock-window-active?* #f)
+(define *fisher-zoomer-unlock-window-task* 0)
 (define *fisher-session-active?* #f)
+;; Debug/free-camera toggle for an active fishing cast.  This is intentionally
+;; user-controlled so it can be flipped from the REPL while the line is out.
+(define *fisher-camera-unlock* #f)
+(define *fisher-camera-free-active?* #f)
 (define *fisher-button-world-down*
   (new 'static 'vector :x 0.0 :y -1.0 :z 0.0 :w 0.0))
 
@@ -4575,7 +4581,11 @@
           (when fish-proc
             (launch-particles
               :system *sp-particle-system-3d*
-              (-> *part-id-table* 3569)
+              (-> *part-id-table* 3590)
+              (-> (the-as manipy fish-proc) root trans))
+            (launch-particles
+              :system *sp-particle-system-3d*
+              (-> *part-id-table* 3592)
               (-> (the-as manipy fish-proc) root trans)))))))
   (none))
 
@@ -4770,6 +4780,14 @@
         (fisher-fish-species self (-> self hooked-fish-slot))
         (the-as int (fisher-species megaloviathan)))
       (meters 5.60))
+
+    ((=
+        (fisher-fish-species self (-> self hooked-fish-slot))
+        (the-as int (fisher-species magma-serpent)))
+      ;; Match the actual catch point to the front edge of the serpent body.
+      ;; This also keeps the lure inside the valid front half of its sensing
+      ;; cone all the way through the slow approach instead of losing '?'.
+      (meters 7.75))
 
     (else
       (meters 0.42))))
@@ -7042,51 +7060,139 @@
                 ((= (-> self fish-state) 'approaching)
                   (fisher-hook-target! self hook-target)
 
-                  (+!
-                    (-> self fish-approach-speed)
-                    (* *fisher-approach-acceleration* dt))
+                  (let ((magma-serpent?
+                        (=
+                          (fisher-fish-species self slot)
+                          (the-as int (fisher-species magma-serpent))))
 
-                  (let ((remaining
-                        (fisher-move-manipy-toward!
-                          fish-proc
-                          hook-target
-                          (meters (-> self fish-approach-speed)))))
+                      (serpent-approach-valid? #t))
 
-                    (when
-                      (<= remaining (meters 0.20))
+                    ;; Do NOT re-run the serpent's narrow acquisition cone while
+                    ;; it is already committed to the visible "?" approach.
+                    ;; Moving the serpent changes the cone origin every frame,
+                    ;; so the acquisition test could flicker false for one frame
+                    ;; and silently reset the fish back to its stored idle slot.
+                    ;;
+                    ;; Instead, hold the approach with a mouth-relative corridor:
+                    ;; the lure still has to remain directly in front of the mouth
+                    ;; and near mouth height, but the test has enough hysteresis
+                    ;; that the serpent's own movement cannot invalidate it.
+                    (when magma-serpent?
+                      (let ((serpent-forward (new 'stack-no-clear 'vector))
+                          (serpent-mouth (new 'stack-no-clear 'vector))
+                          (to-lure (new 'stack-no-clear 'vector))
+                          (serpent-side (new 'stack-no-clear 'vector))
+                          (mouth-front 0.0)
+                          (mouth-side 0.0)
+                          (mouth-vertical 0.0))
 
-                      (fisher-begin-hook-transition! self fish-proc hook-target)
+                        (fisher-lava-fish-forward! fish-proc serpent-forward)
 
-                      (cond
-                        ((-> self fish-scare-on-arrival?)
-                          (set! (-> self fish-scare-on-arrival?) #f)
+                        (singlefish-vector-add-scaled-safe!
+                          serpent-mouth
+                          (-> fish-proc root trans)
+                          serpent-forward
+                          (meters 7.75))
 
-                          (fisher-fish-scared-off!
-                            self
-                            slot))
+                        (singlefish-vector-sub-safe!
+                          to-lure
+                          (-> self lure-pos)
+                          serpent-mouth)
 
-                        (else
-                          (set!
-                            (-> self fish-hook-time)
-                            (if
-                              (=
-                                (-> self location-id)
-                                (the-as int (fisher-zone maincave-dark-eco)))
-                              0.28
-                              (if
-                                (fisher-species-snap-on-bite?
-                                  (fisher-fish-species self slot))
-                                0.45
-                                1.15)))
+                        (set! (-> serpent-side x) (-> serpent-forward z))
+                        (set! (-> serpent-side y) 0.0)
+                        (set! (-> serpent-side z) (- (-> serpent-forward x)))
+                        (set! (-> serpent-side w) 0.0)
 
-                          (fisher-play-fish-bite-sound!)
+                        (set! mouth-front (vector-dot to-lure serpent-forward))
+                        (set! mouth-side (fabs (vector-dot to-lure serpent-side)))
+                        (set! mouth-vertical (fabs (-> to-lure y)))
 
-                          (set! (-> self lure-sink-active?) #f)
-                          (set! (-> self lure-sink-time) 0.0)
+                        (set!
+                          serpent-approach-valid?
+                          (and
+                            ;; Small rear allowance prevents threshold jitter as
+                            ;; the mouth reaches the lure, but the lure cannot be
+                            ;; held over the serpent's body.
+                            (>= mouth-front (meters -0.40))
+                            (<= mouth-front (meters 2.50))
+                            (<= mouth-side (meters 1.35))
+                            ;; Keep the catch mouth-level: not above or below.
+                            (<= mouth-vertical (meters 0.70))))))
 
-                          (set!
-                            (-> self fish-state)
-                            'hook-window))))))
+                    (cond
+                      ((and magma-serpent? (not serpent-approach-valid?))
+                        ;; Use the real scared-off path instead of silently
+                        ;; returning to free.  This synchronizes the logical fish
+                        ;; slot to the serpent's CURRENT position, so there is no
+                        ;; teleport, and it displays the expected SCARED OFF text.
+                        (fisher-fish-scared-off! self slot))
+
+                      (else
+                        (+!
+                          (-> self fish-approach-speed)
+                          (*
+                            (if magma-serpent? 3.50 *fisher-approach-acceleration*)
+                            dt))
+
+                        (let ((approach-target (new 'stack-no-clear 'vector))
+                            (serpent-forward (new 'stack-no-clear 'vector)))
+
+                          (vector-copy! approach-target hook-target)
+
+                          (when magma-serpent?
+                            ;; Move the serpent's MOUTH toward the lure, not its
+                            ;; center/root.  This is what makes the long fish
+                            ;; visibly creep into the lure instead of swallowing
+                            ;; it with its body.
+                            (fisher-lava-fish-forward! fish-proc serpent-forward)
+                            (singlefish-vector-add-scaled-safe!
+                              approach-target
+                              hook-target
+                              serpent-forward
+                              (meters -7.75)))
+
+                          (let ((remaining
+                                (fisher-move-manipy-toward!
+                                  fish-proc
+                                  approach-target
+                                  (meters (-> self fish-approach-speed)))))
+
+                            (when
+                              (<= remaining (meters 0.20))
+
+                              (fisher-begin-hook-transition! self fish-proc hook-target)
+
+                              (cond
+                                ((-> self fish-scare-on-arrival?)
+                                  (set! (-> self fish-scare-on-arrival?) #f)
+
+                                  (fisher-fish-scared-off!
+                                    self
+                                    slot))
+
+                                (else
+                                  (set!
+                                    (-> self fish-hook-time)
+                                    (if
+                                      (=
+                                        (-> self location-id)
+                                        (the-as int (fisher-zone maincave-dark-eco)))
+                                      0.28
+                                      (if
+                                        (fisher-species-snap-on-bite?
+                                          (fisher-fish-species self slot))
+                                        0.45
+                                        1.15)))
+
+                                  (fisher-play-fish-bite-sound!)
+
+                                  (set! (-> self lure-sink-active?) #f)
+                                  (set! (-> self lure-sink-time) 0.0)
+
+                                  (set!
+                                    (-> self fish-state)
+                                    'hook-window))))))))))
 
                 ((= (-> self fish-state) 'hook-window)
                   (fisher-hook-target! self hook-target)
@@ -7304,9 +7410,16 @@
 
                 (set!
                   (-> self fish-approach-speed)
-                  (rand-vu-float-range
-                    *fisher-approach-speed-min*
-                    *fisher-approach-speed-max*))
+                  (if
+                    (=
+                      (fisher-fish-species self slot)
+                      (the-as int (fisher-species magma-serpent)))
+                    ;; Idle/patrol motion stays slow, but once the serpent
+                    ;; shows "?" it should commit and close the final gap quickly.
+                    (rand-vu-float-range 4.75 5.50)
+                    (rand-vu-float-range
+                      *fisher-approach-speed-min*
+                      *fisher-approach-speed-max*)))
 
                 (set!
                   (-> self fish-state)
@@ -8394,7 +8507,13 @@
 )
 
 (defun fisher-camera-follow-lure! ((self fisher-game))
-  (when (and *camera* (> (-> *camera* num-slaves) 0))
+  ;; When the explicit fishing freecam is active, cam-free-floating owns the
+  ;; camera slave.  Do not overwrite its position/orientation here.
+  (when
+    (and
+      (not *fisher-camera-free-active?*)
+      *camera*
+      (> (-> *camera* num-slaves) 0))
     (let ((cam-slave (-> *camera* slave 0 0))
         (desired-camera (new 'stack-no-clear 'vector))
         (desired-look (new 'stack-no-clear 'vector))
@@ -8528,7 +8647,11 @@
   (none))
 
 (defun fisher-camera-before-cast! ((self fisher-game))
-  (when (and *camera* (> (-> *camera* num-slaves) 0))
+  (when
+    (and
+      (not *fisher-camera-free-active?*)
+      *camera*
+      (> (-> *camera* num-slaves) 0))
     (let ((cam-slave (-> *camera* slave 0 0))
         (forward (new 'stack-no-clear 'vector))
         (look-pos (new 'stack-no-clear 'vector))
@@ -8566,6 +8689,58 @@
 
   (none)
 )
+
+(defun fisher-camera-unlock-eligible? ((self fisher-game))
+  ;; Only hand camera ownership to the debug free camera while the fishing
+  ;; line is physically out.  Catch/reward UI and lure-loss return cameras
+  ;; keep their normal authored behavior.
+  (and
+    *fisher-camera-unlock*
+    (-> self casted?)
+    (or
+      (= (-> self cast-state) 'casting)
+      (= (-> self cast-state) 'water-entry)
+      (= (-> self cast-state) 'line-active))))
+
+(defun fisher-update-camera-unlock! ((self fisher-game))
+  (let ((want-freecam (fisher-camera-unlock-eligible? self)))
+    (cond
+      ;; Enter the engine's native free-floating camera exactly once.  Sending
+      ;; change-state every frame would keep reinitializing it and prevent
+      ;; movement from accumulating.
+      ((and want-freecam (not *fisher-camera-free-active?*))
+        (set! *fisher-camera-free-active?* #t)
+        (set! *camera-read-analog* #t)
+        (set! *external-cam-mode* #f)
+        (when *camera*
+          (send-event *camera* 'change-state cam-free-floating 0)))
+
+      ;; Turning the toggle off, losing/resetting the line, or entering a modal
+      ;; catch state returns ownership to the fishing camera immediately.
+      ((and (not want-freecam) *fisher-camera-free-active?*)
+        (set! *fisher-camera-free-active?* #f)
+        (set! *camera-read-analog* #f)
+        (set! *external-cam-mode* #f)
+        (when *camera*
+          (send-event *camera* 'change-state cam-fixed 0))
+
+        (cond
+          ((and
+              (-> self casted?)
+              (or
+                (= (-> self cast-state) 'casting)
+                (= (-> self cast-state) 'water-entry)
+                (= (-> self cast-state) 'line-active)))
+            (fisher-camera-follow-lure! self))
+          ((= (-> self camera-state) 'before-cast)
+            (fisher-camera-before-cast! self))))
+
+      ;; fisher-maintain-player-control! intentionally disables normal camera
+      ;; analog every frame, so reassert it while freecam owns the camera.
+      (want-freecam
+        (set! *camera-read-analog* #t)
+        (set! *external-cam-mode* #f))))
+  (none))
 
 (defun fisher-draw-line! ((self fisher-game))
   (when
@@ -8934,6 +9109,18 @@
     ((= (-> self caught-fish-species) (the-as int (fisher-species nuclear-bombfish)))
       (format *fish-ui-str* "NUCLEAR BOMBFISH"))
 
+    ;; Magma Serpent is unique. Its internal suffix is fixed to HEALTHY only so
+    ;; the normal appearance code has a safe neutral tier; never expose that as
+    ;; a visible prefix to the player.
+    ((= (-> self caught-fish-species) (the-as int (fisher-species magma-serpent)))
+      (format *fish-ui-str* "MAGMA SERPENT"))
+
+    ;; Megaloviathan is unique. Its internal suffix is fixed to HEALTHY only so
+    ;; the normal appearance code has a safe neutral tier; never expose that as
+    ;; a visible prefix to the player.
+    ((= (-> self caught-fish-species) (the-as int (fisher-species megaloviathan)))
+      (format *fish-ui-str* "MEGALOVIATHAN"))
+
     ((= (-> self caught-fish-suffix) 7)
       (format *fish-ui-str* "PRECURSOR FISH"))
 
@@ -8986,8 +9173,6 @@
           (the-as int (fisher-species fire-canyon-cellfish)))
         (or
           (= (-> self caught-power-cell-task)
-            (the-as int (game-task ogre-boss)))
-          (= (-> self caught-power-cell-task)
             (the-as int (game-task ogre-end)))
           (= (-> self caught-power-cell-task)
             (the-as int (game-task ogre-buzzer)))))
@@ -9018,17 +9203,20 @@
         (= (-> self fish-state) 'catch-display)
         (= (-> self fish-state) 'catch-exit))
     (let ((menu-offset (- (the int (-> self catch-menu-offset)) 20)))
+      ;; Keep the Nuclear Bombfish's first loot window the same height as a
+      ;; normal non-carrier catch window.  The later rare-fish popup is separate
+      ;; and intentionally remains unchanged.
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
-        (draw-sprite2d-xy buf 54 (+ 54 menu-offset) 404 174
+        (draw-sprite2d-xy buf 82 (+ 84 menu-offset) 348 104
           (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
-        (draw-sprite2d-xy buf 58 (+ 58 menu-offset) 396 166
+        (draw-sprite2d-xy buf 86 (+ 88 menu-offset) 340 96
           (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
-      (draw-fisher-large-font-scaled "NUCLEAR BOMBFISH" 256 (+ 78 menu-offset) 0.58)
-      (draw-fisher-large-font-scaled "9000.0 LBS" 256 (+ 112 menu-offset) 0.50)
+      (draw-fisher-large-font-scaled "NUCLEAR BOMBFISH" 256 (+ 102 menu-offset) 0.58)
+      (draw-fisher-large-font-scaled "9000.0 LBS" 256 (+ 128 menu-offset) 0.50)
       (draw-fisher-large-font-scaled
         "PRESS <PAD_X> TO CONTINUE"
-        256 (+ 190 menu-offset) 0.46)))
+        256 (+ 167 menu-offset) 0.46)))
   (none))
 
 (defun fisher-draw-catch-ui! ((self fisher-game))
@@ -10316,10 +10504,22 @@
   (none))
 
 (defun fisher-incinerate-lure! ((self fisher-game))
+  ;; Once a Magma Serpent has committed to the lure (the visible "?" state),
+  ;; its burn/incineration volume is disabled completely until that approach
+  ;; ends.  This guard lives here at the final destruction point so neither
+  ;; the serpent body hitbox nor a lava/fire path can destroy the lure while
+  ;; the serpent is actively closing in for the bite.
   (when
     (and
       (-> self casted?)
-      (!= (-> self cast-state) 'lure-stolen-return))
+      (!= (-> self cast-state) 'lure-stolen-return)
+      (not
+        (and
+          (= (-> self fish-state) 'approaching)
+          (>= (-> self hooked-fish-slot) 0)
+          (=
+            (fisher-fish-species self (-> self hooked-fish-slot))
+            (the-as int (fisher-species magma-serpent))))))
     (let ((hook-pos (new 'stack-no-clear 'vector)))
       (fisher-hook-target! self hook-pos)
       (fisher-set-lava-puff-mode! self 2)
@@ -10389,8 +10589,11 @@
     (fisher-hook-target! self hook-pos)
     (fisher-lava-fish-forward! fish-proc forward)
 
+    ;; Keep the incineration volume on the serpent's body, not its mouth.
+    ;; Shorten the front again so the player has a clearly separated safe lane
+    ;; immediately in front of the long head where the bite cone lives.
     (singlefish-vector-add-scaled-safe!
-      relative (-> fish-proc root trans) forward (meters 5.50))
+      relative (-> fish-proc root trans) forward (meters 3.75))
     (vector-! relative hook-pos relative)
 
     (set! (-> side x) (-> forward z))
@@ -10403,7 +10606,9 @@
     (set! vertical (fabs (-> relative y)))
 
     (and
-      (<= along (meters 5.50))
+      ;; 3.75 +/- 3.75 => root through 7.50m forward.  The gameplay mouth is
+      ;; at ~9.75m, leaving more than two meters of clean space before the cone.
+      (<= along (meters 3.75))
       (<= across (meters 1.95))
       (<= vertical (meters 1.75)))))
 
@@ -10470,6 +10675,12 @@
               (-> fish 0 self)
               (= (fisher-fish-species self slot)
                 (the-as int (fisher-species magma-serpent)))
+              ;; This function runs BEFORE the normal fish sensing update.
+              ;; Give the valid mouth cone priority so a correctly-positioned
+              ;; lure survives long enough for the serpent to enter '?' / approach.
+              (not
+                (fisher-manipy-can-sense-lure?
+                  self slot (the-as manipy (-> fish 0 self))))
               (fisher-magma-serpent-touches-hook?
                 self slot (the-as manipy (-> fish 0 self))))
             (fisher-incinerate-lure! self)))))
@@ -11388,6 +11599,66 @@
       (send-event *camera* 'change-state *camera-base-mode* (seconds 0.45))))
   (none))
 
+(defun fisher-zoomer-unlock-task? ((task int))
+  (or
+    (= task (the-as int (game-task firecanyon-end)))
+    (= task (the-as int (game-task ogre-end)))
+    (= task (the-as int (game-task lavatube-end)))))
+
+(defun fisher-open-zoomer-unlock-window! ((task int))
+  (when (fisher-zoomer-unlock-task? task)
+    (set! *fisher-zoomer-unlock-window-task* task)
+    (set! *fisher-zoomer-unlock-window-active?* #t))
+  (none))
+
+(defun fisher-close-zoomer-unlock-window! ()
+  (set! *fisher-zoomer-unlock-window-active?* #f)
+  (set! *fisher-zoomer-unlock-window-task* 0)
+  (when *target*
+    (process-release? *target*))
+  (none))
+
+(defun fisher-draw-zoomer-unlock-window! ()
+  (when
+    (and
+      *fisher-zoomer-unlock-window-active?*
+      (current-frame)
+      (-> (current-frame) global-buf))
+
+    (let ((line-2
+          (cond
+            ((= *fisher-zoomer-unlock-window-task*
+                (the-as int (game-task firecanyon-end)))
+              "AND YOU CAN PROCEED THROUGH FIRE CANYON!")
+            ((= *fisher-zoomer-unlock-window-task*
+                (the-as int (game-task ogre-end)))
+              "AND YOU CAN PROCEED THROUGH MOUNTAIN PASS!")
+            ((= *fisher-zoomer-unlock-window-task*
+                (the-as int (game-task lavatube-end)))
+              "AND YOU CAN PROCEED THROUGH LAVA TUBE!")
+            (else ""))))
+
+      (with-dma-buffer-add-bucket
+        ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+        (draw-sprite2d-xy
+          buf 48 66 416 116
+          (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
+        (draw-sprite2d-xy
+          buf 52 70 408 108
+          (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
+
+      (draw-fisher-large-font-scaled
+        "THE ZOOMER HAS BEEN TRANSPORTED"
+        256 92 0.42)
+      (draw-fisher-large-font-scaled
+        line-2
+        256 120 0.38)
+      (draw-fisher-large-font-scaled
+        "PRESS <PAD_X> TO CONTINUE"
+        256 158 0.42)))
+
+  (none))
+
 (defbehavior fisher-buzzer-power-cell-reward fuel-cell ((task int))
 
   (initialize self)
@@ -11509,6 +11780,10 @@
     (suspend)
     (suspend))
 
+  ;; The cell is now actually awarded and the zoomer gate can open. Show the
+  ;; transport notice only for the three specific progression cells.
+  (fisher-open-zoomer-unlock-window! task)
+
   (set! *fisher-power-cell-camera-active?* #f)
   (set! *fisher-power-cell-reward-active?* #f)
 
@@ -11526,8 +11801,17 @@
   :code
   (behavior ()
     (loop
+      (when *fisher-zoomer-unlock-window-active?*
+        (when *target*
+          (process-grab? *target*))
+        (fisher-draw-zoomer-unlock-window!)
+        (when (cpad-pressed? 0 x)
+          (cpad-clear! 0 x)
+          (fisher-close-zoomer-unlock-window!)))
+
       (when
         (and
+          (not *fisher-zoomer-unlock-window-active?*)
           (not *fisher-power-cell-reward-active?*)
           (or
             (-> self buzzer-victory-pending?)
@@ -11566,6 +11850,7 @@
 
       (when
         (and
+          (not *fisher-zoomer-unlock-window-active?*)
           (not *fisher-power-cell-reward-active?*)
           (not (handle->process (-> *game-info* other-camera-handle)))
           (not (movie?))
@@ -11619,6 +11904,7 @@
   :enter
   (behavior ()
     (set! *fisher-session-active?* #t)
+    (set! *fisher-camera-free-active?* #f)
 
     (when
       (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
@@ -11681,6 +11967,7 @@
         (go-virtual exit))
 
       (fisher-maintain-player-control! self)
+      (fisher-update-camera-unlock! self)
 
       (when (= (-> self camera-state) 'before-cast) (fisher-face-jak-right-side! self) (fisher-camera-before-cast! self))
 
@@ -11713,6 +12000,7 @@
   :virtual #t
   :code
   (behavior ()
+    (set! *fisher-camera-free-active?* #f)
     (set! *camera-read-analog* (-> self saved-camera-read-analog))
     (set! *external-cam-mode* (-> self saved-external-cam-mode))
     (unless

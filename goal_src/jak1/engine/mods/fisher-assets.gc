@@ -455,6 +455,100 @@
     (:timer (seconds 0.42))
     (:flags (bit2 bit3 bit14))))
 
+
+;; Forgotten Fish: use the same visual recipe as fisher.gc's group-bad-fish
+;; (gray bigpuff + lakedrop), but enlarged so the cloud surrounds the rare fish.
+(defpart 3590
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 0.5 0.5)
+    (:y (meters 0.20))
+    (:scale-x (meters 1.65) (meters 2.10))
+    (:rot-x (degrees -90))
+    (:scale-y :copy scale-x)
+    (:r 128.0 128.0)
+    (:g 128.0 128.0)
+    (:b 128.0 128.0)
+    (:a 0.0)
+    (:vel-x (meters -0.0033333334) (meters 0.006666667))
+    (:vel-y (meters -0.0015) (meters 0.0030))
+    (:vel-z (meters -0.0033333334) (meters 0.006666667))
+    (:scalevel-x (meters 0.0033333334))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a 0.53333336)
+    (:timer (seconds 2))
+    (:flags (bit2 bit3 bit14))
+    (:next-time (seconds 0.035) (seconds 0.177))
+    (:next-launcher 3591)))
+
+(defpart 3591
+  :init-specs
+  ((:fade-a -0.21333334)))
+
+(defpart 3592
+  :init-specs
+  ((:texture (lakedrop effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 0.1 1.0)
+    (:x (meters -0.90) (meters 0.90))
+    (:z (meters -0.22) (meters 0.35))
+    (:scale-x (meters 0.12) (meters 0.22))
+    (:rot-x (degrees -90))
+    (:scale-y :copy scale-x)
+    (:r 255.0)
+    (:g 255.0)
+    (:b 255.0)
+    (:a 32.0 32.0)
+    (:fade-a -0.42666668)
+    (:accel-y (meters 0.00033333333))
+    (:timer (seconds 0.5))
+    (:flags (bit2 bit3 bit14))))
+
+;; Static catalogue equivalents of the Magma Serpent's body flame/smoke modes.
+;; These avoid mutating the live lava particle launcher while the catalogue is open.
+(defpart 3593
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 1.0)
+    (:scale-x (meters 2.16))
+    (:rot-x (degrees -90))
+    (:scale-y (meters 2.76))
+    (:r 255.0)
+    (:g 48.0)
+    (:b 0.0)
+    (:a 104.0)
+    (:vel-x (meters -0.0025) (meters 0.0050))
+    (:vel-y (meters 0.0040) (meters 0.0070))
+    (:vel-z (meters -0.0025) (meters 0.0050))
+    (:scalevel-x (meters 0.0030))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.60)
+    (:timer (seconds 0.42))
+    (:flags (bit2 bit3 bit14))))
+
+(defpart 3594
+  :init-specs
+  ((:texture (bigpuff effects))
+    (:birth-func 'birth-func-camera-orient)
+    (:num 2.0)
+    (:scale-x (meters 0.58))
+    (:rot-x (degrees -90))
+    (:scale-y (meters 0.58))
+    (:r 0.0)
+    (:g 0.0)
+    (:b 0.0)
+    (:a 76.0)
+    (:vel-x (meters -0.0025) (meters 0.0050))
+    (:vel-y (meters 0.0040) (meters 0.0070))
+    (:vel-z (meters -0.0025) (meters 0.0050))
+    (:scalevel-x (meters 0.0030))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.22)
+    (:timer (seconds 1.3))
+    (:flags (bit2 bit3 bit14))))
+
 (defskelgroup *sharkey-sgc*
   sharkey
   sharkey-lod0-jg

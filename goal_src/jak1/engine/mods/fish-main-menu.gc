@@ -697,7 +697,11 @@
           (when fish-proc
             (launch-particles
               :system *sp-particle-system-3d*
-              (-> *part-id-table* 3569)
+              (-> *part-id-table* 3590)
+              (-> (the-as manipy fish-proc) root trans))
+            (launch-particles
+              :system *sp-particle-system-3d*
+              (-> *part-id-table* 3592)
               (-> (the-as manipy fish-proc) root trans)))))
 
       (suspend))))

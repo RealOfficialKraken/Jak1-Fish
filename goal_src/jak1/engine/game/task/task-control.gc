@@ -74,6 +74,18 @@
             (entity-perm-status real-complete)))
 
         (set! (-> *game-info* task-perm-list) new-list))))
+
+  ;; Magma Serpent used to store seven prefix bits. Collapse any old prefix
+  ;; progress into its single UNIQUE discovery bit so existing saves keep it
+  ;; discovered after the catalogue conversion.
+  (let ((magma-perm
+        (get-entity-task-perm
+          *game-info*
+          (game-task catalog-magma-serpent))))
+    (when
+      (logtest? (-> magma-perm user-uint64) #x7f)
+      (logior! (-> magma-perm user-uint64) #x01)))
+
   (none))
 
 (defmethod closed? ((this task-cstage))
@@ -2338,6 +2350,13 @@
           #t)))))
 
 (define *fisher-catalog-fire-canyon-cell-shark-tasks*
+  ;; Gatekeeper Cell Shark has six reward stars rather than seven prefixes.
+  ;; unknown            = Fire Canyon completion cell
+  ;; need-hint          = Mountain Pass completion cell
+  ;; need-introduction  = Mountain Pass scout-fly cell
+  ;; need-reminder-a    = Lava Tube completion cell
+  ;; need-reminder      = Lava Tube scout-fly cell
+  ;; need-reward-speech = Citadel scout-fly cell
   (new 'static
     'task-control
     :current-stage -1
@@ -2351,9 +2370,42 @@
         :status (task-status unknown)
         :flags (task-flags has-entity)
         :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t)))))
+        (lambda :behavior process-taskable ((arg0 task-control)) #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fire-canyon-cell-shark)
+        :status (task-status need-hint)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable ((arg0 task-control)) #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fire-canyon-cell-shark)
+        :status (task-status need-introduction)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable ((arg0 task-control)) #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fire-canyon-cell-shark)
+        :status (task-status need-reminder-a)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable ((arg0 task-control)) #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fire-canyon-cell-shark)
+        :status (task-status need-reminder)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable ((arg0 task-control)) #t))
+      (new 'static
+        'task-cstage
+        :game-task (game-task catalog-fire-canyon-cell-shark)
+        :status (task-status need-reward-speech)
+        :flags (task-flags has-entity)
+        :condition
+        (lambda :behavior process-taskable ((arg0 task-control)) #t)))))
 
 (define *fisher-catalog-electric-grubfish-tasks*
   (new 'static
@@ -2860,6 +2912,7 @@
           #t)))))
 
 (define *fisher-catalog-magma-serpent-tasks*
+  ;; Magma Serpent is unique: one persistent discovery bit, no prefix cstages.
   (new 'static
     'task-control
     :current-stage -1
@@ -2871,60 +2924,6 @@
         'task-cstage
         :game-task (game-task catalog-magma-serpent)
         :status (task-status unknown)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-magma-serpent)
-        :status (task-status need-hint)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-magma-serpent)
-        :status (task-status need-introduction)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-magma-serpent)
-        :status (task-status need-reminder-a)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-magma-serpent)
-        :status (task-status need-reminder)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-magma-serpent)
-        :status (task-status need-reward-speech)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-magma-serpent)
-        :status (task-status need-resolution)
         :flags (task-flags has-entity)
         :condition
         (lambda :behavior process-taskable
@@ -3436,6 +3435,7 @@
           #t)))))
 
 (define *fisher-catalog-megaloviathan-tasks*
+  ;; Megaloviathan is unique: one persistent discovery bit, no prefix cstages.
   (new 'static
     'task-control
     :current-stage -1
@@ -3447,60 +3447,6 @@
         'task-cstage
         :game-task (game-task catalog-megaloviathan)
         :status (task-status unknown)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-megaloviathan)
-        :status (task-status need-hint)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-megaloviathan)
-        :status (task-status need-introduction)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-megaloviathan)
-        :status (task-status need-reminder-a)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-megaloviathan)
-        :status (task-status need-reminder)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-megaloviathan)
-        :status (task-status need-reward-speech)
-        :flags (task-flags has-entity)
-        :condition
-        (lambda :behavior process-taskable
-          ((arg0 task-control))
-          #t))
-      (new 'static
-        'task-cstage
-        :game-task (game-task catalog-megaloviathan)
-        :status (task-status need-resolution)
         :flags (task-flags has-entity)
         :condition
         (lambda :behavior process-taskable

@@ -474,15 +474,29 @@
   :enter
     (behavior ((arg0 object) (arg1 handle))
       (set! (-> self pickup-handle) arg1)
-      (when (-> self notify-parent)
-        (let ((gp-0 (new 'stack-no-clear 'event-message-block)))
-          (set! (-> gp-0 from) self)
-          (set! (-> gp-0 num-params) 1)
-          (set! (-> gp-0 message) 'notify)
-          (set! (-> gp-0 param 0) (the-as uint 'pickup))
-          (let ((s5-0 send-event-function)
-                (s4-0 (ppointer->process (-> self parent))))
-            (s5-0 (if (and (nonzero? s4-0) (type-type? (-> s4-0 type) process)) s4-0) gp-0))))
+      (let ((inside (if *level* (level-get-target-inside *level*))))
+        (when
+          (and
+            (-> self notify-parent)
+            ;; In Precursor Basin, collecting the racer-owned cell must not
+            ;; notify the racer to auto-dismount Jak.
+            (not
+              (and
+                (= (-> self fact pickup-type) (pickup-type fuel-cell))
+                inside
+                (= (-> inside name) 'rolling)
+                *target*
+                (logtest?
+                  (-> *target* control root-prim prim-core action)
+                  (collide-action racer)))))
+          (let ((gp-0 (new 'stack-no-clear 'event-message-block)))
+            (set! (-> gp-0 from) self)
+            (set! (-> gp-0 num-params) 1)
+            (set! (-> gp-0 message) 'notify)
+            (set! (-> gp-0 param 0) (the-as uint 'pickup))
+            (let ((s5-0 send-event-function)
+                  (s4-0 (ppointer->process (-> self parent))))
+              (s5-0 (if (and (nonzero? s4-0) (type-type? (-> s4-0 type) process)) s4-0) gp-0)))))
       (logclear! (-> self mask) (process-mask actor-pause)))
   :code
     (behavior ((arg0 object) (arg1 handle))
@@ -1030,7 +1044,17 @@
       (remove-setting! 'sfx-volume)
       (remove-setting! 'ambient-volume)
       (send-event *target* 'blend-shape #f)
-      (send-event *target* 'end-mode)
+      (let ((inside (if *level* (level-get-target-inside *level*))))
+        (when
+          (not
+            (and
+              inside
+              (= (-> inside name) 'rolling)
+              *target*
+              (logtest?
+                (-> *target* control root-prim prim-core action)
+                (collide-action racer))))
+          (send-event *target* 'end-mode)))
       (send-event *camera* 'no-intro)
       (send-event *camera* 'clear-entity)
       (ja-channel-set! 0)
@@ -1149,12 +1173,12 @@
     (= task (the-as int (game-task citadel-sage-yellow)))))
 
 (defun citadel-fuel-cell-spawn-allowed? ((task int))
-  ;; Preserve the global no-authored-Power-Cells mod except for Citadel.
-  ;; The explicit task checks also let these four sage cells initialize
-  ;; correctly during a level transition.
+  ;; Preserve the global no-authored-Power-Cells mod except for the four
+  ;; Citadel sage cells and Klaww's authored Power Cell.
   (or
     (= (-> (level-get-target-inside *level*) name) 'citadel)
-    (citadel-sage-cell-task? task)))
+    (citadel-sage-cell-task? task)
+    (= task (the-as int (game-task ogre-boss)))))
 
 (defmethod init-from-entity! ((this fuel-cell) (arg0 entity-actor))
   (if

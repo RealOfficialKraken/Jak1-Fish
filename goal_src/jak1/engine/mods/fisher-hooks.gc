@@ -1130,9 +1130,9 @@
           ((= current-level 'village3)
             (spawn-fisher-geologist
               (new 'static 'vector
-                :x (meters 1124.9919)
-                :y (meters 45.7740)
-                :z (meters -3563.2534)
+                :x (meters 1104.8718)
+                :y (meters 45.7881)
+                :z (meters -3558.8464)
                 :w 1.0)
               'village3))))))
 
@@ -1192,6 +1192,9 @@
   (none))
 
 (defun runs-on-jak-death ((death-event symbol))
+  ;; The carried/thrown Nuclear Bombfish is a named spawned process. Kill it
+  ;; directly on death before the final-boss runtime is reset and forgets it.
+  (kill-by-name "fisher-finalboss-bombfish-back" *default-pool*)
   (kill-by-name "test-fisher-net" *default-pool*)
   (when *fisher-finalboss-danger-music-active?*
     (stop-main-music)

@@ -591,7 +591,7 @@
 
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone jungle-pillar))
-    5 8 8 15 16 23 1.0)
+    5 8 8 15 16 23 0.50)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone jungle-pillar)) 0 (fisher-species babak-ecofish) 8 15 16 23)
 
   (fisher-set-zone-info!
@@ -602,7 +602,7 @@
 
   (fisher-set-zone-info!
     (fisher-zone-info-for (fisher-zone sentinel-pontoon))
-    2 4 5 8 12 14 1.0)
+    2 4 5 8 12 14 0.50)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sentinel-pontoon)) 0 (fisher-species eco-drum) 1 2 4 5)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sentinel-pontoon)) 1 (fisher-species largemouth-ecofish) 2 3 4 5)
   (fisher-set-zone-species-range! (fisher-zone-info-for (fisher-zone sentinel-pontoon)) 2 (fisher-species babak-ecofish) 2 3 4 4)
@@ -1295,7 +1295,6 @@
     ((and
         (= species (the-as int (fisher-species fire-canyon-cellfish)))
         (or
-          (= (-> self caught-power-cell-task) (the-as int (game-task ogre-boss)))
           (= (-> self caught-power-cell-task) (the-as int (game-task ogre-end)))
           (= (-> self caught-power-cell-task) (the-as int (game-task ogre-buzzer)))))
       "MOUNTAIN PASS CELL FISH")
@@ -1455,7 +1454,18 @@
 (defun fisher-configure-random-fish-slot!
   ((self fisher-game) (slot int) (species int))
   (fisher-set-fish-species! self slot species)
-  (fisher-set-fish-suffix! self slot (fisher-roll-fish-suffix self))
+  ;; Magma Serpent and Megaloviathan are unique species, not seven-prefix
+  ;; species. Keep their internal suffix on the neutral HEALTHY appearance so
+  ;; respawns can never roll MALNUTRITIONED/STRESSED/MUTANT/etc.
+  (fisher-set-fish-suffix!
+    self
+    slot
+    (if
+      (or
+        (= species (the-as int (fisher-species magma-serpent)))
+        (= species (the-as int (fisher-species megaloviathan))))
+      2
+      (fisher-roll-fish-suffix self)))
   (fisher-randomize-fish-level-and-weight! self slot)
   (none))
 
@@ -1639,7 +1649,6 @@
       (when
         (and
           (> task 1)
-          (!= task (the-as int (game-task ogre-boss)))
           (!= task (the-as int (game-task ogre-end))))
         (return #t))))
   #f)
@@ -1803,7 +1812,8 @@
 
 (defun fisher-add-mountain-pass-cellfish-slots! ((self fisher-game))
   (when (fisher-mountain-pass-cellfish-eligible? self)
-    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-boss))
+    ;; Defeat Klaww is intentionally NOT a fishing reward. Its authored
+    ;; Power Cell is exempted in collectables.gc instead.
     (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end)))
   (none))
 
@@ -2071,6 +2081,10 @@
         (fisher-has-species?
           self
           (the-as int (fisher-species fire-canyon-cellfish))))
+      (not
+        (fisher-has-species?
+          self
+          (the-as int (fisher-species lurker-shark))))
       (rand-vu-percent?
         (if *fisher-in-debug?* 1.0 *fisher-power-cell-fish-chance*)))
 
@@ -2079,15 +2093,9 @@
         (slot -1)
         (candidate 0))
 
-      (dotimes (i (-> self fish-count))
-        (when
-          (and
-            (< slot 0)
-            (=
-              (fisher-fish-species self i)
-              (the-as int (fisher-species lurker-shark))))
-          (set! slot i)))
-
+      ;; Do not consume the resident Lurker Shark to make the Gatekeeper
+      ;; Cell Shark.  If a normal shark is present the outer condition above
+      ;; defers this special fish until a later shark-free population.
       (while
         (and
           (< step (-> self fish-count))
@@ -2184,7 +2192,11 @@
       (and
         (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
         (= (fisher-fish-species self slot)
-          (the-as int (fisher-species megaloviathan)))))
+          (the-as int (fisher-species megaloviathan))))
+      ;; Hub 1's normal Lurker Shark is a population member, not a disposable
+      ;; carrier slot.  Never let passive Scout Fly / cell-fish rolls replace it.
+      (= (fisher-fish-species self slot)
+        (the-as int (fisher-species lurker-shark))))
     (return #f))
 
   (when
@@ -2194,6 +2206,10 @@
         (fisher-has-species?
           self
           (the-as int (fisher-species fire-canyon-cellfish))))
+      (not
+        (fisher-has-species?
+          self
+          (the-as int (fisher-species lurker-shark))))
       (rand-vu-percent?
         (if *fisher-in-debug?* 1.0 *fisher-power-cell-fish-chance*)))
 
@@ -2351,6 +2367,8 @@
                   (the-as int (fisher-species electric-lurker-shark)))
                 (= (fisher-fish-species self slot)
                   (the-as int (fisher-species black-lurker-shark)))
+                (= (fisher-fish-species self slot)
+                  (the-as int (fisher-species lurker-shark)))
                 (= (fisher-fish-species self slot)
                   (the-as int (fisher-species inferno-shark)))
                 (= (fisher-fish-species self slot)
@@ -2998,6 +3016,30 @@
         (else
           (return (the-as int (fisher-species ice-shark)))))))
 
+  ;; Hub 1 sharks are injected through shark-chance instead of the normal
+  ;; species ranges.  Re-apply that rule when replacing a caught/despawned slot
+  ;; so a shark is not an initial-pool-only fish.  Keep at most one resident
+  ;; normal Lurker Shark.
+  (when
+    (and
+      (or
+        (= (-> self location-id) (the-as int (fisher-zone jungle-pillar)))
+        (= (-> self location-id) (the-as int (fisher-zone sentinel-pontoon)))
+        (= (-> self location-id) (the-as int (fisher-zone misty-island))))
+      (<
+        (fisher-count-live-species
+          self
+          (the-as int (fisher-species lurker-shark)))
+        1))
+    (let ((hub1-zone
+            (fisher-zone-info-for
+              (the-as fisher-zone (-> self location-id)))))
+      (when
+        (and
+          (> (-> hub1-zone shark-chance) 0.0)
+          (rand-vu-percent? (-> hub1-zone shark-chance)))
+        (return (the-as int (fisher-species lurker-shark))))))
+
   (when
     (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
     (when
@@ -3126,13 +3168,13 @@
   (new 'static 'vector :x (meters -0.15) :y (meters 0.02) :z (meters 0.10) :w 0.0))
 
 (define *fisher-orb-attachment-offset-b-game*
-  (new 'static 'vector :x (meters 0.00) :y (meters 0.16) :z (meters -0.04) :w 0.0))
+  (new 'static 'vector :x (meters 0.00) :y (meters 0.26) :z (meters -0.04) :w 0.0))
 
 (define *fisher-orb-attachment-offset-c-game*
   (new 'static 'vector :x (meters 0.15) :y (meters -0.02) :z (meters 0.08) :w 0.0))
 
 (define *fisher-orb-attachment-offset-a-catch*
-  (new 'static 'vector :x (meters -0.27) :y (meters 0.04) :z (meters 0.16) :w 0.0))
+  (new 'static 'vector :x (meters -0.27) :y (meters 0.04) :z (meters 0.26) :w 0.0))
 
 (define *fisher-orb-attachment-offset-b-catch*
   (new 'static 'vector :x (meters 0.00) :y (meters 0.28) :z (meters -0.07) :w 0.0))
@@ -3693,9 +3735,11 @@
       (fisher-spawn-rare-attachment!
         fish-proc
         *towertop-sgc*
-        (if catch-display?
-          *fisher-precursor-attachment-offset-catch*
-          *fisher-precursor-attachment-offset-game*)
+        (if *fisher-catalog-world-preview-active?*
+          (new 'static 'vector :y (meters 0.26) :w 0.0)
+          (if catch-display?
+            *fisher-precursor-attachment-offset-catch*
+            *fisher-precursor-attachment-offset-game*))
         (if catch-display? 0.025 0.015)
         "fisher-precursor-towertop"))
 
@@ -3729,9 +3773,11 @@
             (fisher-spawn-rare-attachment!
               fish-proc
               *money-sgc*
-              (if catch-display?
-                *fisher-archipelago-group-offset-catch*
-                *fisher-archipelago-group-offset-game*)
+              (if *fisher-catalog-world-preview-active?*
+                (new 'static 'vector :y (meters 0.16) :w 0.0)
+                (if catch-display?
+                  *fisher-archipelago-group-offset-catch*
+                  *fisher-archipelago-group-offset-game*))
               0.001
               "fisher-archipelago-orb-group")))
 
@@ -4102,9 +4148,7 @@
     (when
       (and
         (= species (the-as int (fisher-species fire-canyon-cellfish)))
-        (or
-          (= power-cell-task (the-as int (game-task ogre-boss)))
-          (= power-cell-task (the-as int (game-task ogre-end)))))
+        (= power-cell-task (the-as int (game-task ogre-end))))
       (set! r 0.10)
       (set! g 0.42)
       (set! b 1.00))
@@ -4665,6 +4709,19 @@
           (rand-vu-int-range 100 140)))
 
       ((= (fisher-fish-species self slot)
+          (the-as int (fisher-species lurker-shark)))
+        (fisher-set-fish-suffix!
+          self
+          slot
+          (fisher-roll-standard-fish-suffix))
+        (fisher-set-fish-power-cell-task! self slot 0)
+        (fisher-set-fish-level!
+          self
+          slot
+          (fisher-roll-level-for-current-zone self))
+        (fisher-set-fish-weight-tenths! self slot 260))
+
+      ((= (fisher-fish-species self slot)
           (the-as int (fisher-species megaloviathan)))
         (fisher-set-fish-suffix! self slot 2)
         (fisher-set-fish-power-cell-task! self slot 0)
@@ -5168,7 +5225,11 @@
               (when fish-proc
                 (launch-particles
                   :system *sp-particle-system-3d*
-                  (-> *part-id-table* 3569)
+                  (-> *part-id-table* 3590)
+                  (-> (the-as manipy fish-proc) root trans))
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3592)
                   (-> (the-as manipy fish-proc) root trans)))))))))
   (none))
 
@@ -5314,19 +5375,24 @@
 (defun fisher-fish-lure-sense-range ((self fisher-game) (slot int))
   (if
     (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
-    (meters 1.35)
+    ;; Four-meter frontal sensing cone.  Its origin is shifted so the rear half
+    ;; overlaps the front of the burn body and the forward half protrudes out.
+    (meters 4.00)
     (meters 5.0)))
 
 (defun fisher-fish-lure-sense-origin-offset ((self fisher-game) (slot int))
   (if
     (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
-    (meters 10.0)
+    ;; The serpent burn body ends at 7.50m forward.  Keep the 4m sensing cone
+    ;; centered on that front edge: 2m overlaps the body and 2m pokes out.
+    (meters 5.50)
     0.0))
 
 (defun fisher-fish-lure-sense-half-angle ((self fisher-game) (slot int))
   (if
     (= (fisher-fish-species self slot) (the-as int (fisher-species magma-serpent)))
-    (degrees 20.0)
+    ;; Narrow frontal cone: side/top approaches should not hook this fish.
+    (degrees 16.0)
     (degrees 35.0)))
 
 (defun fisher-fish-lure-sense-dot-min ((self fisher-game) (slot int))
@@ -5349,8 +5415,16 @@
         (cone-angle (fisher-fish-lure-sense-half-angle self slot))
         (cone-radius (* range (tan cone-angle))))
 
-      (singlefish-vector-scale-safe!
-        forward (-> self playfield-axis) (fisher-fish-direction self slot))
+      (if
+        (= (fisher-fish-species self slot)
+           (the-as int (fisher-species magma-serpent)))
+        ;; Match the cone to the serpent's ACTUAL rendered facing, including
+        ;; its slow turn, instead of its eventual logical direction.
+        (let ((rot (new 'stack-no-clear 'matrix)))
+          (quaternion->matrix rot (-> fish-proc root quat))
+          (vector-copy! forward (-> rot vector 2)))
+        (singlefish-vector-scale-safe!
+          forward (-> self playfield-axis) (fisher-fish-direction self slot)))
       (set! (-> forward y) 0.0)
       (set! (-> forward w) 0.0)
       (singlefish-vector-normalize-safe! forward 1.0)
@@ -5391,13 +5465,24 @@
       (sense-origin (new 'stack-no-clear 'vector))
       (distance 0.0)
       (horizontal-distance 0.0)
+      (vertical-distance 0.0)
+      (front-distance 0.0)
       (facing-dot 0.0)
       (sense-range (fisher-fish-lure-sense-range self slot))
       (origin-offset (fisher-fish-lure-sense-origin-offset self slot))
       (sense-dot-min (fisher-fish-lure-sense-dot-min self slot)))
 
-    (singlefish-vector-scale-safe!
-      forward (-> self playfield-axis) (fisher-fish-direction self slot))
+    (if
+      (= (fisher-fish-species self slot)
+         (the-as int (fisher-species magma-serpent)))
+      ;; The bite cone must follow the head the player can actually see.  The
+      ;; old logical playfield direction could disagree while the serpent was
+      ;; turning, making a visually-correct lure position fail the test.
+      (let ((rot (new 'stack-no-clear 'matrix)))
+        (quaternion->matrix rot (-> fish-proc root quat))
+        (vector-copy! forward (-> rot vector 2)))
+      (singlefish-vector-scale-safe!
+        forward (-> self playfield-axis) (fisher-fish-direction self slot)))
     (set! (-> forward y) 0.0)
     (set! (-> forward w) 0.0)
     (singlefish-vector-normalize-safe! forward 1.0)
@@ -5410,6 +5495,7 @@
 
     (singlefish-vector-sub-safe! to-lure (-> self lure-pos) sense-origin)
     (set! distance (singlefish-vector-length-safe to-lure))
+    (set! vertical-distance (fabs (-> to-lure y)))
 
     (when
       (and
@@ -5421,6 +5507,7 @@
     (set! (-> to-lure y) 0.0)
     (set! (-> to-lure w) 0.0)
     (set! horizontal-distance (singlefish-vector-length-safe to-lure))
+    (set! front-distance (vector-dot forward to-lure))
 
     (when (> horizontal-distance (meters 0.001))
       (singlefish-vector-normalize-safe! to-lure 1.0))
@@ -5430,7 +5517,21 @@
     (and
       (<= distance sense-range)
       (> horizontal-distance (meters 0.001))
-      (>= facing-dot sense-dot-min))))
+      (>= facing-dot sense-dot-min)
+      ;; Magma Serpent can only bite from the mouth-level frontal lane.  The
+      ;; lure cannot sit over the long body/top side and still trigger a hook.
+      (or
+        (!= (fisher-fish-species self slot)
+            (the-as int (fisher-species magma-serpent)))
+        (and
+          ;; The rear half of the debug cone is intentionally embedded in the
+          ;; burn volume, but it must NOT count as a bite.  Only the half that
+          ;; actually protrudes in front of the mouth can trigger/hold '?'.
+          ;; 5.50m cone origin + 2.00m = the 7.50m burn-body front edge.
+          ;; The 7.75m mouth target stays safely inside this valid half while
+          ;; the serpent closes the last few centimeters to the hook.
+          (>= front-distance (meters 2.00))
+          (<= vertical-distance (meters 0.60)))))))
 
 (defun fisher-move-manipy-toward!
   ((fish-proc manipy) (target vector) (speed float))
@@ -5686,7 +5787,10 @@
 
       (set! (-> self caught-fish-species) species)
       (set! (-> self caught-fish-suffix) suffix)
-      (fisher-catalog-register-catch! species suffix)
+      (if
+        (= species (the-as int (fisher-species fire-canyon-cellfish)))
+        (fisher-catalog-register-gatekeeper-catch! power-cell-task)
+        (fisher-catalog-register-catch! species suffix))
       (set! (-> self caught-fish-level) fish-level)
       (set! (-> self caught-weight-tenths) weight)
       (set!
@@ -6437,6 +6541,11 @@
     (when
       (and
         (not (paused?))
+        ;; The geologist owns Circle while her dialogue/catalogue owns Jak.
+        ;; Do not show or accept the fisherman's talk prompt at the same time.
+        (or
+          (not *fisher-geologist*)
+          (not (-> *fisher-geologist* 0 dialogue-grabbed?)))
         (fisher-man-valid-dialogue?
           (-> self dialogue-type))
         (fisher-man-near-jak? self))
@@ -6593,6 +6702,7 @@
   (set! (-> self dialogue-char-count) 0)
   (set! (-> self dialogue-char-timer) 0.0)
   (set! (-> self dialogue-grabbed?) #f)
+  (set! (-> self dialogue-release-pending?) #f)
   (set! (-> self shop-offset) 150.0)
   (set! (-> self shop-message-time) 0.0)
 
@@ -6644,11 +6754,30 @@
 
   :enter
   (behavior ()
-    (fisher-man-release-jak! self))
+    ;; A normal dialogue exit deliberately leaves Jak grabbed.  If idle was
+    ;; entered for any other reason, retain the old immediate-release behavior.
+    (when (not (-> self dialogue-release-pending?))
+      (fisher-man-release-jak! self)))
 
   :code
   (behavior ()
+    ;; cpad-clear! may consume X for the transition frame.  Wait for one fresh
+    ;; controller frame before deciding whether the player has actually let go.
+    (when (-> self dialogue-release-pending?)
+      (when *target*
+        (process-grab? *target*))
+      (suspend))
+
     (loop
+      ;; Keep Jak grabbed as long as the same X press that closed dialogue is
+      ;; physically held. Release him on the first frame where X is really up.
+      (when (-> self dialogue-release-pending?)
+        (cond
+          ((and *target* (cpad-hold? 0 x))
+            (process-grab? *target*))
+          (else
+            (fisher-man-release-jak! self)
+            (set! (-> self dialogue-release-pending?) #f))))
       (when
         (and *level* *target* (= (pause-allowed?) #t) (>= (vector-vector-distance (-> self root trans) (target-pos 0)) (meters 100)) (!= (-> (level-get-target-inside *level*) name) (-> self level-name)))
 
@@ -6664,6 +6793,14 @@
 
       (until
         (ja-done? 0)
+
+        (when (-> self dialogue-release-pending?)
+          (cond
+            ((and *target* (cpad-hold? 0 x))
+              (process-grab? *target*))
+            (else
+              (fisher-man-release-jak! self)
+              (set! (-> self dialogue-release-pending?) #f))))
 
         (when
           (fisher-man-idle-interaction! self)
@@ -6682,6 +6819,14 @@
 
       (until
         (ja-done? 0)
+
+        (when (-> self dialogue-release-pending?)
+          (cond
+            ((and *target* (cpad-hold? 0 x))
+              (process-grab? *target*))
+            (else
+              (fisher-man-release-jak! self)
+              (set! (-> self dialogue-release-pending?) #f))))
 
         (when
           (fisher-man-idle-interaction! self)
@@ -6705,6 +6850,7 @@
     (set! (-> self dialogue-char-count) 0)
     (set! (-> self dialogue-char-timer) 0.0)
     (set! (-> self dialogue-grabbed?) #f)
+    (set! (-> self dialogue-release-pending?) #f)
 
     (when *target*
       (process-grab? *target*)
@@ -6717,7 +6863,14 @@
 
   :exit
   (behavior ()
-    (fisher-man-release-jak! self))
+    ;; Normal dialogue exits set dialogue-release-pending? before going idle.
+    ;; Keep Jak grabbed in that case; kill/forced exits still release normally.
+    (cond
+      ((-> self dialogue-release-pending?)
+        (when *target*
+          (process-grab? *target*)))
+      (else
+        (fisher-man-release-jak! self))))
 
   :code
   (behavior ()
@@ -6851,6 +7004,7 @@
               (= (-> self dialogue-kind) 7)
               (= (-> self dialogue-kind) 8)
               (= (-> self dialogue-kind) 9))
+            (set! (-> self dialogue-release-pending?) #t)
             (go idle))
 
           (else
@@ -6865,6 +7019,7 @@
         (cpad-pressed? 0 triangle)
 
         (cpad-clear! 0 triangle)
+        (set! (-> self dialogue-release-pending?) #t)
         (go idle))
 
       (suspend)
@@ -7005,8 +7160,79 @@
     ((= prefix 5) (task-status need-reward-speech))
     (else (task-status need-resolution))))
 
+;; Gatekeeper Cell Shark catalogue completion is reward-based, not prefix-based.
+;; Six stars are used:
+;;   0 Fire Canyon completion cell
+;;   1 Mountain Pass completion cell
+;;   2 Mountain Pass scout-fly cell
+;;   3 Lava Tube completion cell
+;;   4 Lava Tube scout-fly cell
+;;   5 Citadel scout-fly cell
+(defun fisher-catalog-gatekeeper-star-for-task ((task int))
+  (cond
+    ((= task (the-as int (game-task firecanyon-end))) 0)
+    ((= task (the-as int (game-task ogre-end))) 1)
+    ((= task (the-as int (game-task ogre-buzzer))) 2)
+    ((= task (the-as int (game-task lavatube-end))) 3)
+    ((= task (the-as int (game-task lavatube-buzzer))) 4)
+    ((= task (the-as int (game-task citadel-buzzer))) 5)
+    (else -1)))
+
+(defun fisher-catalog-gatekeeper-task-for-star ((star int))
+  (cond
+    ((= star 0) (game-task firecanyon-end))
+    ((= star 1) (game-task ogre-end))
+    ((= star 2) (game-task ogre-buzzer))
+    ((= star 3) (game-task lavatube-end))
+    ((= star 4) (game-task lavatube-buzzer))
+    ((= star 5) (game-task citadel-buzzer))
+    (else (game-task none))))
+
+(defun fisher-catalog-gatekeeper-star-caught? ((star int))
+  (let ((reward-task (fisher-catalog-gatekeeper-task-for-star star)))
+    (or
+      *fisher-in-debug?*
+      ;; This makes existing saves migrate naturally: these reward tasks can
+      ;; only be completed through the corresponding fishing reward in this
+      ;; mod, so a completed task is a valid caught star.
+      (and
+        (> (the int reward-task) 1)
+        (task-complete? *game-info* reward-task))
+      ;; Stars 1-5 did not exist in the old one-state Gatekeeper catalogue, so
+      ;; their new catalogue bits are unambiguous.  The old `unknown` bit is
+      ;; deliberately not trusted by itself for star 0 because older versions
+      ;; used it for ANY Gatekeeper catch.
+      (and
+        (> star 0)
+        (< star 6)
+        (task-closed?
+          (game-task catalog-fire-canyon-cell-shark)
+          (fisher-catalog-status-for-prefix star))))))
+
+(defun fisher-catalog-register-gatekeeper-catch! ((reward-task int))
+  (let ((star (fisher-catalog-gatekeeper-star-for-task reward-task)))
+    (when (>= star 0)
+      (let ((status (fisher-catalog-status-for-prefix star)))
+        (when
+          (not
+            (task-closed?
+              (game-task catalog-fire-canyon-cell-shark)
+              status))
+          (close-specific-task!
+            (game-task catalog-fire-canyon-cell-shark)
+            status)
+          (auto-save-command 'auto-save 0 0 *default-pool*)))))
+  (none))
+
 (defun fisher-catalog-base-unique? ((species int))
-  (or (= species 4) (= species 6) (= species 23)))
+  ;; Scout Fly, Magma Serpent, Megaloviathan, and Nuclear Bombfish have one
+  ;; catalogue state. Gatekeeper Cell Shark is handled separately with six
+  ;; reward stars.
+  (or
+    (= species 4)
+    (= species (the-as int (fisher-species magma-serpent)))
+    (= species 22)
+    (= species 23)))
 
 (defun fisher-catalog-row-unique? ((row int))
   (or
@@ -7017,6 +7243,8 @@
   ;; Each normal fish owns seven permanent cstages (one per prefix/star).
   ;; Only autosave when this catch closes a cstage that was not already saved.
   (cond
+    ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+      (none))
     ((fisher-catalog-base-unique? species)
       (let ((task (the-as game-task (+ 120 species))))
         (when (not (task-closed? task (task-status unknown)))
@@ -7036,18 +7264,28 @@
   (none))
 
 (defun fisher-catalog-prefix-caught? ((row int) (prefix int))
-  (or
-    *fisher-in-debug?*
-    (and
-      (not (fisher-catalog-row-unique? row))
-      (task-closed?
-        (fisher-catalog-task-for-row row)
-        (fisher-catalog-status-for-prefix prefix)))))
+  (cond
+    ((= row (the-as int (fisher-species fire-canyon-cellfish)))
+      (fisher-catalog-gatekeeper-star-caught? prefix))
+    (else
+      (or
+        *fisher-in-debug?*
+        (and
+          (not (fisher-catalog-row-unique? row))
+          (task-closed?
+            (fisher-catalog-task-for-row row)
+            (fisher-catalog-status-for-prefix prefix)))))))
 
 (defun fisher-catalog-row-discovered? ((row int))
   (if *fisher-in-debug?*
     #t
     (cond
+      ((= row (the-as int (fisher-species fire-canyon-cellfish)))
+        (let ((found? #f))
+          (dotimes (star 6)
+            (when (fisher-catalog-gatekeeper-star-caught? star)
+              (set! found? #t)))
+          found?))
       ((fisher-catalog-row-unique? row)
         (task-closed?
           (fisher-catalog-task-for-row row)
@@ -7061,10 +7299,15 @@
 
 (defun fisher-catalog-prefix-count ((row int))
   (let ((count 0))
-    (when (not (fisher-catalog-row-unique? row))
-      (dotimes (prefix 7)
-        (when (fisher-catalog-prefix-caught? row prefix)
-          (+! count 1))))
+    (cond
+      ((= row (the-as int (fisher-species fire-canyon-cellfish)))
+        (dotimes (star 6)
+          (when (fisher-catalog-gatekeeper-star-caught? star)
+            (+! count 1))))
+      ((not (fisher-catalog-row-unique? row))
+        (dotimes (prefix 7)
+          (when (fisher-catalog-prefix-caught? row prefix)
+            (+! count 1)))))
     count))
 
 (defun fisher-catalog-discovered-count ()
@@ -7076,6 +7319,11 @@
 
 (defun fisher-catalog-row-name ((row int))
   (cond
+    ;; The three progression cell sharks (Fire Canyon, Mountain Pass, Lava
+    ;; Tube) share this species/catalogue row, so give the catalogue a neutral
+    ;; name instead of calling every one a Fire Canyon fish.
+    ((= row (the-as int (fisher-species fire-canyon-cellfish)))
+      "GATEKEEPER CELL SHARK")
     ((< row 24)
       (-> (fisher-species-info-for row) name))
     ((= row 24) "PRECURSOR FISH")
@@ -7091,8 +7339,8 @@
 
 (defun fisher-catalog-row-location ((row int))
   (cond
-    ((or (= row 0) (= row 1) (= row 24)) "ANY HUB 1 AREA")
-    ((or (= row 2) (= row 3) (= row 25)) "FORBIDDEN JUNGLE")
+    ((or (= row 0) (= row 1) (= row 3) (= row 24)) "ANY HUB 1 AREA")
+    ((or (= row 2) (= row 25)) "FORBIDDEN JUNGLE")
     ((= row 26) "SENTINEL BEACH")
     ((or (= row 5) (= row 27)) "MISTY ISLAND")
     ((= row 4) "ANY FISHING AREA")
@@ -7629,6 +7877,12 @@
       fish-proc
       #t)
 
+    ;; Catalogue-only Magma Serpent proportion: stretch the long axis before
+    ;; fitting it. The larger envelope below compensates so its body thickness
+    ;; stays about the same while its visible length grows by roughly 23%.
+    (when (= species (the-as int (fisher-species magma-serpent)))
+      (*! (-> fish-proc root scale z) 1.25))
+
     ;; The catch code above leaves the model in its exact loot-window scale.
     ;; Compute one UNIFORM fit multiplier so unusually large/long fish remain
     ;; inside the catalogue window without changing their proportions.
@@ -7639,11 +7893,20 @@
               (abs (-> fish-proc root scale y))
               (abs (-> fish-proc root scale z))))))
       (set! *fisher-catalog-hud-fit-scale*
-        ;; Normalize EVERY catalogue fish to one fixed presentation envelope.
-        ;; Do not preserve catch-size differences here: the catalogue should
-        ;; give every species the same maximum authored scale axis, then apply
-        ;; that exact uniform multiplier to the complete child/attachment tree.
-        (if (> largest 0.0001) (/ 0.19 largest) 1.0))))
+        ;; Normalize EVERY catalogue model tree to a fixed presentation envelope.
+        ;; Magma Serpent is extremely long/thin (its Z scale dominates), so the
+        ;; same max-axis envelope makes its body look much smaller than the other
+        ;; fish. Give only that species a larger fixed envelope; children still
+        ;; inherit the exact same uniform multiplier as their parent.
+        (if
+          (> largest 0.0001)
+          (/
+            (if
+              (= species (the-as int (fisher-species magma-serpent)))
+              0.32
+              0.19)
+            largest)
+          1.0))))
 
   (none))
 
@@ -7735,17 +7998,16 @@
       (when fish-proc
         (let* ((species (fisher-catalog-row-species (-> self catalog-index)))
             (suffix (fisher-catalog-row-suffix (-> self catalog-index)))
-            ;; The catalogue cutout itself is x=290..434, y=42..116 in the
-            ;; 2D UI.  The custom native-MERC HUD bone path has a presentation
-            ;; offset relative to sprite coordinates, so use the calibrated
-            ;; native-MERC coordinates below rather than feeding sprite center
-            ;; coordinates directly.
-            ;; Native PC MERC HUD bones have an additional presentation offset
-            ;; relative to the 2D sprite coordinate system.  Calibrated from the
-            ;; actual catalogue framebuffer: these values put the model center at
-            ;; the visual center of the x=290..434, y=42..116 cutout.
+            ;; sharkey-sgc is authored from the TOP of the model, while the fish
+            ;; skeletons are authored from the underside. Give every catalogue
+            ;; model that actually uses sharkey-sgc the same upward Y correction
+            ;; so its visual center lands on the normal fish preview center.
+            (shark-model?
+              (=
+                (fisher-catalog-row-skeleton (-> self catalog-index))
+                *sharkey-sgc*))
             (target-x -290.0)
-            (target-y 300.0)
+            (target-y (+ 340.0 (if shark-model? 24.0 0.0)))
             (yaw-quat (new 'stack-no-clear 'quaternion))
             (flip-quat (new 'stack-no-clear 'quaternion)))
 
@@ -7850,21 +8112,61 @@
   (none))
 
 (defun fisher-geologist-draw-rare-effects! ((self fisher-geologist))
-  ;; Use the same real 3D particle launch as the live/catch Forgotten Fish.
-  ;; Platformius already launches this particle from its real platform child.
-  (let ((suffix (fisher-catalog-row-suffix (-> self catalog-index))))
-    (when
-      (and
-        (= suffix 8)
-        (-> self catalog-model)
-        (zero? (mod (current-time) 6)))
-      (let ((fish-proc
-            (the-as manipy (ppointer->process (-> self catalog-model)))))
-        (when fish-proc
-          (launch-particles
-            :system *sp-particle-system-3d*
-            (-> *part-id-table* 3569)
-            (-> fish-proc root trans))))))
+  ;; The catalogue preview should carry the persistent visual effects that are
+  ;; part of the fish itself, not just the bare skeleton. Attack/projectile
+  ;; effects are deliberately excluded.
+  (when (-> self catalog-model)
+    (let* ((row (-> self catalog-index))
+        (species (fisher-catalog-row-species row))
+        (suffix (fisher-catalog-row-suffix row))
+        (fish-proc
+          (the-as manipy (ppointer->process (-> self catalog-model)))))
+      (when fish-proc
+        (let ((particle-pos (-> fish-proc root trans)))
+          (cond
+            ;; Gatekeeper Cell Shark: same reddish-orange Power Cell aura used
+            ;; by its live carrier form.
+            ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+              (when (zero? (mod (current-time) 3))
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3576)
+                  particle-pos)))
+
+            ;; Magma Serpent: persistent body flames/smoke. These are static
+            ;; catalogue copies of the live serpent's lava puff modes 4 and 5.
+            ((= species (the-as int (fisher-species magma-serpent)))
+              (when (zero? (mod (current-time) 3))
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3593)
+                  particle-pos)
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3594)
+                  particle-pos)))
+
+            ;; Forgotten Fish: fisher.gc's bad-fish recipe (bigpuff + lakedrop),
+            ;; enlarged so the cloud is at least as large as the fish.
+            ((= suffix 8)
+              (when (zero? (mod (current-time) 4))
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3590)
+                  particle-pos)
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3592)
+                  particle-pos)))
+
+            ;; Platformius' platform child suppresses world-space sparks when
+            ;; converted to HUD-MERC, so submit its equivalent catalogue spark here.
+            ((= suffix 15)
+              (when (zero? (mod (current-time) 6))
+                (launch-particles
+                  :system *sp-particle-system-3d*
+                  (-> *part-id-table* 3569)
+                  particle-pos))))))))
   (none))
 
 (defun fisher-geologist-draw-catalog! ((self fisher-geologist))
@@ -7949,6 +8251,8 @@
           ;; Unique fish have one catalogue state rather than seven prefixes.
           (clear *fish-ui-str*)
           (cond
+            ((= row (the-as int (fisher-species fire-canyon-cellfish)))
+              (format *fish-ui-str* "~D/6" (fisher-catalog-prefix-count row)))
             ((fisher-catalog-row-unique? row)
               (format *fish-ui-str* "~D/1" (if (fisher-catalog-row-discovered? row) 1 0)))
             (else
@@ -7964,6 +8268,12 @@
       (discovered?
         (fisher-geologist-draw-catalog-text (fisher-catalog-row-name selected) 362 126 0.44 #f #t)
         (cond
+          ((= selected (the-as int (fisher-species fire-canyon-cellfish)))
+            (dotimes (star 6)
+              (fisher-geologist-draw-star!
+                (+ 318 (* star 16))
+                135
+                (fisher-catalog-gatekeeper-star-caught? star))))
           ((fisher-catalog-row-unique? selected)
             (fisher-geologist-draw-catalog-text "UNIQUE" 362 141 0.36 #f #t))
           (else
@@ -8116,6 +8426,11 @@
         (when
           (and
             (not (paused?))
+            ;; The fisherman owns Circle while his dialogue owns Jak.  Do not
+            ;; show or accept the geologist prompt at the same time.
+            (or
+              (not *fisher-man*)
+              (not (-> *fisher-man* 0 dialogue-grabbed?)))
             (fisher-geologist-near-jak? self))
           (fisher-geologist-draw-text "PRESS <PAD_CIRCLE> TO TALK." 356 170 0.55 #f #t)
           (when (cpad-pressed? 0 circle)
