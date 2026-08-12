@@ -7552,8 +7552,8 @@
         (else "")))
     ((= row 27)
       (cond
-        ((= line 0) "YE BEST KEEP THAT FISH SAFE FROM OTHER FISHERMEN.--")
-        ((= line 1) "I'LL BUY IT FROM YE FOR 90 ORBS.")
+        ((= line 0) "YE BEST MAKE SURE TO SELL THAT FISH BEFORE BARG")
+        ((= line 1) "HIDES IT AGAIN!")
         (else "")))
     ((= row 28)
       (cond
