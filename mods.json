@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceName": "Kraken",
+  "lastUpdated": "2026-08-12T02:56:00Z",
+  "mods": {
+    "the-fishing-legacy": {
+      "displayName": "The Fishing Legacy",
+      "description": "A fishing expansion for Jak and Daxter: The Precursor Legacy.",
+      "authors": [
+        "RealOfficialKraken"
+      ],
+      "tags": [
+        "gameplay-mod"
+      ],
+      "supportedGames": [
+        "jak1"
+      ],
+      "websiteUrl": "https://github.com/RealOfficialKraken/Jak1-Fish",
+      "versions": []
+    }
+  },
+  "texturePacks": {}
+}
