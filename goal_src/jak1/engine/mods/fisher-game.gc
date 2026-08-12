@@ -6943,10 +6943,22 @@
 
     (let ((mega-center (new 'stack-no-clear 'vector))
         (mega-face (new 'stack-no-clear 'vector))
+        (mega-back (new 'stack-no-clear 'vector))
         (hook-pos (new 'stack-no-clear 'vector)))
 
       (fisher-megaloviathan-center! fish-proc mega-center)
       (fisher-megaloviathan-face-point! self slot fish-proc mega-face)
+
+      ;; The hook-corruption hitbox belongs to the Megaloviathan's BODY, not
+      ;; only the point directly in front of its face.  Build the matching rear
+      ;; point so the hook can collide with the whole monster while it patrols.
+      (singlefish-vector-add-scaled-safe!
+        mega-back
+        mega-center
+        (-> self playfield-axis)
+        (* (fisher-fish-direction self slot) (meters -7.0)))
+      (set! (-> mega-back w) 1.0)
+
       (fisher-hook-target! self hook-pos)
 
       (cond
@@ -6981,7 +6993,9 @@
               (set! (-> self hooked-fish-poison-dps) 0.0)
               (set! (-> self hooked-fish-slot) slot)
               (fisher-begin-hook-transition! self fish-proc hook-pos)
-              (set! (-> self fish-hook-time) 0.28)
+              ;; Give the Megaloviathan the same full reaction window as an
+              ;; ordinary fish instead of the old near-instant 0.28 seconds.
+              (set! (-> self fish-hook-time) 1.15)
               (set! (-> self fish-scare-on-arrival?) #f)
               (set! (-> self lure-stop-active?) #f)
               (set! (-> self lure-stop-time) 0.0)
@@ -7001,8 +7015,10 @@
             (< (-> self dark-eco-displaced-slot) 0)
             (!= (-> self fish-state) 'reeling)
             (!= (-> self hooked-fish-slot) slot)
-            (<=
-              (vector-vector-distance hook-pos mega-face)
+            (fisher-point-near-segment?
+              hook-pos
+              mega-back
+              mega-face
               (meters 1.25)))
 
           (when *fisher-in-debug?*
@@ -9438,11 +9454,11 @@
 
         ((= suffix 10)
           (draw-fisher-large-font-scaled
-            "YE BEST KEEP THAT FISH SAFE FROM OTHER FISHERMEN.--"
+            "QUICK! STASH IT AWAY BEFORE BARG HIDES THEM AGAIN!"
             256 (+ 116 menu-offset)
             0.34)
           (draw-fisher-large-font-scaled
-            "I'LL BUY IT FROM YE FOR 90 ORBS."
+            ""
             256 (+ 134 menu-offset)
             0.34))
 

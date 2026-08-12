@@ -323,7 +323,7 @@
   (fisher-set-species-info!
     (fisher-species-info-for (fisher-species megaloviathan))
     "MEGALOVIATHAN"
-    *fisher-junglefish-sg*
+    *fisher-megaloviathan-sg*
     2000 4000 7.5 2.00 4.00 0.015 0.000 0.060
     (meters 16.0) (meters 18.5))
 
@@ -3183,9 +3183,10 @@
   (new 'static 'vector :x (meters 0.27) :y (meters -0.04) :z (meters 0.13) :w 0.0))
 
 (define *fisher-archipelago-group-offset-game*
-  (new 'static 'vector :y (meters 0.04) :w 0.0))
+  ;; Shared orbit center: keep the ring through the middle of the fish.
+  (new 'static 'vector :y (meters 0.16) :w 0.0))
 (define *fisher-archipelago-group-offset-catch*
-  (new 'static 'vector :y (meters 0.08) :w 0.0))
+  (new 'static 'vector :y (meters 0.16) :w 0.0))
 
 (define *fisher-archipelago-magenta-game*
   (new 'static 'vector :y (meters 0.48) :w 0.0))
@@ -3330,19 +3331,76 @@
   (none))
 
 (defbehavior fisher-archipelago-orb-group-trans manipy ()
+  ;; The hidden parent is only the center of the ring. Never rotate it.
   (fisher-update-rare-attachment-transform! self)
+  (none))
 
-  (let ((base-quat (new 'stack-no-clear 'quaternion))
-      (x-quat (new 'stack-no-clear 'quaternion))
-      (z-quat (new 'stack-no-clear 'quaternion))
-      (spin-quat (new 'stack-no-clear 'quaternion))
-      (tick (the float (current-time))))
+(defbehavior fisher-archipelago-orb-trans manipy ()
+  (let ((tick (the float (current-time)))
+      (parent-proc (ppointer->process (-> self parent)))
+      (offset (-> self root transv)))
 
-    (quaternion-copy! base-quat (-> self root quat))
-    (quaternion-axis-angle! x-quat 1.0 0.0 0.0 (* tick 32.768))
-    (quaternion-axis-angle! z-quat 0.0 0.0 1.0 (* tick 49.152))
-    (quaternion*! spin-quat x-quat z-quat)
-    (quaternion*! (-> self root quat) base-quat spin-quat))
+    (send-event
+      self
+      'max-vis-dist
+      (if
+        (or
+          *fisher-resident-fish-visible?*
+          in-main-menu?
+          *fisher-catalog-world-preview-active?*
+          (= (-> self draw dma-add-func) fisher-dma-add-process-drawable-catalog-hud-merc!))
+        (meters 999999.0)
+        (meters 0.0)))
+
+    (when
+      (and
+        parent-proc
+        offset
+        (type-type? (-> parent-proc type) process-drawable))
+
+      (let ((parent-drawable (the-as process-drawable parent-proc))
+          (x-quat (new 'stack-no-clear 'quaternion))
+          (z-quat (new 'stack-no-clear 'quaternion))
+          (ring-quat (new 'stack-no-clear 'quaternion))
+          (ring-mat (new 'stack-no-clear 'matrix))
+          (parent-mat (new 'stack-no-clear 'matrix))
+          (local-ring-offset (new 'stack-no-clear 'vector))
+          (world-ring-offset (new 'stack-no-clear 'vector))
+          (base-quat (new 'stack-no-clear 'quaternion))
+          (self-spin (new 'stack-no-clear 'quaternion)))
+
+        ;; Recreate the original Archipelagoldfish ring motion, but apply it
+        ;; ONLY to the six orb POSITIONS.  Z spins the ring around the fish;
+        ;; X continuously rolls the whole orbit plane around/down through 3D.
+        (quaternion-axis-angle! x-quat 1.0 0.0 0.0 (* tick 32.768))
+        (quaternion-axis-angle! z-quat 0.0 0.0 1.0 (* tick 49.152))
+        (quaternion*! ring-quat x-quat z-quat)
+        (quaternion->matrix ring-mat ring-quat)
+        (vector-rotate*! local-ring-offset offset ring-mat)
+        (set! (-> local-ring-offset w) 0.0)
+
+        ;; Carry that moving ring with the fish/group without making the orb
+        ;; model inherit the ring's pitch/roll.
+        (quaternion->matrix parent-mat (-> parent-drawable root quat))
+        (vector-rotate*! world-ring-offset local-ring-offset parent-mat)
+        (set! (-> world-ring-offset w) 0.0)
+
+        (vector+!
+          (-> self root trans)
+          (-> parent-drawable root trans)
+          world-ring-offset)
+        (set! (-> self root trans w) 1.0)
+
+        ;; Orientation remains upright relative to the fish.  The only
+        ;; individual-orb rotation is its own vertical-axis spin.
+        (quaternion-copy! base-quat (-> parent-drawable root quat))
+        (quaternion-axis-angle!
+          self-spin
+          0.0
+          1.0
+          0.0
+          (* tick 131.072))
+        (quaternion*! (-> self root quat) base-quat self-spin))))
 
   (none))
 
@@ -3628,6 +3686,21 @@
 
   (none))
 
+(defun fisher-configure-archipelago-orb!
+  ((attachment (pointer manipy))
+    (r float)
+    (g float)
+    (b float))
+
+  (fisher-configure-rare-orb! attachment r g b)
+
+  (when attachment
+    (let ((orb (the-as manipy (ppointer->process attachment))))
+      (when orb
+        (send-event orb 'trans-hook fisher-archipelago-orb-trans))))
+
+  (none))
+
 (defun fisher-match-attachment-color!
   ((attachment (pointer manipy)) (parent manipy))
 
@@ -3791,7 +3864,7 @@
               (set-vector! (-> group-proc draw color-mult) 0.0 0.0 0.0 0.0)
               (set-vector! (-> group-proc draw color-emissive) 0.0 0.0 0.0 0.0)
 
-              (fisher-configure-rare-orb!
+              (fisher-configure-archipelago-orb!
                 (fisher-spawn-rare-attachment!
                   group-proc *money-sgc*
                   (if catch-display?
@@ -3800,7 +3873,7 @@
                   orb-scale "fisher-archipelago-orb-magenta")
                 1.00 0.18 0.48)
 
-              (fisher-configure-rare-orb!
+              (fisher-configure-archipelago-orb!
                 (fisher-spawn-rare-attachment!
                   group-proc *money-sgc*
                   (if catch-display?
@@ -3809,7 +3882,7 @@
                   orb-scale "fisher-archipelago-orb-green")
                 0.18 1.00 0.36)
 
-              (fisher-configure-rare-orb!
+              (fisher-configure-archipelago-orb!
                 (fisher-spawn-rare-attachment!
                   group-proc *money-sgc*
                   (if catch-display?
@@ -3818,7 +3891,7 @@
                   orb-scale "fisher-archipelago-orb-purple")
                 0.64 0.24 1.00)
 
-              (fisher-configure-rare-orb!
+              (fisher-configure-archipelago-orb!
                 (fisher-spawn-rare-attachment!
                   group-proc *money-sgc*
                   (if catch-display?
@@ -3827,7 +3900,7 @@
                   orb-scale "fisher-archipelago-orb-salmon")
                 1.00 0.42 0.26)
 
-              (fisher-configure-rare-orb!
+              (fisher-configure-archipelago-orb!
                 (fisher-spawn-rare-attachment!
                   group-proc *money-sgc*
                   (if catch-display?
@@ -3836,7 +3909,7 @@
                   orb-scale "fisher-archipelago-orb-blue")
                 0.12 0.24 1.00)
 
-              (fisher-configure-rare-orb!
+              (fisher-configure-archipelago-orb!
                 (fisher-spawn-rare-attachment!
                   group-proc *money-sgc*
                   (if catch-display?
@@ -4885,9 +4958,11 @@
           (cond
             ((and
                 (= (-> owner location-id) (the-as int (fisher-zone maincave-dark-eco)))
-                (or
-                  (= (fisher-fish-species owner slot) (the-as int (fisher-species helix-voidfish)))
-                  (= (fisher-fish-species owner slot) (the-as int (fisher-species megaloviathan)))))
+                (= (fisher-fish-species owner slot) (the-as int (fisher-species megaloviathan))))
+              *fisher-megaloviathan-sg*)
+            ((and
+                (= (-> owner location-id) (the-as int (fisher-zone maincave-dark-eco)))
+                (= (fisher-fish-species owner slot) (the-as int (fisher-species helix-voidfish))))
               *fisher-junglefish-sg*)
             ((and
                 (= (-> owner location-id) (the-as int (fisher-zone maincave-dark-eco)))
@@ -7901,10 +7976,15 @@
         (if
           (> largest 0.0001)
           (/
-            (if
-              (= species (the-as int (fisher-species magma-serpent)))
-              0.32
-              0.19)
+            (cond
+              ((= species (the-as int (fisher-species magma-serpent)))
+                0.38)
+              ;; Keep the Megaloviathan visibly enormous instead of normalizing
+              ;; it down to the same envelope as ordinary catalogue fish.
+              ((= species (the-as int (fisher-species megaloviathan)))
+                0.36)
+              (else
+                0.19))
             largest)
           1.0))))
 
@@ -7926,9 +8006,14 @@
 
     (set-vector!
       (-> model root scale)
-      (* sx unit-scale (-> *video-parms* relative-x-scale))
+      ;; Preserve the catalogue model's 4:3 proportions on every display.
+      ;; relative-x-scale changes with widescreen and was being baked directly
+      ;; into X/Z, making the fish narrower on 16:9.  Use the display's
+      ;; vertical HUD scale for the whole model envelope instead; keep the
+      ;; existing 512x448 Y correction that makes the 4:3 catalogue look right.
+      (* sx unit-scale (-> *video-parms* relative-y-scale))
       (* sy unit-scale aspect (-> *video-parms* relative-y-scale))
-      (* sz unit-scale (-> *video-parms* relative-x-scale))
+      (* sz unit-scale (-> *video-parms* relative-y-scale))
       1.0)
 
     ;; transv is the authored local attachment offset.  Preserve W because
@@ -8011,7 +8096,19 @@
             (yaw-quat (new 'stack-no-clear 'quaternion))
             (flip-quat (new 'stack-no-clear 'quaternion)))
 
-          (set! (-> fish-proc root trans x) (- target-x 256.0))
+          ;; The 4:3 catalogue position is already correct.  The native HUD-MERC
+          ;; path does not add the horizontal centering offset that normal HUD
+          ;; pieces receive on widescreen, so add only that missing 16:9 shift.
+          ;; 85px is half of the extra logical width between centered 4:3 and
+          ;; 16:9 on the 512-wide HUD canvas.
+          (set!
+            (-> fish-proc root trans x)
+            (+
+              (- target-x 256.0)
+              (if
+                (< (-> *video-parms* relative-x-scale) 1.0)
+                -185.0
+                0.0)))
           (set!
             (-> fish-proc root trans y)
             (- target-y (the float (-> *video-parms* screen-sy))))

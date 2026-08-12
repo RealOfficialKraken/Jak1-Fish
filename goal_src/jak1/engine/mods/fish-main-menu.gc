@@ -104,9 +104,13 @@
   (set! *main-menu-extra-blackout-set?* #t)
 
   (main-menu-clear-fish!)
-  (set! *main-menu-fish-target-count* *main-menu-fish-type-count*)
+  ;; The selection pool is much larger now, but keep the aquarium population
+  ;; at the original 11 visible fish.
+  (set! *main-menu-fish-target-count* 11)
   (set! *main-menu-next-fish-spawn-time* 2.0)
-  (set! *main-menu-next-fish-type* 0)
+  (set!
+    *main-menu-next-fish-type*
+    (rand-vu-int-range 0 (- *main-menu-fish-type-count* 1)))
   (set! *main-menu-next-fish-lower?* (rand-vu-percent? 0.5))
   (set! *main-menu-made-by-time* 0.0)
   (set! *main-menu-made-by-y* 112.0)
@@ -232,24 +236,39 @@
 
 (defun main-menu-fish-species ((index int))
   (cond
-    ((< index *fisher-species-count*) index)
-    ((= index 7) (the-as int (fisher-species largemouth-ecofish)))
-    ((= index 8) (the-as int (fisher-species eco-drum)))
-    (else (the-as int (fisher-species eco-drum)))))
+    ;; Menu slots 0-3 map directly to species 0-3.
+    ((< index 4)
+      index)
+
+    ;; Skip species 4 (scout-fly), then continue through every remaining fish:
+    ;; poisonous-eelfish all the way through nuclear-bombfish.
+    ((< index 23)
+      (+ index 1))
+
+    ;; Existing rare menu variants use these base fish models/colors before
+    ;; their suffix-specific appearance/attachments are applied.
+    ((= index 23)
+      (the-as int (fisher-species largemouth-ecofish)))
+    (else
+      (the-as int (fisher-species eco-drum)))))
 
 (defun main-menu-fish-suffix ((index int))
   (cond
-    ((= index 7) 7)
-    ((= index 8) 8)
-    ((= index 9) 9)
-    ((= index 10) 10)
+    ;; Rare slots come after every normal pool fish.
+    ((= index 23) 7)
+    ((= index 24) 8)
+    ((= index 25) 9)
+    ((= index 26) 10)
     (else 2)))
 
 (defun main-menu-fish-skelgroup ((index int))
   (cond
-    ((= index 7) *catch-fishb-sgc*)
-    ((= index 8) *catch-fisha-sgc*)
-    ((or (= index 9) (= index 10)) *catch-fisha-sgc*)
+    ((= index 23) *catch-fishb-sgc*)
+    ((or
+        (= index 24)
+        (= index 25)
+        (= index 26))
+      *catch-fisha-sgc*)
     (else
       (the-as skeleton-group
         (->
@@ -514,6 +533,10 @@
         *main-menu-camera-up*
         (+
           (-> self height)
+          ;; Keep the complete fish field lower in the main-menu camera.
+          ;; The spawn bands stay unchanged; this is one camera-space offset
+          ;; applied equally to every fish and all attached visuals.
+          (meters -5.0)
           (*
             (meters 0.06)
             (sin
@@ -736,11 +759,12 @@
         :name "main-menu-fish-agent"
         *active-pool*)
 
+      ;; Every new menu fish can come from any fishing pool immediately.
       (set!
         *main-menu-next-fish-type*
-        (mod
-          (+ *main-menu-next-fish-type* 1)
-          *main-menu-fish-type-count*))
+        (rand-vu-int-range
+          0
+          (- *main-menu-fish-type-count* 1)))
 
       (set!
         *main-menu-next-fish-lower?*

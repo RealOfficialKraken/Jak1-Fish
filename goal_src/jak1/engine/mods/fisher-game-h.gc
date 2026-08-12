@@ -110,7 +110,8 @@
 
 (define *main-menu-bubble-time* 0.0)
 
-(define *main-menu-fish-type-count* 11)
+;; 23 real fish species (everything except scout-fly) + 4 menu rare fish.
+(define *main-menu-fish-type-count* 27)
 
 (define *main-menu-fish-target-count* 11)
 

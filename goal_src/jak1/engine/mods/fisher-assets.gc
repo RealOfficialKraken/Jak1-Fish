@@ -465,11 +465,11 @@
     (:num 0.5 0.5)
     (:y (meters 0.20))
     (:scale-x (meters 1.65) (meters 2.10))
-    (:rot-x (degrees -90))
     (:scale-y :copy scale-x)
-    (:r 128.0 128.0)
-    (:g 128.0 128.0)
-    (:b 128.0 128.0)
+    ;; Camera-oriented billboard with a very saturated purple tint.
+    (:r 190.0 190.0)
+    (:g 0.0 0.0)
+    (:b 255.0 255.0)
     (:a 0.0)
     (:vel-x (meters -0.0033333334) (meters 0.006666667))
     (:vel-y (meters -0.0015) (meters 0.0030))
@@ -494,10 +494,10 @@
     (:x (meters -0.90) (meters 0.90))
     (:z (meters -0.22) (meters 0.35))
     (:scale-x (meters 0.12) (meters 0.22))
-    (:rot-x (degrees -90))
     (:scale-y :copy scale-x)
-    (:r 255.0)
-    (:g 255.0)
+    ;; Match the cloud layer: camera-facing and intensely purple.
+    (:r 190.0)
+    (:g 0.0)
     (:b 255.0)
     (:a 32.0 32.0)
     (:fade-a -0.42666668)
@@ -653,6 +653,16 @@
   junglefish-swim-ja
   ((junglefish-lod0-mg (meters 20)) (junglefish-lod1-mg (meters 40)) (junglefish-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 1 0 1.5))
+
+;; Megaloviathan reuses the junglefish art, but its gameplay model is enormous.
+;; Give it its own generous culling sphere so its long body remains drawable
+;; when the root/center moves near the edge of the camera frustum.
+(defskelgroup *fisher-megaloviathan-sg*
+  junglefish
+  junglefish-lod0-jg
+  junglefish-swim-ja
+  ((junglefish-lod0-mg (meters 20)) (junglefish-lod1-mg (meters 40)) (junglefish-lod2-mg (meters 999999)))
+  :bounds (static-spherem 0 1 0 5.0))
 
 (defskelgroup *geologist-sgc*
   geologist
