@@ -26,9 +26,9 @@
             "jak1"
           ],
           "assets": {
-            "windows": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v0.0.4/windows-v1.0.2.zip",
-            "linux": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v0.0.4/linux-v1.0.2.tar.gz",
-            "macos": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v0.0.4/macos-intel-v1.0.2.tar.gz"
+            "windows": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.0.2/windows-v1.0.2.zip",
+            "linux": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.0.2/linux-v1.0.2.tar.gz",
+            "macos": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.0.2/macos-intel-v1.0.2.tar.gz"
           }
         }
       ]
