@@ -286,6 +286,9 @@
       (b (-> info color-b)))
 
     (cond
+      ((= species (the-as int (fisher-species megaloviathan)))
+        (set! base-scale 4.00))
+
       ((= species (the-as int (fisher-species scout-fly)))
         (set! base-scale 0.40))
 

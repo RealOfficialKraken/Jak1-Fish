@@ -2773,6 +2773,18 @@
     (format #t "[FISHER] >>> fisher-begin-lure-stolen-return! ENTERED <<<~%"))
 
   (when (!= (-> self cast-state) 'lure-stolen-return)
+    (when (not (fisher-finalboss-zone? self))
+      (cpad-set-buzz!
+        (-> *cpad-list* cpads 0)
+        0
+        255
+        (seconds 0.18))
+      (cpad-set-buzz!
+        (-> *cpad-list* cpads 0)
+        1
+        255
+        (seconds 0.18)))
+
     (set! (-> self lure-destroyed?) #f)
     (set! (-> self lure-incinerated?) #f)
     (fisher-lose-lure!)
@@ -3600,8 +3612,14 @@
       (<= vertical-distance (meters 1.8))
       (<= total-distance (meters 5.0)))))
 
-(defun fisher-play-fish-bite-sound! ()
+(defun fisher-play-fish-bite-sound! ((self fisher-game) (slot int))
   (play-sound-file "fish-bite.wav" (the int (-> *setting-control* current sfx-volume)))
+
+  (cpad-set-buzz!
+    (-> *cpad-list* cpads 0)
+    1
+    52
+    (seconds 0.14))
 
   (none))
 
@@ -4173,121 +4191,123 @@
 
   (none))
 
+(defun fisher-orb-pool-complete-after-catch? ((self fisher-game) (raw-index int))
+  (when
+    (and
+      (>= raw-index 0)
+      (< raw-index (length *level-task-data-remap*)))
+
+    (let* ((level-index
+          (the int
+            (-> *level-task-data-remap* raw-index)))
+
+        (max-orbs
+          (-> (get-game-count level-index) money-count))
+
+        (projected-orbs
+          (+
+            (-> *game-info* money-per-level level-index)
+            (max
+              0
+              (-> self caught-orb-value)))))
+
+      (return
+        (and
+          (> max-orbs 0)
+          (>= projected-orbs max-orbs)))))
+
+  #f)
+
 (defun fisher-catch-area-orbs-complete? ((self fisher-game))
-  (let ((level-index
-        (fisher-orb-level-index self))
-      (catch-orbs
-        (max
-          0
-          (-> self caught-orb-value))))
+  (case (-> self location-id)
+    ((0)
+      (and
+        (fisher-orb-pool-complete-after-catch? self 1)
+        (fisher-orb-pool-complete-after-catch? self 0)))
 
-    (when (>= level-index 0)
-      (let ((max-orbs
-            (-> (get-game-count level-index) money-count)))
-        (when
-          (and
-            (> max-orbs 0)
-            (>=
-              (+
-                (-> *game-info* money-per-level level-index)
-                catch-orbs)
-              max-orbs))
-          (return #t))))
+    ((1)
+      (fisher-orb-pool-complete-after-catch? self 3))
 
-    (case (-> self location-id)
-      ((0)
-        (when (> (length *level-task-data-remap*) 0)
-          (let* ((extra-index
-                (the int (-> *level-task-data-remap* 0)))
-              (max-orbs
-                (-> (get-game-count extra-index) money-count)))
-            (when
-              (and
-                (> max-orbs 0)
-                (>=
-                  (+
-                    (-> *game-info* money-per-level extra-index)
-                    catch-orbs)
-                  max-orbs))
-              (return #t)))))
+    ((2)
+      (fisher-orb-pool-complete-after-catch? self 0))
 
-      ((5)
-        (when (> (length *level-task-data-remap*) 6)
-          (let* ((extra-index
-                (the int (-> *level-task-data-remap* 6)))
-              (max-orbs
-                (-> (get-game-count extra-index) money-count)))
-            (when
-              (and
-                (> max-orbs 0)
-                (>=
-                  (+
-                    (-> *game-info* money-per-level extra-index)
-                    catch-orbs)
-                  max-orbs))
-              (return #t))))
-        (when (> (length *level-task-data-remap*) 11)
-          (let* ((extra-index
-                (the int (-> *level-task-data-remap* 11)))
-              (max-orbs
-                (-> (get-game-count extra-index) money-count)))
-            (when
-              (and
-                (> max-orbs 0)
-                (>=
-                  (+
-                    (-> *game-info* money-per-level extra-index)
-                    catch-orbs)
-                  max-orbs))
-              (return #t)))))
+    ((3)
+      (fisher-orb-pool-complete-after-catch? self 2))
 
-      ((8)
-        (when (> (length *level-task-data-remap*) 12)
-          (let* ((extra-index
-                (the int (-> *level-task-data-remap* 12)))
-              (max-orbs
-                (-> (get-game-count extra-index) money-count)))
-            (when
-              (and
-                (> max-orbs 0)
-                (>=
-                  (+
-                    (-> *game-info* money-per-level extra-index)
-                    catch-orbs)
-                  max-orbs))
-              (return #t))))
-        (when (> (length *level-task-data-remap*) 19)
-          (let* ((extra-index
-                (the int (-> *level-task-data-remap* 19)))
-              (max-orbs
-                (-> (get-game-count extra-index) money-count)))
-            (when
-              (and
-                (> max-orbs 0)
-                (>=
-                  (+
-                    (-> *game-info* money-per-level extra-index)
-                    catch-orbs)
-                  max-orbs))
-              (return #t)))))
+    ((4)
+      (fisher-orb-pool-complete-after-catch? self 5))
 
-      ((10)
-        (when (> (length *level-task-data-remap*) 18)
-          (let* ((extra-index
-                (the int (-> *level-task-data-remap* 18)))
-              (max-orbs
-                (-> (get-game-count extra-index) money-count)))
-            (when
-              (and
-                (> max-orbs 0)
-                (>=
-                  (+
-                    (-> *game-info* money-per-level extra-index)
-                    catch-orbs)
-                  max-orbs))
-              (return #t))))))
+    ((5)
+      (and
+        (fisher-orb-pool-complete-after-catch? self 7)
+        (fisher-orb-pool-complete-after-catch? self 6)
+        (fisher-orb-pool-complete-after-catch? self 11)))
 
-  #f))
+    ((6)
+      (fisher-orb-pool-complete-after-catch? self 8))
+
+    ((7)
+      (fisher-orb-pool-complete-after-catch? self 10))
+
+    ((8)
+      (and
+        (fisher-orb-pool-complete-after-catch? self 13)
+        (fisher-orb-pool-complete-after-catch? self 12)
+        (fisher-orb-pool-complete-after-catch? self 19)))
+
+    ((9)
+      (fisher-orb-pool-complete-after-catch? self 14))
+
+    ((10)
+      (and
+        (fisher-orb-pool-complete-after-catch? self 15)
+        (fisher-orb-pool-complete-after-catch? self 18)))
+
+    (else #f)))
+
+(defun fisher-draw-catch-orb-progress-line!
+  ((self fisher-game)
+    (raw-index int)
+    (label string)
+    (y int))
+
+  (when
+    (and
+      (>= raw-index 0)
+      (< raw-index (length *level-task-data-remap*)))
+
+    (let* ((level-index
+          (the int
+            (-> *level-task-data-remap* raw-index)))
+
+        (max-orbs
+          (-> (get-game-count level-index) money-count))
+
+        (projected-orbs
+          (min
+            max-orbs
+            (+
+              (-> *game-info* money-per-level level-index)
+              (max
+                0
+                (-> self caught-orb-value))))))
+
+      (when (> max-orbs 0)
+        (clear *fish-ui-str*)
+        (format
+          *fish-ui-str*
+          "~D/~D ~A ORBS"
+          projected-orbs
+          max-orbs
+          label)
+
+        (draw-fisher-large-font-scaled
+          *fish-ui-str*
+          256
+          y
+          0.38))))
+
+  (none))
 
 (defun singlefish-sell! ((self singlefish-base))
   (let ((owner
@@ -5747,6 +5767,12 @@
       (set! (-> self lure-pos y) bottom-y)
 
       (set! (-> self lure-y-velocity) 0.48)
+
+      (cpad-set-buzz!
+        (-> *cpad-list* cpads 0)
+        1
+        36
+        (seconds 0.08))
     )
 
     (vector-! from-jak (-> self lure-pos) (-> self fishing-player-pos))
@@ -7062,6 +7088,26 @@
               (-> self fish-fight-base-y)
               (* (meters 0.055) (sin (-> self fish-fight-phase)))))
 
+          (when
+            (and
+              (not button-fight?)
+              (not (fisher-finalboss-zone? self)))
+
+            (cpad-set-buzz!
+              (-> *cpad-list* cpads 0)
+              1
+              (the int
+                (fmax
+                  55.0
+                  (fmin
+                    230.0
+                    (+
+                      35.0
+                      (*
+                        1.30
+                        (fisher-fight-damage-per-second self slot))))))
+              (seconds 0.08)))
+
           (cond
             (button-fight?
               (unless (fisher-update-button-fight! self)
@@ -7222,7 +7268,7 @@
               (set! (-> self lure-sink-time) 0.0)
               (set! (-> self tug-line-active?) #f)
               (set! (-> self tug-line-time) 0.0)
-              (fisher-play-fish-bite-sound!)
+              (fisher-play-fish-bite-sound! self slot)
               (set! (-> self fish-state) 'hook-window)
 
               (when *fisher-in-debug?*
@@ -7243,6 +7289,7 @@
           (when *fisher-in-debug?*
             (format #t "[FISHER] MEGALOVIATHAN HOOK CORRUPTION~%"))
           (fisher-debug-print-lure-loss! self "MEGALOVIATHAN HOOK CORRUPTION")
+          (play-sound-file "corruption.mp3" (the int (-> *setting-control* current sfx-volume)))
           (fisher-begin-lure-stolen-return! self)
           (set! (-> self fish-message) "LINE CORRUPTED")
           (set! (-> self fish-message-time) 1.75)
@@ -7352,7 +7399,7 @@
                                     0.45
                                     1.15)))
 
-                              (fisher-play-fish-bite-sound!)
+                              (fisher-play-fish-bite-sound! self slot)
 
                               (set! (-> self lure-sink-active?) #f)
                               (set! (-> self lure-sink-time) 0.0)
@@ -7841,6 +7888,11 @@
 
       (fisher-launch-water-entry-bubbles! self)
       (play-sound-file "splash.wav" (the int (-> *setting-control* current sfx-volume)))
+      (cpad-set-buzz!
+        (-> *cpad-list* cpads 0)
+        1
+        44
+        (seconds 0.10))
 
       (set!
         (-> self cast-state)
@@ -9313,10 +9365,25 @@
               4)
             (fisher-catch-area-orbs-complete? self)))
 
+        (orb-lines
+          (if
+            (= (-> self caught-fish-species) 4)
+            0
+            (if
+              all-orbs?
+              1
+              (case (-> self location-id)
+                ((0) 2)
+                ((5) 3)
+                ((8) 3)
+                ((10) 2)
+                ((11) 0)
+                (else 1)))))
+
         (panel-height
           (+
             (if carrier? 126 104)
-            (if all-orbs? 20 0))))
+            (* orb-lines 18))))
 
       (with-dma-buffer-add-bucket
         ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
@@ -9397,19 +9464,69 @@
             (+ 150 menu-offset)
             0.48)
 
-          (when all-orbs?
-            (draw-fisher-large-font-scaled
-              "ALL ORBS COLLECTED IN THIS AREA!"
-              256
-              (+ 170 menu-offset)
-              0.40))
+          (cond
+            (all-orbs?
+              (draw-fisher-large-font-scaled
+                "ALL ORBS COLLECTED IN THIS AREA!"
+                256
+                (+ 170 menu-offset)
+                0.40))
+
+            ((> orb-lines 0)
+              (let ((orb-y (+ 170 menu-offset)))
+                (case (-> self location-id)
+                  ((0)
+                    (fisher-draw-catch-orb-progress-line! self 1 "SANDOVER VILLAGE" orb-y)
+                    (+! orb-y 18)
+                    (fisher-draw-catch-orb-progress-line! self 0 "GEYSER ROCK" orb-y))
+
+                  ((1)
+                    (fisher-draw-catch-orb-progress-line! self 3 "FORBIDDEN JUNGLE" orb-y))
+
+                  ((2)
+                    (fisher-draw-catch-orb-progress-line! self 0 "GEYSER ROCK" orb-y))
+
+                  ((3)
+                    (fisher-draw-catch-orb-progress-line! self 2 "SENTINEL BEACH" orb-y))
+
+                  ((4)
+                    (fisher-draw-catch-orb-progress-line! self 5 "MISTY ISLAND" orb-y))
+
+                  ((5)
+                    (fisher-draw-catch-orb-progress-line! self 7 "ROCK VILLAGE" orb-y)
+                    (+! orb-y 18)
+                    (fisher-draw-catch-orb-progress-line! self 6 "FIRE CANYON" orb-y)
+                    (+! orb-y 18)
+                    (fisher-draw-catch-orb-progress-line! self 11 "PRECURSOR BASIN" orb-y))
+
+                  ((6)
+                    (fisher-draw-catch-orb-progress-line! self 8 "LOST PRECURSOR CITY" orb-y))
+
+                  ((7)
+                    (fisher-draw-catch-orb-progress-line! self 10 "BOGGY SWAMP" orb-y))
+
+                  ((8)
+                    (fisher-draw-catch-orb-progress-line! self 13 "VOLCANIC CRATER" orb-y)
+                    (+! orb-y 18)
+                    (fisher-draw-catch-orb-progress-line! self 12 "MOUNTAIN PASS" orb-y)
+                    (+! orb-y 18)
+                    (fisher-draw-catch-orb-progress-line! self 19 "CITADEL" orb-y))
+
+                  ((9)
+                    (fisher-draw-catch-orb-progress-line! self 14 "SNOWY MOUNTAIN" orb-y))
+
+                  ((10)
+                    (fisher-draw-catch-orb-progress-line! self 15 "SPIDER CAVE" orb-y)
+                    (+! orb-y 18)
+                    (fisher-draw-catch-orb-progress-line! self 18 "LAVA TUBE" orb-y))))))
 
           (when carrier?
             (draw-fisher-large-font-scaled
               "THE FISH HAD SWALLOWED A POWERCELL!"
               256
               (+
-                (if all-orbs? 190 170)
+                170
+                (* orb-lines 18)
                 menu-offset)
               0.40))))
 
@@ -9419,9 +9536,8 @@
         *fish-ui-str*
         256
         (+
-          (+
-            (if carrier? 191 167)
-            (if all-orbs? 20 0))
+          (if carrier? 191 167)
+          (* orb-lines 18)
           menu-offset)
         0.52)))
     ))
@@ -10613,6 +10729,7 @@
         (-> *part-id-table* 3573)
         hook-pos))
     (fisher-debug-print-lure-loss! self "LAVA / FIRE INCINERATED LURE")
+    (play-sound-file "incineration.mp3" (the int (-> *setting-control* current sfx-volume)))
     (fisher-begin-lure-stolen-return! self)
     (set! (-> self lure-incinerated?) #t)
     (set! (-> self fish-message) "LURE INCINERATED")
