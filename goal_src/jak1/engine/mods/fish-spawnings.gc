@@ -6950,6 +6950,25 @@
               (pickup-type money)
               -10.0)
 
+            (dotimes (buzzer-index 7)
+              (when
+                (not
+                  (got-buzzer?
+                    *game-info*
+                    (game-task training-buzzer)
+                    buzzer-index))
+
+                (send-event
+                  *target*
+                  'get-pickup
+                  (pickup-type buzzer)
+                  (the float
+                    (logior
+                      (the int (game-task training-buzzer))
+                      (ash buzzer-index 16))))
+
+                (runs-on-fly-pickup)))
+
             (send-event
               *target*
               'get-pickup
