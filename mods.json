@@ -20,15 +20,15 @@
       "thumbnailArtUrl": "https://raw.githubusercontent.com/RealOfficialKraken/Jak1-Fish/main/mod-icon.png",
       "versions": [
         {
-          "version": "1.0.3",
+          "version": "1.1.2",
           "publishedDate": "2026-08-12T05:54:00Z",
           "supportedGames": [
             "jak1"
           ],
           "assets": {
-            "windows": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.0.3/windows-v1.0.3.zip",
-            "linux": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.0.3/linux-v1.0.3.tar.gz",
-            "macos": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.0.3/macos-intel-v1.0.3.tar.gz"
+            "windows": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.1.2/windows-v1.1.2.zip",
+            "linux": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.1.2/linux-v1.1.2.tar.gz",
+            "macos": "https://github.com/RealOfficialKraken/Jak1-Fish/releases/download/v1.1.2/macos-intel-v1.1.2.tar.gz"
           }
         }
       ]
