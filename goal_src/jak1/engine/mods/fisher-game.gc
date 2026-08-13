@@ -197,6 +197,7 @@
 (define *fisher-zoomer-unlock-window-active?* #f)
 (define *fisher-zoomer-unlock-window-task* 0)
 (define *fisher-session-active?* #f)
+(define *fisher-nuclear-hook-timeout-exit?* #f)
 (define *fisher-camera-unlock* #f)
 (define *fisher-camera-free-active?* #f)
 (define *fisher-button-world-down*
@@ -917,6 +918,7 @@
   (set! (-> self fish-scare-on-arrival?) #f)
   (set! (-> self fish-message) #f)
   (set! (-> self fish-message-time) 0.0)
+  (set! *fisher-nuclear-hook-timeout-exit?* #f)
   (set! (-> self skill-message) #f)
   (set! (-> self skill-message-time) 0.0)
   (set! (-> self fish-approach-speed) 2.20)
@@ -5905,6 +5907,8 @@
     (set! (-> self lure-pos w) 1.0))
   (none))
 
+(define *fisher-finalboss-timing-speed* 72.0)
+
 (defun fisher-finalboss-runtime-reset! ()
   (set! *fisher-finalboss-danger-music-active?* #f)
   (when *fisher-finalboss-hold-music-mute?*
@@ -5943,6 +5947,16 @@
     (set! (-> rt guitar-miss-mask) 0)
     (set! (-> rt guitar-miss-flash) 0.0)
     (set! (-> rt guitar-last-hit-count) 0)
+    (set! (-> rt timing-y) 173.0)
+    (set! (-> rt timing-direction) -1)
+    (set! (-> rt timing-target-edge) 0)
+    (set! (-> rt timing-button) 2)
+    (set! (-> rt timing-hits) 0)
+    (set! (-> rt timing-target) 6)
+    (set! (-> rt timing-slow-time) 0.0)
+    (set! *fisher-finalboss-timing-speed* 72.0)
+    (set! (-> rt timing-hit-flash) 0.0)
+    (set! (-> rt timing-miss-flash) 0.0)
     (set! (-> rt reel-target-y) 0.0)
     (set! (-> rt stick-last-zone) -1)
     (set! (-> rt stick-direction) 0)
@@ -6122,9 +6136,36 @@
     (set! (-> rt guitar-hit-mask) 0))
   (none))
 
+(defun fisher-finalboss-begin-timing! ()
+  (let ((rt *fisher-finalboss-runtime*))
+    (set! (-> rt timing-y) 173.0)
+    (set! (-> rt timing-direction) -1)
+    (set! (-> rt timing-target-edge) 0)
+    (set! (-> rt timing-button) 2)
+    (set! (-> rt timing-hits) 0)
+    (set! (-> rt timing-target) 12)
+    (set! (-> rt timing-slow-time) 0.0)
+    (set! *fisher-finalboss-timing-speed* 72.0)
+    (set! (-> rt timing-hit-flash) 0.0)
+    (set! (-> rt timing-miss-flash) 0.0)
+    (when (> (-> rt stage) 1)
+      (set! (-> rt timing-button) (rand-vu-int-range 0 3))))
+  (none))
+
+(defun fisher-finalboss-timing-in-target? ()
+  (let* ((rt *fisher-finalboss-runtime*)
+         (zone-h
+           (cond
+             ((<= (-> rt stage) 1) 22.0)
+             ((= (-> rt stage) 2) 16.0)
+             (else 12.0))))
+    (if (= (-> rt timing-target-edge) 0)
+      (<= (-> rt timing-y) (+ 74.0 zone-h))
+      (>= (-> rt timing-y) (- 172.0 zone-h)))))
+
 (defun fisher-finalboss-begin-fight! ((self fisher-game))
   (let* ((rt *fisher-finalboss-runtime*)
-         (kind (rand-vu-int-range 0 2)))
+         (kind (rand-vu-int-range 0 3)))
     (set! (-> rt state) 'fight)
     (set! (-> rt fight-kind) kind)
     (set! (-> self fish-fighting?) #t)
@@ -6147,7 +6188,7 @@
         (set! (-> rt wave-total) 3)
         (fisher-finalboss-begin-wave! self))
 
-      (else
+      ((= kind 2)
         (set! (-> rt guitar-index) 0)
         (set! (-> rt guitar-total)
           (cond
@@ -6162,7 +6203,10 @@
         (set! (-> rt guitar-miss-mask) 0)
         (set! (-> rt guitar-miss-flash) 0.0)
         (set! (-> rt guitar-last-hit-count) 0)
-        (fisher-finalboss-next-guitar-note!))))
+        (fisher-finalboss-next-guitar-note!))
+
+      (else
+        (fisher-finalboss-begin-timing!))))
   (none))
 
 (defun fisher-finalboss-begin-reel! ((self fisher-game))
@@ -6272,7 +6316,7 @@
                 (fisher-finalboss-begin-reel! self)
                 (fisher-finalboss-begin-wave! self))))))
 
-      (else
+      ((= (-> rt fight-kind) 2)
         (when (> (-> rt guitar-hit-flash) 0.0)
           (-! (-> rt guitar-hit-flash) dt)
           (when (< (-> rt guitar-hit-flash) 0.0)
@@ -6330,6 +6374,84 @@
 
         (when (and (= (-> rt state) 'fight)
                    (>= (-> rt guitar-index) (-> rt guitar-total)))
+          (fisher-finalboss-begin-reel! self)))
+
+      (else
+        (when (> (-> rt timing-slow-time) 0.0)
+          (-! (-> rt timing-slow-time) dt)
+          (when (< (-> rt timing-slow-time) 0.0)
+            (set! (-> rt timing-slow-time) 0.0)))
+        (when (> (-> rt timing-hit-flash) 0.0)
+          (-! (-> rt timing-hit-flash) dt)
+          (when (< (-> rt timing-hit-flash) 0.0)
+            (set! (-> rt timing-hit-flash) 0.0)))
+        (when (> (-> rt timing-miss-flash) 0.0)
+          (-! (-> rt timing-miss-flash) dt)
+          (when (< (-> rt timing-miss-flash) 0.0)
+            (set! (-> rt timing-miss-flash) 0.0)))
+
+        ;; Current sweep speed is persistent. Correct hits build it up;
+        ;; misses knock it down and it stays down until the player earns
+        ;; that speed back with later successful inputs.
+        (+! (-> rt timing-y)
+          (* *fisher-finalboss-timing-speed*
+             (the float (-> rt timing-direction))
+             dt))
+
+        ;; The marker sprite is 6 px tall and the meter spans Y 72..176.
+        ;; Let its center reach 75..173 so the marker physically touches
+        ;; the visible top and bottom ends of the meter.
+        (when (<= (-> rt timing-y) 75.0)
+          (set! (-> rt timing-y) 75.0)
+          (set! (-> rt timing-direction) 1))
+        (when (>= (-> rt timing-y) 173.0)
+          (set! (-> rt timing-y) 173.0)
+          (set! (-> rt timing-direction) -1))
+
+        (when (and (= (-> rt state) 'fight) (>= button 0))
+          (fisher-finalboss-clear-button! button)
+          (cond
+            ((and
+                (= button (-> rt timing-button))
+                (fisher-finalboss-timing-in-target?))
+              (fisher-launch-button-hit-effects!
+                self
+                256.0
+                (-> rt timing-y))
+              (play-sound-file
+                "bwoop.wav"
+                (the int (-> *setting-control* current sfx-volume)))
+              (+! (-> rt timing-hits) 1)
+              (+! *fisher-finalboss-timing-speed* 8.0)
+              (set! (-> rt timing-hit-flash) 0.22)
+              (set! (-> rt timing-miss-flash) 0.0)
+              (set! (-> rt timing-slow-time) 0.0)
+              (set! (-> rt timing-target-edge)
+                (if (= (-> rt timing-target-edge) 0) 1 0))
+              ;; A successful edge hit immediately sends the marker back
+              ;; toward the newly-active opposite green zone.
+              (set!
+                (-> rt timing-direction)
+                (if (= (-> rt timing-target-edge) 1) 1 -1))
+              ;; Keep the same required face button for this entire timing
+              ;; section. A new button is chosen only when the next timing
+              ;; section begins.
+              )
+            (else
+              (set! (-> rt timing-miss-flash) 0.36)
+              (set! (-> rt timing-hit-flash) 0.0)
+              ;; Misses permanently reduce the current sweep speed instead
+              ;; of applying a temporary slowdown that snaps back by itself.
+              ;; Keep a floor so repeated misses never make the meter unusable.
+              (set!
+                *fisher-finalboss-timing-speed*
+                (fmax 36.0 (* *fisher-finalboss-timing-speed* 0.5)))
+              (set! (-> rt timing-slow-time) 0.0))))
+
+        (when
+          (and
+            (= (-> rt state) 'fight)
+            (>= (-> rt timing-hits) (-> rt timing-target)))
           (fisher-finalboss-begin-reel! self))))
     (none)))
 
@@ -6495,7 +6617,7 @@
               (draw-fisher-large-font-scaled *fish-ui-str* 256 67 0.34))
             (fisher-draw-button-fight! self))
 
-           (else
+           ((= (-> rt fight-kind) 2)
             (draw-fisher-large-font-scaled
              (if (> (-> rt guitar-last-hit-count) 1) "KEEP THE STREAK!" "HIT THE TARGET!")
              256
@@ -6563,7 +6685,63 @@
                166
                0.27))
             (when (> (-> rt guitar-miss-flash) 0.0)
-              (draw-fisher-large-font-scaled "MISS!" 256 166 0.27)))))
+              (draw-fisher-large-font-scaled "MISS!" 256 166 0.27)))
+
+           (else
+            (draw-fisher-large-font-scaled "TIRE THE FISH OUT!" 256 40 0.40)
+
+            (with-dma-buffer-add-bucket
+              ((buf (-> (current-frame) global-buf)) (bucket-id subtitle))
+              (let* ((track-x 229)
+                     (track-y 72)
+                     (track-w 54)
+                     (track-h 104)
+                     (zone-h
+                       (cond
+                         ((<= (-> rt stage) 1) 22)
+                         ((= (-> rt stage) 2) 16)
+                         (else 12)))
+                     (zone-y
+                       (if
+                         (= (-> rt timing-target-edge) 0)
+                         75
+                         (- 173 zone-h)))
+                     (marker-y (the int (-> rt timing-y)))
+                     (border
+                       (new 'static 'rgba :r #x8c :g #x98 :b #xa8 :a #xe0))
+                     (inside
+                       (new 'static 'rgba :r #x08 :g #x0c :b #x12 :a #xc8))
+                     (green
+                       (new 'static 'rgba :r #x38 :g #xd8 :b #x58 :a #xe8))
+                     (marker
+                       (if (> (-> rt timing-miss-flash) 0.0)
+                         (new 'static 'rgba :r #xff :g #x30 :b #x30 :a #xff)
+                         (new 'static 'rgba :r #xf0 :g #xf4 :b #xff :a #xff))))
+                (draw-sprite2d-xy buf track-x track-y track-w track-h border)
+                (draw-sprite2d-xy buf (+ track-x 3) (+ track-y 3) (- track-w 6) (- track-h 6) inside)
+                (draw-sprite2d-xy buf (+ track-x 4) zone-y (- track-w 8) zone-h green)
+                (draw-sprite2d-xy buf (+ track-x 2) (- marker-y 3) (- track-w 4) 6 marker)))
+
+            (let* ((zone-h
+                     (cond
+                       ((<= (-> rt stage) 1) 22)
+                       ((= (-> rt stage) 2) 16)
+                       (else 12)))
+                   (zone-y
+                     (if
+                       (= (-> rt timing-target-edge) 0)
+                       75
+                       (- 173 zone-h))))
+              (draw-fisher-large-font-scaled
+                (fisher-button-label (-> rt timing-button))
+                322
+                (+ zone-y (the int (/ zone-h 2)))
+                0.54))
+
+            (when (> (-> rt timing-hit-flash) 0.0)
+              (draw-fisher-large-font-scaled "GOOD!" 256 58 0.27))
+            (when (> (-> rt timing-miss-flash) 0.0)
+              (draw-fisher-large-font-scaled "MISS!" 256 58 0.27)))))
 
         ((= (-> rt state) 'reel)
          (draw-fisher-large-font-scaled "ROTATE THE RIGHT STICK!" 256 82 0.46))
@@ -7389,15 +7567,24 @@
                               (set!
                                 (-> self fish-hook-time)
                                 (if
-                                  (=
-                                    (-> self location-id)
-                                    (the-as int (fisher-zone maincave-dark-eco)))
-                                  0.28
+                                  (and
+                                    (=
+                                      (-> self location-id)
+                                      (the-as int (fisher-zone finalboss-nuclear)))
+                                    (=
+                                      (fisher-fish-species self slot)
+                                      (the-as int (fisher-species nuclear-bombfish))))
+                                  3.0
                                   (if
-                                    (fisher-species-snap-on-bite?
-                                      (fisher-fish-species self slot))
-                                    0.45
-                                    1.15)))
+                                    (=
+                                      (-> self location-id)
+                                      (the-as int (fisher-zone maincave-dark-eco)))
+                                    0.28
+                                    (if
+                                      (fisher-species-snap-on-bite?
+                                        (fisher-fish-species self slot))
+                                      0.45
+                                      1.15))))
 
                               (fisher-play-fish-bite-sound! self slot)
 
@@ -7419,6 +7606,20 @@
                     (<= (-> self fish-hook-time) 0.0)
 
                     (cond
+                      ((and
+                          (=
+                            (-> self location-id)
+                            (the-as int (fisher-zone finalboss-nuclear)))
+                          (=
+                            (fisher-fish-species self slot)
+                            (the-as int (fisher-species nuclear-bombfish))))
+                        (fisher-debug-print-lure-loss! self "NUCLEAR BOMBFISH HOOK WINDOW EXPIRED")
+                        (fisher-begin-lure-stolen-return! self)
+                        ;; The bomb cannot hurt Jak while fishing owns him.
+                        ;; Defer detonation until the normal fishing exit state has
+                        ;; released Jak and cleared *fisher-session-active?*.
+                        (set! *fisher-nuclear-hook-timeout-exit?* #t))
+
                       ((fisher-species-snap-on-bite?
                           (fisher-fish-species self slot))
                         (fisher-fish-scared-off! self slot)
@@ -12167,6 +12368,9 @@
 
       (fisher-update-casting! self)
 
+      (when *fisher-nuclear-hook-timeout-exit?*
+        (go-virtual exit))
+
       (when
         (and
           (= (-> self cast-state) 'ready)
@@ -12216,6 +12420,19 @@
 
     (fisher-reset-cast! self)
     (set! *fisher-session-active?* #f)
+
+    ;; Nuclear Bombfish hook-timeout failure: only detonate after Jak is
+    ;; fully back in normal gameplay so the explosion can actually affect him.
+    ;; Disable the final-boss fishing area before firing the bomb.  The global
+    ;; fishing-area maintainer will immediately despawn fisher-game, its net,
+    ;; lure, and resident gameplay fish, and area-enabled? prevents it from
+    ;; being spawned again while this failed boss state is active.
+    (when *fisher-nuclear-hook-timeout-exit?*
+      (set! *fisher-nuclear-hook-timeout-exit?* #f)
+      (set! (-> *fisher-finalboss-runtime* area-enabled?) #f)
+      (set! (-> *fisher-finalboss-runtime* state) 'failed)
+      (set! *boss-activate-blue-eco* #f)
+      (set! *boss-trigger-blue-bomb-explosion* #t))
 
     (go-virtual idle)
   )
