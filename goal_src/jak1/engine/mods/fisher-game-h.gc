@@ -1055,6 +1055,40 @@
     "IT'S A DIFFICULT TASK TO DO ALONE, BUT IF"
     "YOU TWO COULD BRING BACK THE FISH"
     "YOU FIND, IT WOULD MEAN THE WORLD TO ME."))
+
+(define *fisher-geologist-repeat-dialogue-lines*
+  (new 'static
+    'boxed-array
+    :type string
+    "YOU TWO ARE DOING GREAT WORK!"
+    ""
+    "EVERY CATCH HELPS US UNDERSTAND"
+    "THESE FISH A LITTLE BETTER."
+
+    "THANK YOU FOR HELPING ME WITH MY"
+    "RESEARCH."
+    "HERE'S A CATALOGUE OF ALL OUR FINDINGS"
+    "SO FAR."
+
+    "GOOD FIND, BOYS!"
+    "NOW WE ARE FINALLY GETTING BACK"
+    "TO OUR RESEARCH."
+    ""
+
+    "AHH, THESE FISH ARE QUITE UNUSUAL..."
+    ""
+    ""
+    ""
+
+    "EVERY NEW SPECIMEN TELLS US A LITTLE"
+    "MORE ABOUT THESE WATERS."
+    ""
+    "THERE MAY BE MORE SURPRISES YET..."
+
+    "YOU TWO ARE DOING A NOBLE THING, INDEED."
+    "WE MUST LEARN MORE ABOUT WHAT LIVES"
+    "IN THESE WATERS."
+    ""))
 (define-extern *fisher-geologist-bg-color* rgba)
 (define-extern *fisher-geologist-dialogue-buffer-0* string)
 (define-extern *fisher-geologist-dialogue-buffer-1* string)

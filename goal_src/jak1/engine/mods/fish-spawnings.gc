@@ -7103,11 +7103,20 @@
   ((self fisher-geologist)
     (line-index int))
   (cond
-    ((or
-        (< (-> self dialogue-page) 0)
-        (>= (-> self dialogue-page) 4)
-        (< line-index 0)
-        (>= line-index 4))
+    ((or (< line-index 0) (>= line-index 4))
+      "")
+    ((task-closed?
+        (game-task fisher-geologist-intro)
+        (task-status need-introduction))
+      (cond
+        ((or (< (-> self dialogue-page) 0) (>= (-> self dialogue-page) 6))
+          "")
+        (else
+          (->
+            *fisher-geologist-repeat-dialogue-lines*
+            data
+            (+ (* (-> self dialogue-page) 4) line-index)))))
+    ((or (< (-> self dialogue-page) 0) (>= (-> self dialogue-page) 4))
       "")
     (else
       (->
@@ -8414,12 +8423,7 @@
           (fisher-geologist-draw-text "PRESS <PAD_CIRCLE> TO TALK." 356 170 0.55 #f #t)
           (when (cpad-pressed? 0 circle)
             (cpad-clear! 0 circle)
-            (if
-              (task-closed?
-                (game-task fisher-geologist-intro)
-                (task-status need-introduction))
-              (go fisher-geologist-catalog)
-              (go fisher-geologist-dialogue))))
+            (go fisher-geologist-dialogue)))
         (suspend)
         (ja :num! (seek!)))))
   :post transform-post)
@@ -8427,7 +8431,12 @@
 (defstate fisher-geologist-dialogue (fisher-geologist)
   :enter
   (behavior ()
-    (set! (-> self dialogue-page) 0)
+    (if
+      (task-closed?
+        (game-task fisher-geologist-intro)
+        (task-status need-introduction))
+      (set! (-> self dialogue-page) (rand-vu-int-range 0 5))
+      (set! (-> self dialogue-page) 0))
     (set! (-> self dialogue-char-count) 0)
     (set! (-> self dialogue-char-timer) 0.0)
     (set! (-> self dialogue-grabbed?) #f)
@@ -8441,6 +8450,9 @@
   :code
   (behavior ()
     (loop
+      (when *target*
+        (process-grab? *target*)
+        (set! (-> self dialogue-grabbed?) #t))
       (fisher-geologist-draw-dialogue! self)
 
       (+!
@@ -8466,6 +8478,10 @@
               (-> self dialogue-char-count)
               (fisher-geologist-dialogue-total-length self))
             (set! (-> self dialogue-char-timer) 0.0))
+          ((task-closed?
+              (game-task fisher-geologist-intro)
+              (task-status need-introduction))
+            (go fisher-geologist-catalog))
           ((< (-> self dialogue-page) 3)
             (+! (-> self dialogue-page) 1)
             (set! (-> self dialogue-char-count) 0)
