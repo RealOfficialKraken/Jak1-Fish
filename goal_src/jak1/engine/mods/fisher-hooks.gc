@@ -920,6 +920,13 @@
   (none))
 
 (defun runs-every-frame ()
+  (when 
+    (and
+      (not in-main-menu?)
+      *main-menu-time-frozen?*
+    )
+      (main-menu-restore-time-of-day!)
+    )
   (if *show-input-display* (input-display-on) (input-display-off))
 
   (when in-main-menu?

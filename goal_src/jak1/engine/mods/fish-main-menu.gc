@@ -1335,6 +1335,7 @@
 
       (when
         (>= *main-menu-transition-warp-wait-time* 2.0)
+        (main-menu-restore-time-of-day!)
 
         (main-menu-restore-gameplay-settings!)
 
