@@ -1053,6 +1053,76 @@
               1
               'village3))
 
+          ((= current-level 'beach)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters -195.5496)
+                :y (meters 2.9918)
+                :z (meters -264.5620)
+                :w 1.0)
+              1
+              'beach))
+
+          ((= current-level 'jungle)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 428.8921)
+                :y (meters 1.3243)
+                :z (meters -276.3540)
+                :w 1.0)
+              1
+              'jungle))
+
+          ((= current-level 'misty)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 85.6386)
+                :y (meters 23.2460)
+                :z (meters 928.7921)
+                :w 1.0)
+              1
+              'misty))
+
+          ((= current-level 'sunken)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 731.7421)
+                :y (meters -139.2178)
+                :z (meters -1715.3216)
+                :w 1.0)
+              1
+              'sunken))
+
+          ((= current-level 'swamp)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 465.6262)
+                :y (meters 0.0068)
+                :z (meters -2103.0024)
+                :w 1.0)
+              1
+              'swamp))
+
+          ((= current-level 'snow)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 821.3248)
+                :y (meters 221.0621)
+                :z (meters -3297.4853)
+                :w 1.0)
+              1
+              'snow))
+
+          ((= current-level 'maincave)
+            (spawn-fisher-man
+              (new 'static 'vector
+                :x (meters 1024.2919)
+                :y (meters 37.7158)
+                :z (meters -3090.9970)
+                :w 1.0)
+              1
+              'maincave))
+
           ((and
               (= current-level 'ogre)
               (not
