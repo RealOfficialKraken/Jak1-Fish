@@ -218,7 +218,7 @@
   (fisher-set-species-info!
     (fisher-species-info-for (fisher-species electric-grubfish))
     "ELECTRIC GRUBFISH"
-    *catch-fisha-sgc*
+    *fisher-sunkenfisha-yellow-blue-sg*
     30 60 1.8 0.66 0.42 0.10 0.62 1.00
     (meters 10.0) (meters 15.0))
 
@@ -260,7 +260,7 @@
   (fisher-set-species-info!
     (fisher-species-info-for (fisher-species lava-drum))
     "LAVA DRUM"
-    *catch-fisha-sgc*
+    *fisher-sunkenfisha-red-yellow-sg*
     400 800 4.0 1.35 1.05 1.00 0.20 0.005
     (meters 30.0) (meters 35.0))
 
@@ -281,7 +281,7 @@
   (fisher-set-species-info!
     (fisher-species-info-for (fisher-species frost-biter))
     "FROST BITER"
-    *catch-fisha-sgc*
+    *fisher-sunkenfisha-yellow-blue-sg*
     50 100 2.0 0.70 0.42 0.05 1.00 1.00
     (meters 2.0) (meters 6.0))
 
@@ -1184,8 +1184,8 @@
           ((< roll 47000) 1)
           ((< roll 76000) 2)
           ((< roll 87000) 3)
-          ((< roll 96750) 4)
-          ((< roll 99750) 5)
+          ((< roll 94500) 4)
+          ((< roll 97500) 5)
           (else 6)))
 
       ((fisher-golden-hour?)
@@ -1194,8 +1194,8 @@
           ((< roll 55500) 1)
           ((< roll 85000) 2)
           ((< roll 92500) 3)
-          ((< roll 97900) 4)
-          ((< roll 99900) 5)
+          ((< roll 97000) 4)
+          ((< roll 99000) 5)
           (else 6)))
 
       (else
@@ -1204,8 +1204,8 @@
           ((< roll 62000) 1)
           ((< roll 93000) 2)
           ((< roll 97000) 3)
-          ((< roll 99490) 4)
-          ((< roll 99990) 5)
+          ((< roll 99400) 4)
+          ((< roll 99900) 5)
           (else 6))))))
 
 (defun fisher-rare-suffix-for-location ((self fisher-game))
@@ -3601,7 +3601,16 @@
   ((fish-proc manipy) (species int) (catch-display? symbol))
 
   (when (!= species (the-as int (fisher-species scout-fly)))
-    (let* ((parent-scale (-> fish-proc root scale x))
+    (let* ((frost-biter?
+          (= species (the-as int (fisher-species frost-biter))))
+        (parent-scale
+          (if
+            frost-biter?
+            (if catch-display? 0.70 0.42)
+            (-> fish-proc root scale x)))
+        ;; Attachments use absolute scale; they do not inherit the parent fish's
+        ;; Sunkenfisha 10x/15x visual multiplier. Keep the crystal at its normal
+        ;; intended size instead of dividing it by 15.
         (scale
           (*
             parent-scale
@@ -3611,7 +3620,12 @@
               0.37037037)))
         (offset (new 'stack-no-clear 'vector)))
 
-      (set-vector! offset 0.0 (* (meters 1.6) parent-scale) 0.0 0.0)
+      (set-vector!
+        offset
+        0.0
+        (* (meters 1.6) parent-scale)
+        0.0
+        0.0)
 
       (let ((attachment
             (fisher-spawn-rare-attachment!
@@ -4027,7 +4041,7 @@
     ((or (= suffix 7) (= suffix 11) (= suffix 14) (= suffix 15) (= suffix 16))
       *catch-fishb-sgc*)
     ((= suffix 8)
-      *catch-fisha-sgc*)
+      *fisher-sunkenfisha-red-yellow-sg*)
     ((= suffix 12)
       *catch-fishc-sgc*)
     ((or (= suffix 9) (= suffix 10) (= suffix 13))
@@ -4078,7 +4092,9 @@
         (set! r 0.56)
         (set! g 0.18)
         (set! b 0.88)
-        (set! base-scale (if catch-display? 0.62 0.34)))
+        ;; Forgotten Fish uses the Sunkenfisha model. Keep gameplay scale unchanged,
+        ;; but make the loot/catch display 15x larger than the old 0.62 value.
+        (set! base-scale (if catch-display? 9.30 0.34)))
 
       ((= suffix 9)
         (set! r 0.56)
@@ -4336,6 +4352,30 @@
       (set! x-scale 0.62)
       (set! y-scale 0.72)
       (set! z-scale 1.55))
+    (when
+      (and
+        (not catch-display?)
+        (or
+          (= suffix 8)
+          (and
+            (not (fisher-rare-fish? suffix))
+            (or
+              (= species (the-as int (fisher-species electric-grubfish)))
+              (= species (the-as int (fisher-species lava-drum)))
+              (= species (the-as int (fisher-species frost-biter)))))))
+      (*! base-scale 10.0))
+
+    ;; Every fish that actually renders with a Sunkenfisha skeleton is
+    ;; naturally very small, so enlarge it 15x in the loot/catch window only.
+    (when
+      (and
+        catch-display?
+        (let ((display-skeleton (fisher-display-skeleton-for species suffix)))
+          (or
+            (= display-skeleton *fisher-sunkenfisha-yellow-blue-sg*)
+            (= display-skeleton *fisher-sunkenfisha-red-yellow-sg*)
+            (= display-skeleton *fisher-sunkenfisha-yellow-eye-sg*))))
+      (*! base-scale 10.0))
 
     (when catch-display?
       (*! base-scale 0.50))
@@ -4811,7 +4851,6 @@
     (singlefish-vector-add-scaled-safe! dst dst side-axis (fisher-fish-lane self slot))
 
     (set! (-> dst y) (- (-> self water-level) (fisher-fish-depth self slot)))
-
     (set! (-> dst w) 1.0))
 
   dst)
@@ -4947,7 +4986,7 @@
                 (= (fisher-fish-suffix owner slot) 16))
               *catch-fishb-sgc*)
             ((= (fisher-fish-suffix owner slot) 8)
-              *catch-fisha-sgc*)
+              *fisher-sunkenfisha-red-yellow-sg*)
             ((= (fisher-fish-suffix owner slot) 12)
               *catch-fishc-sgc*)
             ((or
@@ -7090,6 +7129,7 @@
 (define *fisher-catalog-hud-unit-scale* 0.14)
 (define *fisher-catalog-hud-fit-scale* 1.0)
 (define *fisher-catalog-attachment-spawn-scale* 1.0)
+(define *fisher-catalog-sunkenfisha-y-offset* -200.0)
 
 (define *fisher-geologist-dialogue-buffer-0*
   (new 'global 'string 256 (the string #f)))
@@ -7834,6 +7874,12 @@
                 0.38)
               ((= species (the-as int (fisher-species megaloviathan)))
                 0.36)
+              ((or
+                (= suffix 8)
+                (= species (the-as int (fisher-species electric-grubfish)))
+                (= species (the-as int (fisher-species lava-drum)))
+                (= species (the-as int (fisher-species frost-biter))))
+                2.85)
               (else
                 0.19))
             largest)
@@ -7911,12 +7957,21 @@
       (when fish-proc
         (let* ((species (fisher-catalog-row-species (-> self catalog-index)))
             (suffix (fisher-catalog-row-suffix (-> self catalog-index)))
+            (row-skeleton
+              (fisher-catalog-row-skeleton (-> self catalog-index)))
             (shark-model?
-              (=
-                (fisher-catalog-row-skeleton (-> self catalog-index))
-                *sharkey-sgc*))
+              (= row-skeleton *sharkey-sgc*))
+            (sunkenfisha-model?
+              (or
+                (= row-skeleton *fisher-sunkenfisha-red-yellow-sg*)
+                (= row-skeleton *fisher-sunkenfisha-yellow-blue-sg*)
+                (= row-skeleton *fisher-sunkenfisha-yellow-eye-sg*)))
             (target-x -290.0)
-            (target-y (+ 340.0 (if shark-model? 24.0 0.0)))
+            (target-y
+              (+
+                340.0
+                (if shark-model? 24.0 0.0)
+                (if sunkenfisha-model? *fisher-catalog-sunkenfisha-y-offset* 0.0)))
             (yaw-quat (new 'stack-no-clear 'quaternion))
             (flip-quat (new 'stack-no-clear 'quaternion)))
 

@@ -4456,6 +4456,32 @@
 
 (defun fisher-smoothstep ((value float)) (* value value (- 3.0 (* 2.0 value))))
 
+(defun fisher-slot-sunkenfisha-rendered?
+  ((self fisher-game) (slot int))
+
+  (let ((species (fisher-fish-species self slot))
+      (suffix (fisher-fish-suffix self slot)))
+    (or
+      (= suffix 8)
+      (and
+        (not (fisher-rare-fish? suffix))
+        (or
+          (= species (the-as int (fisher-species electric-grubfish)))
+          (= species (the-as int (fisher-species lava-drum)))
+          (= species (the-as int (fisher-species frost-biter))))))))
+
+(defun fisher-sunkenfisha-center-y-offset
+  ((self fisher-game) (slot int) (fish-proc manipy))
+
+  (if
+    (and
+      (>= slot 0)
+      (fisher-slot-sunkenfisha-rendered? self slot))
+    (- (* (meters 1.5) (fabs (-> fish-proc root scale y))))
+    0.0))
+
+(define *fisher-loot-sunkenfisha-y-offset* -19.0)
+
 (defun fisher-catch-display-fish-position!
   ((self fisher-game) (dst vector))
 
@@ -4466,7 +4492,13 @@
 
     (singlefish-vector-normalize-safe! camera-forward 1.0)
 
-    (singlefish-vector-add-scaled-safe! dst (-> self fisher-cam) camera-forward (meters 5.0))
+    ;; Loot/catch models use the normal shared presentation distance.
+    ;; Sunkenfisha models are resized separately; do not move them farther away.
+    (singlefish-vector-add-scaled-safe!
+      dst
+      (-> self fisher-cam)
+      camera-forward
+      (meters 5.0))
 
     (let ((fish-menu-offset
           (if
@@ -4484,6 +4516,23 @@
         (+
           (meters 1.28)
           (* (meters -0.030) fish-menu-offset))))
+
+    ;; Loot-window-only Sunkenfisha offset. The value is expressed in the same
+    ;; menu-position units used by catch-menu-offset, then converted to world
+    ;; distance so -19 is a visible presentation adjustment rather than -19
+    ;; raw GOAL world units. This never affects fish while they are in water.
+    (let ((display-skeleton
+          (fisher-display-skeleton-for
+            (-> self caught-fish-species)
+            (-> self caught-fish-suffix))))
+      (when
+        (or
+          (= display-skeleton *fisher-sunkenfisha-yellow-blue-sg*)
+          (= display-skeleton *fisher-sunkenfisha-red-yellow-sg*)
+          (= display-skeleton *fisher-sunkenfisha-yellow-eye-sg*))
+        (+!
+          (-> dst y)
+          (* (meters 0.030) *fisher-loot-sunkenfisha-y-offset*))))
 
     (set! (-> dst w) 1.0))
 
@@ -4539,6 +4588,8 @@
             slot
             fish-proc
             #t)
+
+          ;; Loot Y offset is applied once by fisher-catch-display-fish-position!.
 
           (fisher-spawn-rare-fish-attachments!
             fish-proc
@@ -5227,6 +5278,10 @@
     (singlefish-vector-copy-safe! (-> self hooked-fish-last-hook-pos) active-hook)
 
     (singlefish-vector-add-scaled-safe! root-pos active-hook smoothed-facing (- mouth-offset))
+
+    ;; Do not add the Sunkenfisha free-swim center offset while hooked.
+    ;; root-pos is mouth-pinned to active-hook; an additional Y correction here
+    ;; makes the fish bite/reel below the lure.
 
     (set! (-> fish-proc root trans quad) (-> root-pos quad))
 
@@ -7544,6 +7599,10 @@
                           serpent-forward
                           (meters -7.75)))
 
+                      ;; Do not apply the Sunkenfisha visual-center Y offset to the
+                      ;; bite target. During approach the root is driven directly toward
+                      ;; the hook so the mouth/hook alignment is not pushed downward.
+
                       (let ((remaining
                             (fisher-move-manipy-toward!
                               fish-proc
@@ -7849,6 +7908,9 @@
               (= (-> self fish-state) 'rare-enter)
               (= (-> self fish-state) 'rare-display)
               (= (-> self fish-state) 'rare-exit)))
+
+          ;; Sunkenfisha models are never Y-offset in gameplay or the loot window.
+          ;; The catalogue has its own independent HUD-space offset.
 
           (fisher-submit-power-cell-fish-particle! self slot fish-proc)
 

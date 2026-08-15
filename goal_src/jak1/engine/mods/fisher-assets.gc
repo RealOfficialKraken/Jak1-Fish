@@ -736,6 +736,30 @@
   ((catch-fisha-lod0-mg (meters 999999)))
   :bounds (static-spherem 0 0 0 99))
 
+;; Alternate visual skeletons for existing fishing fish.
+;; The art-group owner must be sunkenfisha because these JG/MG/JA elements
+;; live in sunkenfisha-ag. The gameplay process remains the generic fishing manipy.
+(defskelgroup *fisher-sunkenfisha-red-yellow-sg*
+  sunkenfisha
+  sunkenfisha-red-yellow-lod0-jg
+  sunkenfisha-idle-ja
+  ((sunkenfisha-red-yellow-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 99))
+
+(defskelgroup *fisher-sunkenfisha-yellow-blue-sg*
+  sunkenfisha
+  sunkenfisha-yellow-blue-lod0-jg
+  sunkenfisha-idle-ja
+  ((sunkenfisha-yellow-blue-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 99))
+
+(defskelgroup *fisher-sunkenfisha-yellow-eye-sg*
+  sunkenfisha
+  sunkenfisha-yellow-eye-lod0-jg
+  sunkenfisha-idle-ja
+  ((sunkenfisha-yellow-eye-lod0-mg (meters 999999)))
+  :bounds (static-spherem 0 0 0 99))
+
 (defskelgroup *catch-fishb-sgc*
   catch-fishb
   catch-fishb-lod0-jg
@@ -797,7 +821,9 @@
   junglefish
   junglefish-lod0-jg
   junglefish-swim-ja
-  ((junglefish-lod0-mg (meters 20)) (junglefish-lod1-mg (meters 40)) (junglefish-lod2-mg (meters 999999)))
+  ((junglefish-lod0-mg (meters 20))
+   (junglefish-lod1-mg (meters 40))
+   (junglefish-lod2-mg (meters 999999)))
   :bounds (static-spherem 0 1 0 5.0))
 
 (defskelgroup *geologist-sgc*
