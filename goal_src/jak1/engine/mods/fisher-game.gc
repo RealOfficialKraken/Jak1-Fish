@@ -8604,7 +8604,7 @@
           ((or
               (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
               (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
-            (set-vector! active-curtain-color 91.0 2.0 93.0 255.0))
+            (set-vector! active-curtain-color 14.0 2.0 15.0 255.0))
 
           (else
             (set!
