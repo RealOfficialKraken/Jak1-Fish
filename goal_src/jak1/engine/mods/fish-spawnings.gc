@@ -5735,6 +5735,7 @@
 
     (set! (-> self caught-fish-species) 4)
     (set! (-> self caught-fish-suffix) 2)
+    (set! *fisher-catch-new?* (fisher-catalog-catch-new? 4 2 0))
     (fisher-catalog-register-catch! 4 2)
     (set! (-> self caught-fish-level) (fisher-fish-level self slot))
     (set! (-> self caught-weight-tenths) 500)
@@ -5833,6 +5834,7 @@
 
       (set! (-> self caught-fish-species) species)
       (set! (-> self caught-fish-suffix) suffix)
+      (set! *fisher-catch-new?* (fisher-catalog-catch-new? species suffix power-cell-task))
       (if
         (= species (the-as int (fisher-species fire-canyon-cellfish)))
         (fisher-catalog-register-gatekeeper-catch! power-cell-task)
@@ -7276,6 +7278,34 @@
   (or
     (>= row 24)
     (fisher-catalog-base-unique? row)))
+
+(defun fisher-catalog-catch-new? ((species int) (suffix int) (reward-task int))
+  (cond
+    ((= species (the-as int (fisher-species fire-canyon-cellfish)))
+      (let ((star (fisher-catalog-gatekeeper-star-for-task reward-task)))
+        (and
+          (>= star 0)
+          (not (fisher-catalog-gatekeeper-star-caught? star)))))
+
+    ((fisher-catalog-base-unique? species)
+      (not
+        (task-closed?
+          (the-as game-task (+ 120 species))
+          (task-status unknown))))
+
+    ((fisher-rare-fish? suffix)
+      (not
+        (task-closed?
+          (the-as game-task (+ 144 (- suffix 7)))
+          (task-status unknown))))
+
+    ((and (>= suffix 0) (<= suffix 6))
+      (not
+        (task-closed?
+          (the-as game-task (+ 120 species))
+          (fisher-catalog-status-for-prefix suffix))))
+
+    (else #f)))
 
 (defun fisher-catalog-register-catch! ((species int) (suffix int))
   (cond

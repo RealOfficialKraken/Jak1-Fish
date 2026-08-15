@@ -3817,6 +3817,7 @@
 
     (set! (-> owner caught-fish-species) 0)
     (set! (-> owner caught-fish-suffix) suffix)
+    (set! *fisher-catch-new?* (fisher-catalog-catch-new? 0 suffix 0))
     (fisher-catalog-register-catch! 0 suffix)
     (set! (-> owner caught-fish-level) (-> self level))
     (set! (-> owner caught-weight-tenths) (-> self weight-tenths))
@@ -4737,6 +4738,7 @@
     (set! (-> self caught-fish-xp) 0)
     (set! (-> self catch-transition-time) 0.0)
     (set! (-> self catch-menu-offset) 0.0)
+    (set! *fisher-catch-new?* #f)
 
     (cond
       ((-> self buzzer-victory-pending?)
@@ -4856,6 +4858,7 @@
         (set! (-> self caught-fish-xp) 0)
         (set! (-> self catch-transition-time) 0.0)
         (set! (-> self catch-menu-offset) 0.0)
+        (set! *fisher-catch-new?* #f)
 
         (fisher-reset-cast! self)
 
@@ -6918,6 +6921,7 @@
   (set! (-> self fish-state) 'free)
   (set! (-> self caught-orb-value) 0)
   (set! (-> self caught-fish-xp) 0)
+  (set! *fisher-catch-new?* #f)
   (set! (-> self cast-state) 'buzzer-exit)
   (none))
 
@@ -9578,6 +9582,27 @@
 
   *fish-ui-str*)
 
+(defun fisher-draw-new-catch-tag! ((right-x int) (top-y int))
+  (when *fisher-catch-new?*
+    (clear matt-str)
+    (clear *pc-encoded-matt-str*)
+    (format matt-str "NEW")
+    (pc-encode-utf8-string matt-str *pc-encoded-matt-str*)
+
+    (with-dma-buffer-add-bucket
+      ((buf (-> (current-frame) global-buf))
+        (bucket-id subtitle))
+      (draw-string-xy-scaled
+        *pc-encoded-matt-str*
+        buf
+        (- right-x 27)
+        (+ top-y 5)
+        (font-color red)
+        (font-flags large middle shadow kerning)
+        0.40)))
+
+  (none))
+
 (defun fisher-draw-finalboss-catch-ui! ((self fisher-game))
   (when
     (or (= (-> self fish-state) 'catch-enter)
@@ -9590,6 +9615,7 @@
           (new 'static 'rgba :r #x04 :g #x10 :b #x18 :a #xd4))
         (draw-sprite2d-xy buf 86 (+ 88 menu-offset) 340 96
           (new 'static 'rgba :r #x10 :g #x38 :b #x48 :a #xb8)))
+      (fisher-draw-new-catch-tag! 430 (+ 84 menu-offset))
       (draw-fisher-large-font-scaled "NUCLEAR BOMBFISH" 256 (+ 102 menu-offset) 0.58)
       (draw-fisher-large-font-scaled "9000.0 LBS" 256 (+ 128 menu-offset) 0.50)
       (draw-fisher-large-font-scaled
@@ -9664,6 +9690,8 @@
             :g #x38
             :b #x48
             :a #xa8)))
+
+      (fisher-draw-new-catch-tag! 430 (+ 84 menu-offset))
 
       (draw-fisher-large-font-scaled
         (fisher-format-catch-name! self)
