@@ -1,4 +1,4 @@
-;;-*-Lisp-*-
+
 (in-package goal)
 (bundles "JUN.DGO")
 (require "engine/geometry/path.gc")
@@ -7,7 +7,6 @@
 (require "engine/target/sidekick.gc")
 (declare-type fisher-fish process-drawable)
 
-;; DECOMP BEGINS
 
 (deftype fisher-bank (basic)
   ((width      meters)
@@ -694,6 +693,7 @@
    (hard            symbol)
    (training        symbol)
    (school-spawned? symbol)
+   (replay-school?  symbol)
    (params          fisher-params :inline))
   (:states
    fisher-done
@@ -841,7 +841,9 @@
                         :to
                         *entity-pool*)
          (sound-play "get-big-fish")
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-caught 200))
+         (send-event (ppointer->process (-> self parent))
+                     'fisher-fish-caught
+                     (if (not (task-complete? *game-info* (-> (the-as fisher (-> self parent 0)) entity extra perm task))) 200 5)))
         (else
          (process-spawn part-tracker
                         :init
@@ -855,7 +857,9 @@
                         :to
                         *entity-pool*)
          (sound-play "get-small-fish")
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-caught 200)))
+         (send-event (ppointer->process (-> self parent))
+                     'fisher-fish-caught
+                     (if (not (task-complete? *game-info* (-> (the-as fisher (-> self parent 0)) entity extra perm task))) 200 1))))
       (set! (-> self vel) (/ (-> self vel) 4))
       (while (< 0.1 (-> self root scale x))
         (set! (-> self offset) (-> (the-as fisher (-> self parent 0)) paddle))
@@ -876,7 +880,9 @@
            (if (< 0.5 f0-2)
              (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA04" #t (-> self root trans))
              (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA05" #t (-> self root trans))))
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-die 200))
+         (send-event (ppointer->process (-> self parent))
+                     'fisher-fish-die
+                     (if (not (task-complete? *game-info* (-> (the-as fisher (-> self parent 0)) entity extra perm task))) 200 5)))
         (else
          (let ((f0-5 (rand-float-gen)))
            (cond
@@ -891,7 +897,9 @@
              ((< 0.1666 f0-5) (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA09" #t (-> self root trans)))
              ((> (-> (the-as fisher (-> self parent 0)) missed) 0)
               (play-ambient (-> (the-as fisher (-> self parent 0)) ambient) "FIS-TA10" #t (-> self root trans)))))
-         (send-event (ppointer->process (-> self parent)) 'fisher-fish-die 200)))))
+         (send-event (ppointer->process (-> self parent))
+                     'fisher-fish-die
+                     (if (not (task-complete? *game-info* (-> (the-as fisher (-> self parent 0)) entity extra perm task))) 200 1))))))
 
 (defbehavior fisher-fish-init-by-other fisher-fish ((arg0 symbol) (arg1 float) (arg2 float))
   (set! (-> self mode) arg0)
@@ -1029,6 +1037,7 @@
 (defstate fisher-done (fisher)
   :enter
     (behavior ()
+      (set! (-> self replay-school?) #f)
       (init! (-> self query)
              (lookup-text! *common-text* (text-id play-again?) #f)
              40
@@ -1106,7 +1115,7 @@
         ((< (-> self caught) 0))
         (else
          (when (< (mod (-> *display* base-frame-counter) (seconds 1)) (seconds 0.5))
-           ;; og:preserve-this PAL patch here
+
            (let ((gp-0 (new 'stack 'font-context *font-default-matrix* 56 100 0.0 (font-color red) (font-flags shadow kerning))))
              (let ((v1-10 gp-0)) (set! (-> v1-10 width) (the float 400)))
              (let ((v1-11 gp-0)) (set! (-> v1-11 height) (the float 50)))
@@ -1115,7 +1124,9 @@
          (fisher-draw-display self)
          (let ((gp-1 (get-response (-> self query))))
            (cond
-             ((and (= gp-1 'yes) (process-release? *target*)) (go-virtual enter-playing))
+             ((and (= gp-1 'yes) (process-release? *target*))
+              (set! (-> self replay-school?) #t)
+              (go-virtual enter-playing))
              ((= gp-1 'no) (go-virtual play-reject))))))
       (spool-push *art-control* "fisher-reject" 0 self -99.0))
   :code process-taskable-anim-loop
@@ -1161,39 +1172,43 @@
     ((and (< (-> self params vel) 0.0) (>= 0.0 (-> self spawner)))
      (set! (-> self params vel) (- (-> self params vel)))
      (set! (-> self spawner) 0.0)))
-  ;; Spawn every safe fish type together once, at the exact same lane.
-  ;; Poison fish use fishc through the bad/deadly modes, so those modes are
-  ;; deliberately excluded.
-  (when
-    (not (-> self school-spawned?))
-
-    (set! (-> self school-spawned?) #t)
-    (set! (-> self spawner) 0.5)
-    (set! (-> self spawner-last) 0.5)
-    (set-time! (-> self spawn-time))
-
-    (sound-play "fish-spawn" :vol 70)
-
-    ;; The initial parameter block has fish-vel = 0.0, so using it here
-    ;; creates motionless fish. Give the simultaneous school a fixed forward
-    ;; path speed equivalent to the normal early-game fish speed.
-    ;; fisha
-    (process-spawn
-      fisher-fish
-      'normal
-      0.5
-      2.775
-      :to
-      self)
-
-    ;; fishb
-    (process-spawn
-      fisher-fish
-      'powerup
-      0.5
-      2.775
-      :to
-      self))
+  (cond
+    ((not (task-complete? *game-info* (-> self entity extra perm task)))
+     (when (not (-> self school-spawned?))
+       (set! (-> self school-spawned?) #t)
+       (set! (-> self spawner) 0.5)
+       (set! (-> self spawner-last) 0.5)
+       (set-time! (-> self spawn-time))
+       (sound-play "fish-spawn" :vol 70)
+       (process-spawn fisher-fish 'normal 0.5 2.775 :to self)
+       (process-spawn fisher-fish 'powerup 0.5 2.775 :to self)))
+    ((-> self replay-school?)
+     (when (not (-> self school-spawned?))
+       (set! (-> self school-spawned?) #t)
+       (set! (-> self spawner) 0.5)
+       (set! (-> self spawner-last) 0.5)
+       (set-time! (-> self spawn-time))
+       (sound-play "fish-spawn" :vol 70)
+       (process-spawn fisher-fish 'normal 0.5 8.325 :to self)
+       (process-spawn fisher-fish 'powerup 0.5 8.325 :to self)))
+    (else
+     (when (and (nonzero? (-> self params period)) (time-elapsed? (-> self spawn-time) (-> self params period)))
+       (let ((gp-0 (cond
+                     ((rand-vu-percent? (-> self params powerup-percent))
+                      (if (and (time-elapsed? (-> self ambient-big-one) (seconds 30))
+                               (play-ambient (-> self ambient) "FIS-TA03" #t (-> self root trans)))
+                        (set-time! (-> self ambient-big-one)))
+                      'powerup)
+                     ((rand-vu-percent? (-> self params bad-percent)) 'bad)
+                     ((rand-vu-percent? (-> self params deadly-percent)) 'deadly)
+                     (else 'normal))))
+         (if (and (!= gp-0 'bad) (< 0.8 (fabs (- (-> self spawner-last) (-> self spawner)))))
+           (set! (-> self spawner) (* 0.5 (+ (-> self spawner-last) (-> self spawner)))))
+         (set! (-> self spawner-last) (-> self spawner))
+         (set-time! (-> self spawn-time))
+         (sound-play "fish-spawn" :vol 70)
+         (fisher-spawn-ambient)
+         (process-spawn fisher-fish gp-0 (-> self spawner) (* 1.85 (-> self params fish-vel)) :to self)))))
   (let ((f1-14 (analog-input (the-as int (-> *cpad-list* cpads 0 leftx)) 128.0 32.0 110.0 28.0)))
     (+! (-> self paddle-vel) (* f1-14 (seconds-per-frame))))
   (seek! (-> self paddle-vel) 0.0 (* 15.0 (seconds-per-frame)))
@@ -1304,7 +1319,7 @@
       (set-blackout-frames (seconds 0.017))
       (if (send-event *target* 'change-mode 'fishing self) (go fisher-playing))))
 
-;; og:preserve-this pc port needs its own implementation of play-anim for cutscene skipping
+
 (#when PC_PORT
   (define *fisher-camera-backup-fov* (degrees 46.2356))
   (define *fisher-camera-backup-trans* (new 'static 'vector :x 1095664.2500 :y 15926.4003 :z -945203.3750 :w 1.0000))
@@ -1355,7 +1370,7 @@
              25
              #f
              (lookup-text! *common-text* (text-id quit) #f)))
-  ;; og:preserve-this needed for cutscene skipping
+
   :exit
   (behavior ()
     (#when PC_PORT
@@ -1543,6 +1558,7 @@
   (set! (-> this hard) #f)
   (set! (-> *FISHER-bank* max-caught) 200)
   (set! (-> this training) #f)
+  (set! (-> this replay-school?) #f)
   (process-taskable-method-42 this)
   (none))
 

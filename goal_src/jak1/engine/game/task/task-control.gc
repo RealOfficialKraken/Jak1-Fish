@@ -2350,13 +2350,6 @@
           #t)))))
 
 (define *fisher-catalog-fire-canyon-cell-shark-tasks*
-  ;; Gatekeeper Cell Shark has six reward stars rather than seven prefixes.
-  ;; unknown            = Fire Canyon completion cell
-  ;; need-hint          = Mountain Pass completion cell
-  ;; need-introduction  = Mountain Pass scout-fly cell
-  ;; need-reminder-a    = Lava Tube completion cell
-  ;; need-reminder      = Lava Tube scout-fly cell
-  ;; need-reward-speech = Citadel scout-fly cell
   (new 'static
     'task-control
     :current-stage -1

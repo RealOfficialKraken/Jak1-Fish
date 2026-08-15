@@ -1533,7 +1533,7 @@
     ((= (-> self location-id) 7) 9)
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava))) 1)
     ((= (-> self location-id) (the-as int (fisher-zone snow-ice))) 6)
-    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))) 5)
+    ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))) 7)
     ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
     (else 0)))
 
@@ -1610,7 +1610,9 @@
         ((= index 1) (game-task cave-robot-climb))
         ((= index 2) (game-task cave-swing-poles))
         ((= index 3) (game-task cave-spider-tunnel))
-        (else (game-task cave-platforms))))
+        ((= index 4) (game-task cave-platforms))
+        ((= index 5) (game-task cave-dark-crystals))
+        (else (game-task cave-gnawers))))
 
     (else (game-task none))))
 
@@ -1809,7 +1811,8 @@
 
 (defun fisher-add-mountain-pass-cellfish-slots! ((self fisher-game))
   (when (fisher-mountain-pass-cellfish-eligible? self)
-    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end)))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-secret)))
   (none))
 
 (defun fisher-add-village3-mountain-pass-cellfish-slots! ((self fisher-game))
@@ -1827,7 +1830,8 @@
               (pickup-type fuel-cell))))
         45))
     (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-end))
-    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-buzzer)))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-buzzer))
+    (fisher-add-one-mountain-pass-cellfish! self (game-task ogre-secret)))
   (none))
 
 (defun fisher-lava-tube-cellfish-eligible? ((self fisher-game))

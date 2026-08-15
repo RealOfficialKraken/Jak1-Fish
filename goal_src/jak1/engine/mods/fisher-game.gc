@@ -693,7 +693,7 @@
           (when
             (nonzero? (logand skill-mask 1))
             (draw-fisher-large-font-scaled
-              "<PAD_SQUARE> STOP LURE: 3 SEC / 20 SEC COOLDOWN."
+              "<PAD_SQUARE> STOP LURE: 3 SECONDS"
               256
               (+ 157 menu-offset)
               0.30))
@@ -743,7 +743,7 @@
               0.27)
 
             (fisher-draw-reel-hint-text
-              " HEAL LINE: RESTORE 65 HP / 26 SEC."
+              " HEAL LINE: RESTORE HP TO YOUR LURE! / 25 SECOND COOLDOWN"
               94
               (+ 220 menu-offset)
               0.25))))
@@ -8604,7 +8604,7 @@
           ((or
               (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
               (= (-> self location-id) (the-as int (fisher-zone finalboss-nuclear))))
-            (set-vector! active-curtain-color 3.0 0.0 5.0 255.0))
+            (set-vector! active-curtain-color 91.0 2.0 93.0 255.0))
 
           (else
             (set!
