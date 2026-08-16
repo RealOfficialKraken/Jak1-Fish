@@ -1527,6 +1527,7 @@
 
 (defun fisher-power-cell-task-count-for-location ((self fisher-game))
   (cond
+    ((= (-> self location-id) 1) 5)
     ((= (-> self location-id) 4) 5)
     ((= (-> self location-id) 5) 3)
     ((= (-> self location-id) 6) 9)
@@ -1534,7 +1535,7 @@
     ((= (-> self location-id) (the-as int (fisher-zone village3-lava))) 1)
     ((= (-> self location-id) (the-as int (fisher-zone snow-ice))) 6)
     ((= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco))) 7)
-    ((or (= (-> self location-id) 1) (= (-> self location-id) 3)) 4)
+    ((= (-> self location-id) 3) 4)
     (else 0)))
 
 (defun fisher-power-cell-task-for-location-index
@@ -1552,7 +1553,8 @@
         ((= index 0) (game-task jungle-tower))
         ((= index 1) (game-task jungle-plant))
         ((= index 2) (game-task jungle-canyon-end))
-        (else (game-task jungle-temple-door))))
+        ((= index 3) (game-task jungle-temple-door))
+        (else (game-task jungle-eggtop))))
 
     ((= (-> self location-id) 4)
       (cond

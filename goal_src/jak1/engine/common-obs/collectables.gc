@@ -1172,20 +1172,57 @@
     (= task (the-as int (game-task citadel-sage-red)))
     (= task (the-as int (game-task citadel-sage-yellow)))))
 
+(defun vanilla-fuel-cell-exempt-task? ((task int))
+  (or
+    ;; Geyser Rock
+    (= task (the-as int (game-task training-gimmie)))
+    (= task (the-as int (game-task training-door)))
+    (= task (the-as int (game-task training-climb)))
+    (= task (the-as int (game-task training-buzzer)))
+    (= task (the-as int (game-task village1-yakow)))
+    (= task (the-as int (game-task village1-mayor-money)))
+    (= task (the-as int (game-task village1-uncle-money)))
+    (= task (the-as int (game-task village1-oracle-money1)))
+    (= task (the-as int (game-task village1-oracle-money2)))
+    (= task (the-as int (game-task jungle-lurkerm)))
+    (= task (the-as int (game-task jungle-fishgame)))
+    (= task (the-as int (game-task beach-flutflut)))
+    (= task (the-as int (game-task beach-seagull)))
+    (= task (the-as int (game-task beach-cannon)))
+    (= task (the-as int (game-task misty-muse)))
+    (= task (the-as int (game-task misty-cannon)))
+    (= task (the-as int (game-task village2-gambler-money)))
+    (= task (the-as int (game-task village2-geologist-money)))
+    (= task (the-as int (game-task village2-warrior-money)))
+    (= task (the-as int (game-task village2-oracle-money1)))
+    (= task (the-as int (game-task village2-oracle-money2)))
+    (= task (the-as int (game-task swamp-billy)))
+    (= task (the-as int (game-task rolling-race)))
+    (= task (the-as int (game-task rolling-robbers)))
+    (= task (the-as int (game-task rolling-moles)))
+    (= task (the-as int (game-task rolling-plants)))
+    (= task (the-as int (game-task rolling-ring-chase-1)))
+    (= task (the-as int (game-task rolling-ring-chase-2)))
+    (= task (the-as int (game-task ogre-boss)))
+    (= task (the-as int (game-task village3-miner-money1)))
+    (= task (the-as int (game-task village3-miner-money2)))
+    (= task (the-as int (game-task village3-miner-money3)))
+    (= task (the-as int (game-task village3-miner-money4)))
+    (= task (the-as int (game-task village3-oracle-money1)))
+    (= task (the-as int (game-task village3-oracle-money2)))
+    (= task (the-as int (game-task snow-ram)))
+    (citadel-sage-cell-task? task)))
+
 (defun citadel-fuel-cell-spawn-allowed? ((task int))
-  ;; Preserve the global no-authored-Power-Cells mod except for the four
-  ;; Citadel sage cells and Klaww's authored Power Cell.
   (or
     (= (-> (level-get-target-inside *level*) name) 'citadel)
-    (citadel-sage-cell-task? task)
-    (= task (the-as int (game-task ogre-boss)))))
+    (vanilla-fuel-cell-exempt-task? task)))
 
 (defmethod init-from-entity! ((this fuel-cell) (arg0 entity-actor))
   (if
     (citadel-fuel-cell-spawn-allowed?
       (the-as int (-> this entity extra perm task)))
     (begin
-      ;; Vanilla level-authored Power Cell initialization.
       (initialize this)
       (process-drawable-from-entity! this (-> this entity))
       (initialize-params this 0 (the-as float 1024.0))
@@ -1401,13 +1438,34 @@
   (set! (-> this victory-anim) (fuel-cell-pick-anim this))
   this)
 
+(defun rolling-buzzer-spawn-allowed? ()
+  (let ((inside (if *level* (level-get-target-inside *level*))))
+    (and inside (= (-> inside name) 'rolling))))
+
 (defmethod init-from-entity! ((this buzzer) (arg0 entity-actor))
-  ;; Prevent level-authored buzzer pickups from becoming active processes.
-  (process-entity-status!
-    this
-    (entity-perm-status dead)
-    #t)
-  (deactivate this)
+  (if
+    (rolling-buzzer-spawn-allowed?)
+    (begin
+      (initialize this)
+      (process-drawable-from-entity! this (-> this entity))
+      (initialize-params this 0 (the-as float 1024.0))
+      (set! (-> this collect-timeout) (seconds 2))
+      (update-transforms! (-> this root))
+      (update-trans! (-> this sound) (-> this root trans))
+      (if
+        (and
+          (-> this entity)
+          (logtest?
+            (-> this entity extra perm status)
+            (entity-perm-status complete)))
+        (go (method-of-object this wait))
+        (go (method-of-object this pickup) #t (the-as handle #f))))
+    (begin
+      (process-entity-status!
+        this
+        (entity-perm-status dead)
+        #t)
+      (deactivate this)))
   (none))
 
 (defbehavior buzzer-init-by-other buzzer ((arg0 vector) (arg1 vector) (arg2 fact-info) (arg3 entity-actor))
@@ -1542,9 +1600,8 @@
                 (set! sv-48 0)
                 #f)
 
-              ;; Power Cell processes may spawn only for Citadel or one of
-              ;; the four Citadel sage-cell tasks.  Money and buzzers stay
-              ;; blocked by their separate branches below/above.
+              ;; Power Cell processes may spawn only for the explicit vanilla
+              ;; exemption list (plus the existing Citadel-wide exception).
               ((= v1-25 (pickup-type fuel-cell))
                 (if
                   (citadel-fuel-cell-spawn-allowed? (the int arg2))
@@ -1577,10 +1634,38 @@
                   (begin
                     (set! sv-48 0)
                     #f)))
-              ;; Buzzers may not spawn naturally from crates or other pickup births.
               ((= v1-25 (pickup-type buzzer))
-                (set! sv-48 0)
-                #f)
+                (if
+                  (rolling-buzzer-spawn-allowed?)
+                  (begin
+                    (set! (-> s0-0 pickup-spawn-amount) arg2)
+                    (let ((sv-176
+                            (get-process
+                              *pickup-dead-pool*
+                              buzzer
+                              #x4000)))
+                      (set! v1-71
+                        (when sv-176
+                          (set! sv-192 (the-as (pointer process) v1-71))
+                          ((method-of-type buzzer activate)
+                            (the-as buzzer sv-176)
+                            arg4
+                            'buzzer
+                            (the-as pointer #x70004000))
+                          (run-now-in-process
+                            sv-176
+                            buzzer-init-by-other
+                            arg0
+                            s1-0
+                            s0-0
+                            (-> self entity))
+                          (set! sv-192 (-> sv-176 ppointer))
+                          v1-71)))
+                    (set! sv-48 0)
+                    sv-48)
+                  (begin
+                    (set! sv-48 0)
+                    #f)))
               (else (format 0 "ERROR: unknown type of eco ~d~%" arg1) #f)))))
       sv-192)))
 
