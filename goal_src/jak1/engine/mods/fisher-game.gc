@@ -7,6 +7,8 @@
 
 (define *fisher-background-cloud-visible?* #f)
 (define *fisher-background-cloud-session-active?* #f)
+(define *fisher-background-mist-submit-time* 0.0)
+(define *fisher-god-ray-submit-time* 0.0)
 (define *fisher-god-ray-x-0* (meters -34.0))
 (define *fisher-god-ray-x-1* (meters -17.0))
 (define *fisher-god-ray-x-2* (meters 1.0))
@@ -1194,6 +1196,9 @@
 
         (damping
           0.0))
+      (if *fisher-camera-unlock*
+        (logior! (-> snake draw status) (draw-status hidden))
+        (logclear! (-> snake draw status) (draw-status hidden)))
 
       (vector-copy! anchor (-> self lure-pos))
 
@@ -2044,6 +2049,12 @@
       *fisher-background-cloud-session-active?*
       (-> self camera-underwater?))
 
+    (-! *fisher-background-mist-submit-time* (-> *display* seconds-per-frame))
+
+    (when
+      (<= *fisher-background-mist-submit-time* 0.0)
+      (set! *fisher-background-mist-submit-time* 0.05)
+
     (let ((curtain-forward
           (new 'stack-no-clear 'vector))
 
@@ -2119,7 +2130,8 @@
       (launch-particles
         :system *sp-particle-system-3d*
         (-> *part-id-table* 3572)
-        particle-pos)))
+        particle-pos))))
+
 
   (none))
 
@@ -2192,7 +2204,10 @@
 
     (set!
       (-> *part-id-table* 3580 init-specs 11 initial-valuef)
-      alpha))
+      ;; Each ray now lives for three 20 Hz submission pulses.  Reduce the
+      ;; alpha of each individual copy so the overlapped result stays near the
+      ;; original brightness instead of becoming ~3x brighter.
+      (* alpha 0.40)))
 
   (none))
 
@@ -2446,8 +2461,15 @@
           (-> self background-mist-time)
           (degrees 360.0)))
 
-      (when (> daylight 0.0)
-        (fisher-submit-animated-god-ray!
+      (cond
+        ((> daylight 0.0)
+          (-! *fisher-god-ray-submit-time* dt)
+
+          (when
+            (<= *fisher-god-ray-submit-time* 0.0)
+            (set! *fisher-god-ray-submit-time* 0.05)
+
+            (fisher-submit-animated-god-ray!
           self
           (meters -34.0)
           (meters 73.0)
@@ -2497,7 +2519,10 @@
           (* daylight 28.0)
           (+ (* phase 0.76) (degrees 185.0)))))
 
-  )
+        (else
+          (set! *fisher-god-ray-submit-time* 0.0)))
+
+  ))
 
   (none))
 
@@ -3569,6 +3594,9 @@
   (none))
 
 (defun singlefish-can-see-lure? ((self singlefish-base))
+  (when *fisher-camera-unlock*
+    (return #f))
+
   (let* ((owner
         (the-as fisher-game (-> self owner)))
 
@@ -7439,6 +7467,7 @@
 
   (when
     (and
+      (not *fisher-camera-unlock*)
       (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
       (= (fisher-fish-species self slot) (the-as int (fisher-species megaloviathan)))
       (= (-> self cast-state) 'line-active)
@@ -7555,6 +7584,23 @@
 
             (direction
               (fisher-fish-direction self slot)))
+          (when
+            (and
+              *fisher-camera-unlock*
+              (= slot (-> self hooked-fish-slot))
+              (or
+                (= (-> self fish-state) 'approaching)
+                (= (-> self fish-state) 'hook-window)
+                (= (-> self fish-state) 'reeling)))
+            (set! (-> self hooked-fish-slot) -1)
+            (set! (-> self hooked-fish) #f)
+            (set! (-> self fish-state) 'free)
+            (set! (-> self fish-fighting?) #f)
+            (set! (-> self fish-hook-time) 0.0)
+            (set! (-> self fish-fight-time) 0.0)
+            (set! (-> self hooked-fish-poison-dps) 0.0)
+            (set! (-> self fish-scare-on-arrival?) #f)
+            (fisher-clear-button-fight! self))
 
           (unless (fisher-megaloviathan-try-special! self slot fish-proc)
             (cond
@@ -7865,6 +7911,7 @@
 
               (when
                 (and
+                  (not *fisher-camera-unlock*)
                   (= (-> self hooked-fish-slot) -1)
                   (= (-> self fish-state) 'free)
                   (= (-> self cast-state) 'line-active)
@@ -8843,6 +8890,8 @@
           (fisher-submit-god-rays! self))))
 
     (else
+      (set! *fisher-background-mist-submit-time* 0.0)
+      (set! *fisher-god-ray-submit-time* 0.0)
       (set!
         *fisher-underwater-haze-override?*
         #f)))
@@ -9136,6 +9185,7 @@
 (defun fisher-draw-line! ((self fisher-game))
   (when
     (and
+      (not *fisher-camera-unlock*)
       *target*
       (-> self casted?))
 
@@ -11147,6 +11197,7 @@
 
     (when
       (and
+        (not *fisher-camera-unlock*)
         (-> self casted?)
         (= (-> self cast-state) 'line-active)
         (= (-> self fish-state) 'free))
@@ -12390,6 +12441,8 @@
   (behavior ()
     (set! *fisher-session-active?* #t)
     (set! *fisher-camera-free-active?* #f)
+    (set! *fisher-background-mist-submit-time* 0.0)
+    (set! *fisher-god-ray-submit-time* 0.0)
 
     (when
       (= (-> self location-id) (the-as int (fisher-zone maincave-dark-eco)))
@@ -12503,6 +12556,8 @@
     (fisher-remove-lure-snake! self)
     (set! *fisher-background-cloud-visible?* #f)
     (set! *fisher-background-cloud-session-active?* #f)
+    (set! *fisher-background-mist-submit-time* 0.0)
+    (set! *fisher-god-ray-submit-time* 0.0)
     (fisher-restore-normal-background!)
 
     (when *target*
@@ -12510,13 +12565,6 @@
 
     (fisher-reset-cast! self)
     (set! *fisher-session-active?* #f)
-
-    ;; Nuclear Bombfish hook-timeout failure: only detonate after Jak is
-    ;; fully back in normal gameplay so the explosion can actually affect him.
-    ;; Disable the final-boss fishing area before firing the bomb.  The global
-    ;; fishing-area maintainer will immediately despawn fisher-game, its net,
-    ;; lure, and resident gameplay fish, and area-enabled? prevents it from
-    ;; being spawned again while this failed boss state is active.
     (when *fisher-nuclear-hook-timeout-exit?*
       (set! *fisher-nuclear-hook-timeout-exit?* #f)
       (set! (-> *fisher-finalboss-runtime* area-enabled?) #f)

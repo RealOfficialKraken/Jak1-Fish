@@ -5528,6 +5528,8 @@
 
 (defun fisher-manipy-can-sense-lure?
   ((self fisher-game) (slot int) (fish-proc manipy))
+  (when *fisher-camera-unlock*
+    (return #f))
 
   (let ((to-lure (new 'stack-no-clear 'vector))
       (forward (new 'stack-no-clear 'vector))

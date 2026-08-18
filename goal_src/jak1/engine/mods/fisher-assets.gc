@@ -122,8 +122,7 @@
     (:vel-z 0.0)
     (:scalevel-x 0.0)
     (:scalevel-y 0.0)
-
-    (:timer (seconds 0.05))
+    (:timer (seconds 0.15))
     (:flags (bit2 bit3))))
 
 
@@ -150,8 +149,7 @@
     (:vel-z 0.0)
     (:scalevel-x 0.0)
     (:scalevel-y 0.0)
-
-    (:timer (seconds 0.02))
+    (:timer (seconds 0.15))
     (:flags (bit2 bit3))))
 
 (defpart 3575

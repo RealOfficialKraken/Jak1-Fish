@@ -21,6 +21,7 @@
 (define-extern runs-on-eco-pickup (function pickup-type process-tree none))
 
 (define-extern orb-placer-list-maintenace (function symbol none))
+(define-extern in-main-menu? symbol)
 
 (declare-type vent process-drawable)
 
@@ -1139,7 +1140,10 @@
       (if (-> self state-object) (spawn (-> self part) (-> self root root-prim prim-core world-sphere)))))
 
 (defmethod initialize ((this fuel-cell))
-  (stack-size-set! (-> this main-thread) 2048)
+  (if
+    (name= (-> this name) "fisher-power-cell-reward")
+    (stack-size-set! (-> this main-thread) 2048)
+    (stack-size-set! (-> this main-thread) 512))
   (let ((s5-0 (new 'process 'collide-shape-moving this (collide-list-enum hit-by-player))))
     (set! (-> s5-0 dynam) (copy *standard-dynamics* 'process))
     (set! (-> s5-0 reaction) default-collision-reaction)
@@ -1174,7 +1178,6 @@
 
 (defun vanilla-fuel-cell-exempt-task? ((task int))
   (or
-    ;; Geyser Rock
     (= task (the-as int (game-task training-gimmie)))
     (= task (the-as int (game-task training-door)))
     (= task (the-as int (game-task training-climb)))
@@ -1214,9 +1217,11 @@
     (citadel-sage-cell-task? task)))
 
 (defun citadel-fuel-cell-spawn-allowed? ((task int))
-  (or
-    (= (-> (level-get-target-inside *level*) name) 'citadel)
-    (vanilla-fuel-cell-exempt-task? task)))
+  (and
+    (not in-main-menu?)
+    (or
+      (= (-> (level-get-target-inside *level*) name) 'citadel)
+      (vanilla-fuel-cell-exempt-task? task))))
 
 (defmethod init-from-entity! ((this fuel-cell) (arg0 entity-actor))
   (if
