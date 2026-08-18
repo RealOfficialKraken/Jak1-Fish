@@ -1029,6 +1029,17 @@
       (set! (-> self control cspace-offset y) (-> self control draw-offset y))
       (send-event (ppointer->process (-> self sidekick)) 'matrix #f)
       ((-> target-clone-anim exit))
+      (let ((inside (if *level* (level-get-target-inside *level*))))
+        (when (and inside (= (-> inside name) 'rolling))
+          (move-to-point! (-> self control) (-> self control unknown-vector102))
+          (quaternion-copy!
+            (-> self control quat)
+            (-> self control unknown-quaternion02))
+          (quaternion-copy!
+            (-> self control quat-for-control)
+            (-> self control unknown-quaternion03))
+          (rot->dir-targ! (-> self control))))
+
       ((-> target-racing-start exit))
       (vector-reset! (-> self control transv)))
   :code
@@ -1036,6 +1047,9 @@
       (set! (-> self control unknown-uint20) (the-as uint (-> self control draw-offset y)))
       (set! (-> self control draw-offset y) 0.0)
       (send-event (ppointer->process (-> self sidekick)) 'matrix 'play-anim)
+      (set! (-> self control unknown-vector102 quad) (-> self control trans quad))
+      (quaternion-copy! (-> self control unknown-quaternion02) (-> self control quat))
+      (quaternion-copy! (-> self control unknown-quaternion03) (-> self control quat-for-control))
       (clone-anim arg0 33 #t "")
       (go target-racing))
   :post
