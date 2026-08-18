@@ -10668,7 +10668,7 @@
                       *fisher-electric-charge-seconds*)
                     (play-sound-file
                       "zapping.mp3"
-                      (- (the int (-> *setting-control* current sfx-volume)) 50))))
+                      (the int (-> *setting-control* current sfx-volume)))))
 
                 ((= state 2)
                   (let ((fish (fisher-fish-pointer self slot)))
@@ -10832,7 +10832,7 @@
                 (set! (-> self electric-timer) 0.0)
                 (play-sound-file
                   "zapping.mp3"
-                  (- (the int (-> *setting-control* current sfx-volume)) 50)))
+                  (the int (-> *setting-control* current sfx-volume))))
               (else
                 (set! (-> self electric-timer) 1.0))))))
 
