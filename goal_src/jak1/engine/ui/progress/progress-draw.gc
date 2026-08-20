@@ -7,6 +7,72 @@
 
 ;; DECOMP BEGINS
 
+(defun fisher-power-cell-menu-description ((task game-task))
+  (cond
+    ((or
+       (= task (game-task jungle-tower))
+       (= task (game-task jungle-plant))
+       (= task (game-task jungle-canyon-end))
+       (= task (game-task jungle-temple-door))
+       (= task (game-task jungle-eggtop))
+       (= task (game-task beach-ecorocks))
+       (= task (game-task beach-pelican))
+       (= task (game-task beach-gimmie))
+       (= task (game-task beach-sentinel))
+       (= task (game-task misty-boat))
+       (= task (game-task misty-warehouse))
+       (= task (game-task misty-bike))
+       (= task (game-task misty-bike-jump))
+       (= task (game-task misty-eco-challenge))
+       (= task (game-task firecanyon-buzzer))
+       (= task (game-task rolling-lake))
+       (= task (game-task rolling-buzzer))
+       (= task (game-task sunken-platforms))
+       (= task (game-task sunken-pipe))
+       (= task (game-task sunken-slide))
+       (= task (game-task sunken-sharks))
+       (= task (game-task sunken-top-of-helix))
+       (= task (game-task sunken-spinning-room))
+       (= task (game-task sunken-room))
+       (= task (game-task swamp-battle))
+       (= task (game-task swamp-flutflut))
+       (= task (game-task swamp-tether-1))
+       (= task (game-task swamp-tether-2))
+       (= task (game-task swamp-tether-3))
+       (= task (game-task swamp-tether-4))
+       (= task (game-task village3-extra1))
+       (= task (game-task snow-eggtop))
+       (= task (game-task snow-fort))
+       (= task (game-task snow-ball))
+       (= task (game-task snow-bunnies))
+       (= task (game-task snow-bumpers))
+       (= task (game-task snow-cage))
+       (= task (game-task cave-dark-climb))
+       (= task (game-task cave-robot-climb))
+       (= task (game-task cave-swing-poles))
+       (= task (game-task cave-spider-tunnel))
+       (= task (game-task cave-platforms))
+       (= task (game-task cave-dark-crystals))
+       (= task (game-task cave-gnawers))
+       (= task (game-task lavatube-end))
+       (= task (game-task lavatube-buzzer))
+       (= task (game-task citadel-buzzer))
+       )
+     "CATCH THE FISH THAT SWALLOWED THIS CELL")
+
+    ((= task (game-task firecanyon-end))
+     "CATCH IN HUB 1 AFTER COLLECTING 20 CELLS")
+
+    ((or
+       (= task (game-task ogre-end))
+       (= task (game-task ogre-secret)))
+     "CATCH THE FISH IN VOLCANIC CRATER OR HUB 2")
+
+    ((= task (game-task ogre-buzzer))
+     "CATCH THE FISH IN VOLCANIC CRATER")
+
+    (else #f)))
+
 (defun adjust-pos ((arg0 int) (arg1 int))
   (if (< arg0 arg1) 0 (- arg0 arg1)))
 
@@ -47,7 +113,10 @@
                 (set! (-> this particle-state s0-0) 2)
                 (cond
                   ((or (= v0-4 (task-status need-hint)) (= v0-4 (task-status unknown)))
-                   (if (= *kernel-boot-message* 'play) (set! (-> this particle-state s0-0) 1)))
+
+                  (if (fisher-power-cell-menu-description (-> s5-0 task-info sv-208 task-id))
+                    (set! v1-59 0)
+                    (if (= *kernel-boot-message* 'play) (set! (-> this particle-state s0-0) 1))))
                   ((= v0-4 (task-status invalid))
                    (set! v1-59 (-> s5-0 task-info sv-208 text-index-when-resolved))
                    (set! (-> this particle-state s0-0) 3)
@@ -89,10 +158,17 @@
                 (set-height! s0-1 50)
                 (set-scale! s0-1 0.7)
                 (set! (-> s0-1 flags) (font-flags shadow kerning middle middle-vert large))
-                (print-game-text-scaled (lookup-text! *common-text* (-> s5-0 task-info (-> this task-index) task-name s1-0) #f)
-                                        f30-0
-                                        s0-1
-                                        (the int (* 128.0 f30-0)))
+                (print-game-text-scaled
+                  (if (fisher-power-cell-menu-description (-> s5-0 task-info (-> this task-index) task-id))
+                    (the-as string
+                      (fisher-power-cell-menu-description (-> s5-0 task-info (-> this task-index) task-id)))
+                    (lookup-text! *common-text* (-> s5-0 task-info (-> this task-index) task-name s1-0) #f))
+
+                  f30-0
+
+                  s0-1
+
+                  (the int (* 128.0 f30-0)))
                 (when s3-0
                   (set! (-> s0-1 origin x) (the float (- (+ s2-0 32) (-> this left-x-offset))))
                   (set! (-> s0-1 origin y) (the float (+ (/ s4-1 2) 175)))
